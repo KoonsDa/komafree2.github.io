@@ -117,6 +117,24 @@ button:disabled {
   opacity: 0.45;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.fullscreen-button {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 10;
+  padding: 11px 16px;
+  color: #245b80;
+  background: #ffffff;
+  border: 2px solid #7bd5dc;
+  border-radius: 14px;
+  font-weight: 800;
+  box-shadow: 0 4px 0 rgba(38, 50, 70, 0.12);
+}
+
 .quick-button {
   min-width: 92px;
   padding: 12px 18px;
@@ -194,6 +212,39 @@ button:disabled {
   background: #7185a6;
 }
 
+.stop-alarm {
+  background: #d94f38;
+}
+
+.timer-card.finished .status-message {
+  font-size: clamp(1.3rem, 4vw, 2rem);
+  animation: finish-pulse 700ms ease-in-out 2;
+}
+
+@keyframes finish-pulse {
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+:fullscreen body,
+body:fullscreen {
+  width: 100vw;
+  min-height: 100vh;
+}
+
+:fullscreen .timer-card {
+  width: min(1100px, 92vw);
+  min-height: min(760px, 88vh);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+:fullscreen .time-display {
+  font-size: clamp(7rem, 22vw, 14rem);
+}
+
 @media (max-width: 560px) {
   body {
     padding: 12px;
@@ -202,6 +253,13 @@ button:disabled {
   .timer-card {
     padding: 24px 16px;
     border-radius: 24px;
+  }
+
+  .fullscreen-button {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    padding: 9px 12px;
+    font-size: 0.88rem;
   }
 
   .quick-buttons,
@@ -220,7 +278,9 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button {
+  button,
+  .timer-card.finished .status-message {
     transition: none;
+    animation: none;
   }
 }

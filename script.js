@@ -8,11 +8,16 @@ const quickButtons = document.querySelectorAll(".quick-button");
 const startButton = document.querySelector("#start-button");
 const pauseButton = document.querySelector("#pause-button");
 const resetButton = document.querySelector("#reset-button");
+const stopAlarmButton = document.querySelector("#stop-alarm-button");
+const fullscreenButton = document.querySelector("#fullscreen-button");
 
 let selectedSeconds = 5 * 60;
 let remainingSeconds = selectedSeconds;
 let timerId = null;
 let endTime = null;
+let audioContext = null;
+let alarmOscillators = [];
+let alarmEndTimeout = null;
 
 function formatTime(totalSeconds) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -43,6 +48,73 @@ function stopTimer() {
   endTime = null;
 }
 
+function prepareAudio() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  if (audioContext === null) {
+    audioContext = new AudioContextClass();
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume();
+  }
+}
+
+function stopAlarm() {
+  alarmOscillators.forEach((oscillator) => {
+    try {
+      oscillator.stop();
+    } catch (error) {
+      // 이미 재생이 끝난 소리는 다시 멈출 필요가 없습니다.
+    }
+  });
+  alarmOscillators = [];
+
+  if (alarmEndTimeout !== null) {
+    clearTimeout(alarmEndTimeout);
+    alarmEndTimeout = null;
+  }
+
+  stopAlarmButton.hidden = true;
+}
+
+function playAlarm() {
+  prepareAudio();
+  if (audioContext === null) return;
+
+  stopAlarm();
+  const startTime = audioContext.currentTime + 0.05;
+
+  for (let index = 0; index < 3; index += 1) {
+    const noteStart = startTime + index * 0.42;
+    const oscillator = audioContext.createOscillator();
+    const volume = audioContext.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(660, noteStart);
+    oscillator.frequency.linearRampToValueAtTime(880, noteStart + 0.16);
+    volume.gain.setValueAtTime(0.0001, noteStart);
+    volume.gain.exponentialRampToValueAtTime(0.22, noteStart + 0.025);
+    volume.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.22);
+
+    oscillator.connect(volume);
+    volume.connect(audioContext.destination);
+    oscillator.start(noteStart);
+    oscillator.stop(noteStart + 0.23);
+    oscillator.addEventListener("ended", () => {
+      alarmOscillators = alarmOscillators.filter((item) => item !== oscillator);
+    });
+    alarmOscillators.push(oscillator);
+  }
+
+  stopAlarmButton.hidden = false;
+  alarmEndTimeout = setTimeout(() => {
+    stopAlarmButton.hidden = true;
+    alarmEndTimeout = null;
+  }, 1500);
+}
+
 function finishTimer() {
   stopTimer();
   remainingSeconds = 0;
@@ -52,6 +124,7 @@ function finishTimer() {
   startButton.disabled = true;
   pauseButton.disabled = true;
   setSettingsDisabled(false);
+  playAlarm();
 }
 
 function tick() {
@@ -91,6 +164,7 @@ function applyInputTime() {
   selectedSeconds = inputSeconds;
   remainingSeconds = selectedSeconds;
   timerCard.classList.remove("finished");
+  stopAlarm();
   startButton.disabled = false;
   quickButtons.forEach((button) => button.classList.remove("active"));
   statusMessage.textContent = "준비되면 시작 버튼을 눌러 주세요.";
@@ -106,6 +180,7 @@ quickButtons.forEach((button) => {
     remainingSeconds = selectedSeconds;
     inputError.textContent = "";
     timerCard.classList.remove("finished");
+    stopAlarm();
     startButton.disabled = false;
     statusMessage.textContent = "준비되면 시작 버튼을 눌러 주세요.";
 
@@ -120,6 +195,9 @@ secondsInput.addEventListener("change", applyInputTime);
 
 startButton.addEventListener("click", () => {
   if (timerId !== null) return;
+
+  prepareAudio();
+  stopAlarm();
 
   if (remainingSeconds === selectedSeconds) {
     const inputSeconds = readInputTime();
@@ -139,6 +217,7 @@ startButton.addEventListener("click", () => {
 
 pauseButton.addEventListener("click", () => {
   tick();
+  if (remainingSeconds === 0) return;
   stopTimer();
   statusMessage.textContent = "잠시 멈췄어요. 시작을 누르면 이어집니다.";
   startButton.disabled = false;
@@ -147,6 +226,7 @@ pauseButton.addEventListener("click", () => {
 
 resetButton.addEventListener("click", () => {
   stopTimer();
+  stopAlarm();
   remainingSeconds = selectedSeconds;
   timerCard.classList.remove("finished");
   statusMessage.textContent = "준비되면 시작 버튼을 눌러 주세요.";
@@ -155,6 +235,24 @@ resetButton.addEventListener("click", () => {
   pauseButton.disabled = true;
   setSettingsDisabled(false);
   updateDisplay();
+});
+
+stopAlarmButton.addEventListener("click", stopAlarm);
+
+fullscreenButton.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (error) {
+    statusMessage.textContent = "이 브라우저에서는 전체화면을 사용할 수 없습니다.";
+  }
+});
+
+document.addEventListener("fullscreenchange", () => {
+  fullscreenButton.textContent = document.fullscreenElement ? "전체화면 종료" : "전체화면";
 });
 
 updateDisplay();
