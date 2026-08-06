@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>우리 반 수업 타이머</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="timer-card" aria-labelledby="page-title">
+    <header>
+      <p class="eyebrow">집중 시간을 정해 볼까요?</p>
+      <h1 id="page-title">우리 반 수업 타이머</h1>
+    </header>
+
+    <section class="display-area" aria-live="polite">
+      <div id="time-display" class="time-display" role="timer" aria-label="남은 시간 5분">05:00</div>
+      <p id="status-message" class="status-message">준비되면 시작 버튼을 눌러 주세요.</p>
+    </section>
+
+    <section class="settings" aria-label="시간 설정">
+      <h2>빠른 시간 선택</h2>
+      <div class="quick-buttons">
+        <button class="quick-button active" type="button" data-minutes="5">5분</button>
+        <button class="quick-button" type="button" data-minutes="10">10분</button>
+        <button class="quick-button" type="button" data-minutes="15">15분</button>
+      </div>
+
+      <h2>직접 입력</h2>
+      <div class="time-inputs">
+        <label>
+          <span>분</span>
+          <input id="minutes-input" type="number" min="0" max="999" value="5" inputmode="numeric">
+        </label>
+        <span class="input-colon" aria-hidden="true">:</span>
+        <label>
+          <span>초</span>
+          <input id="seconds-input" type="number" min="0" max="59" value="0" inputmode="numeric">
+        </label>
+      </div>
+      <p id="input-error" class="input-error" role="alert"></p>
+    </section>
+
+    <section class="controls" aria-label="타이머 조작">
+      <button id="start-button" class="control-button start" type="button">시작</button>
+      <button id="pause-button" class="control-button pause" type="button" disabled>일시정지</button>
+      <button id="reset-button" class="control-button reset" type="button">초기화</button>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
