@@ -1,6 +1,44 @@
-// 카드 등급 확률입니다. 숫자의 합이 100이 되도록 수정하면 됩니다.
-const CARD_RATES = { 일반: 60, 희귀: 25, 영웅: 12, 전설: 3 };
+const CARD_RARITIES = ["일반", "희귀", "영웅", "전설", "고대"];
+const CARD_RATE_KEYS = { 일반: "common", 희귀: "rare", 영웅: "epic", 전설: "legendary", 고대: "ancient" };
+const DEFAULT_DRAW_RATES = { common: 55, rare: 25, epic: 12, legendary: 6, ancient: 2 };
+const DEFAULT_DRAW_OPTIONS = [
+  { id: "draw-basic", name: "일반 뽑기", price: 30, rates: { common: 60, rare: 25, epic: 10, legendary: 4, ancient: 1 }, active: true, deleted: false },
+  { id: "draw-advanced", name: "고급 뽑기", price: 60, rates: { common: 35, rare: 35, epic: 18, legendary: 9, ancient: 3 }, active: true, deleted: false },
+  { id: "draw-premium", name: "프리미엄 뽑기", price: 100, rates: { common: 15, rare: 30, epic: 30, legendary: 18, ancient: 7 }, active: true, deleted: false }
+];
+const DEFAULT_CARD_SET_ID = "korean-history-basic";
+const CARD_UPGRADE_STEPS = [
+  { from: "일반", to: "희귀", key: "commonToRare", defaultCount: 3 },
+  { from: "희귀", to: "영웅", key: "rareToEpic", defaultCount: 3 },
+  { from: "영웅", to: "전설", key: "epicToLegendary", defaultCount: 4 },
+  { from: "전설", to: "고대", key: "legendaryToAncient", defaultCount: 5 }
+];
+const DEFAULT_CARD_UPGRADE_SETTINGS = Object.fromEntries(CARD_UPGRADE_STEPS.map((step) => [step.key, step.defaultCount]));
+const DEFAULT_CARD_ABILITY_SETTINGS = {
+  일반: { dailyCap: 0, abilities: { academic: { assignmentPercent: 2, rolePercent: 0 }, responsibility: { assignmentPercent: 0, rolePercent: 2 }, balance: { assignmentPercent: 1, rolePercent: 1 } } },
+  희귀: { dailyCap: 3, abilities: { academic: { assignmentPercent: 5, rolePercent: 0 }, responsibility: { assignmentPercent: 0, rolePercent: 5 }, balance: { assignmentPercent: 3, rolePercent: 3 } } },
+  영웅: { dailyCap: 5, abilities: { academic: { assignmentPercent: 10, rolePercent: 0 }, responsibility: { assignmentPercent: 0, rolePercent: 10 }, balance: { assignmentPercent: 5, rolePercent: 5 } } },
+  전설: { dailyCap: 8, abilities: { academic: { assignmentPercent: 15, rolePercent: 0 }, responsibility: { assignmentPercent: 0, rolePercent: 15 }, balance: { assignmentPercent: 8, rolePercent: 8 } } },
+  고대: { dailyCap: 10, abilities: { academic: { assignmentPercent: 20, rolePercent: 0 }, responsibility: { assignmentPercent: 0, rolePercent: 20 }, balance: { assignmentPercent: 10, rolePercent: 10 } } }
+};
+const CARD_ABILITIES = [
+  { id: "academic", name: "학문의 힘", icon: "📚", description: "과제" , weight: 1 },
+  { id: "responsibility", name: "책임의 힘", icon: "🛡", description: "1인1역", weight: 1 },
+  { id: "balance", name: "균형의 힘", icon: "⭐", description: "과제·1인1역", weight: 1 }
+];
 const STORAGE_KEY = "ourClassQuestDemoV1";
+const RANKING_TYPES = [
+  { id: "activity", title: "획득 포인트", icon: "◆", unit: "P" },
+  { id: "roles", title: "1인1역 활동", icon: "✓", unit: "회" },
+  { id: "assignments", title: "과제 활동", icon: "▣", unit: "개" },
+  { id: "collection", title: "카드 수집", icon: "★", unit: "종" }
+];
+const TIMETABLE_DAYS = [
+  { key: "monday", label: "월요일", day: 1 }, { key: "tuesday", label: "화요일", day: 2 },
+  { key: "wednesday", label: "수요일", day: 3 }, { key: "thursday", label: "목요일", day: 4 },
+  { key: "friday", label: "금요일", day: 5 }
+];
+const EMPTY_TIMETABLE = () => Array.from({ length: 6 }, () => "");
 
 const FIGURES = [
   { id: "sejong", name: "세종대왕", rarity: "전설", era: "조선", achievement: "훈민정음을 창제해 우리 글을 널리 펼쳤어요." },
@@ -44,9 +82,14 @@ const DEFAULT_OBSERVATION_QUICK_ITEMS = {
   기타: ["기타"]
 };
 
+function normalizeDrawRates(source = {}, fallback = DEFAULT_DRAW_RATES) {
+  const rates = Object.fromEntries(Object.keys(DEFAULT_DRAW_RATES).map((key) => [key, Number.isFinite(Number(source[key])) ? Number(source[key]) : fallback[key]]));
+  return Object.values(rates).every((rate) => rate >= 0 && rate <= 100) && Math.abs(Object.values(rates).reduce((sum, rate) => sum + rate, 0) - 100) < 0.001 ? rates : { ...fallback };
+}
+
 function createDemoData() {
   const students = STUDENT_NAMES.map((name, index) => ({
-    id: `s${index + 1}`, name, points: [75, 45, 95, 30, 60][index], cards: index === 0 ? { hongdo: 2, saimdang: 1 } : {},
+    id: `s${index + 1}`, name, points: [75, 45, 95, 30, 60][index], cards: index === 0 ? { hongdo: { 일반: { academic: 1, responsibility: 1, balance: 0 } }, saimdang: { 희귀: { academic: 1, responsibility: 0, balance: 0 } } } : {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [],
     pointHistory: [{ id: crypto.randomUUID(), amount: [20, 10, 25, 5, 15][index], reason: "이번 주 역할 참여", date: new Date().toLocaleDateString("ko-KR") }]
   }));
   return {
@@ -64,8 +107,18 @@ function createDemoData() {
       assignmentState: "active", completed: false, completedAt: null,
       statuses: STUDENT_NAMES.map((_, studentIndex) => studentIndex < 3 - assignmentIndex ? "submitted" : "missing")
     })),
+    cardSets: [{ id: DEFAULT_CARD_SET_ID, name: "한국사 기본 위인", description: "우리 역사에서 만나는 기본 위인 카드셋", createdAt: new Date().toISOString(), active: true, deleted: false }],
+    activeCardSetIds: [DEFAULT_CARD_SET_ID],
+    drawOptions: structuredClone(DEFAULT_DRAW_OPTIONS),
+    cardUpgradeSettings: { ...DEFAULT_CARD_UPGRADE_SETTINGS },
+    cardAbilitySettings: structuredClone(DEFAULT_CARD_ABILITY_SETTINGS),
+    cards: FIGURES.map(({ rarity, ...figure }, index) => ({ ...figure, cardSetId: DEFAULT_CARD_SET_ID, order: index, active: true, deleted: false })),
     observations: [],
-    observationQuickItems: structuredClone(DEFAULT_OBSERVATION_QUICK_ITEMS)
+    observationQuickItems: structuredClone(DEFAULT_OBSERVATION_QUICK_ITEMS),
+    rankingVisibility: Object.fromEntries(RANKING_TYPES.map((ranking) => [ranking.id, true])),
+    weeklyTimetable: Object.fromEntries(TIMETABLE_DAYS.map((day) => [day.key, EMPTY_TIMETABLE()])),
+    dateTimetableOverrides: {},
+    dailyClassNotes: {}
   };
 }
 
@@ -73,6 +126,75 @@ function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (!saved) return createDemoData();
+    const savedCards = Array.isArray(saved.cards) ? saved.cards : FIGURES;
+    const legacyRarityByCardId = Object.fromEntries(savedCards.map((card) => [card.id, CARD_RARITIES.includes(card.rarity) ? card.rarity : "일반"]));
+    const savedCardSets = Array.isArray(saved.cardSets) ? saved.cardSets : [];
+    if (!savedCardSets.length) savedCardSets.push({ id: DEFAULT_CARD_SET_ID, name: "한국사 기본 위인", description: "기존 카드를 안전하게 옮긴 기본 카드셋", createdAt: new Date().toISOString(), active: true, deleted: false });
+    saved.cardSets = savedCardSets.map((cardSet) => ({
+      id: cardSet.id || crypto.randomUUID(), name: cardSet.name || "이름 없는 카드셋", description: cardSet.description || "",
+      createdAt: cardSet.createdAt || new Date().toISOString(), active: cardSet.active !== false, deleted: Boolean(cardSet.deleted)
+    }));
+    const fallbackCardSetId = saved.cardSets.find((cardSet) => !cardSet.deleted)?.id || DEFAULT_CARD_SET_ID;
+    saved.cards = savedCards.map((card, index) => ({
+      id: card.id || crypto.randomUUID(), name: card.name || "이름 없는 인물", era: card.era || "시대 미상",
+      achievement: card.achievement || card.description || "",
+      cardSetId: saved.cardSets.some((cardSet) => cardSet.id === card.cardSetId) ? card.cardSetId : fallbackCardSetId,
+      order: Number.isFinite(Number(card.order)) ? Number(card.order) : index, active: card.active !== false, deleted: Boolean(card.deleted)
+    }));
+    const legacyActiveSetIds = Array.isArray(saved.activeCardSetIds) ? saved.activeCardSetIds : [saved.currentCardSetId || fallbackCardSetId];
+    saved.activeCardSetIds = [...new Set(legacyActiveSetIds)].filter((id) => saved.cardSets.some((cardSet) => cardSet.id === id && cardSet.active && !cardSet.deleted));
+    if (!saved.activeCardSetIds.length) { const firstUsableSet = saved.cardSets.find((cardSet) => cardSet.active && !cardSet.deleted); if (firstUsableSet) saved.activeCardSetIds = [firstUsableSet.id]; }
+    delete saved.currentCardSetId;
+    const legacyDrawRates = saved.drawRates && typeof saved.drawRates === "object" ? normalizeDrawRates(saved.drawRates) : null;
+    const savedDrawOptions = Array.isArray(saved.drawOptions) ? saved.drawOptions : legacyDrawRates ? [{ id: "legacy-default-draw", name: "기본 뽑기", price: 50, rates: legacyDrawRates, active: true, deleted: false }] : structuredClone(DEFAULT_DRAW_OPTIONS);
+    saved.drawOptions = savedDrawOptions.map((option, index) => ({
+      id: option.id || crypto.randomUUID(), name: option.name || `뽑기 옵션 ${index + 1}`,
+      price: Number.isInteger(Number(option.price)) && Number(option.price) >= 0 ? Number(option.price) : 50,
+      rates: normalizeDrawRates(option.rates), active: option.active !== false, deleted: Boolean(option.deleted)
+    }));
+    delete saved.drawRates;
+    saved.cardUpgradeSettings = Object.fromEntries(CARD_UPGRADE_STEPS.map((step) => {
+      const value = Number(saved.cardUpgradeSettings?.[step.key]); return [step.key, Number.isInteger(value) && value >= 2 ? value : step.defaultCount];
+    }));
+    saved.cardAbilitySettings = Object.fromEntries(CARD_RARITIES.map((rarity) => {
+      const setting = saved.cardAbilitySettings?.[rarity] || DEFAULT_CARD_ABILITY_SETTINGS[rarity];
+      const legacyPercent = Number(setting.bonusPercent); const dailyCap = Number(setting.dailyCap);
+      const abilities = Object.fromEntries(CARD_ABILITIES.map((ability) => {
+        const defaults = DEFAULT_CARD_ABILITY_SETTINGS[rarity].abilities[ability.id]; const source = setting.abilities?.[ability.id] || {};
+        const assignmentPercent = Number(source.assignmentPercent); const rolePercent = Number(source.rolePercent);
+        return [ability.id, {
+          assignmentPercent: Number.isFinite(assignmentPercent) && assignmentPercent >= 0 ? assignmentPercent : (Number.isFinite(legacyPercent) ? (ability.id === "responsibility" ? 0 : legacyPercent) : defaults.assignmentPercent),
+          rolePercent: Number.isFinite(rolePercent) && rolePercent >= 0 ? rolePercent : (Number.isFinite(legacyPercent) ? (ability.id === "academic" ? 0 : legacyPercent) : defaults.rolePercent)
+        }];
+      }));
+      return [rarity, {
+        dailyCap: Number.isInteger(dailyCap) && dailyCap >= 0 ? dailyCap : DEFAULT_CARD_ABILITY_SETTINGS[rarity].dailyCap, abilities
+      }];
+    }));
+    saved.students = (Array.isArray(saved.students) ? saved.students : []).map((student) => {
+      const legacyCards = Array.isArray(student.cards) ? student.cards.reduce((counts, card) => {
+        const id = typeof card === "string" ? card : card?.id; if (!id) return counts;
+        const rarity = typeof card === "object" && CARD_RARITIES.includes(card?.rarity) ? card.rarity : (legacyRarityByCardId[id] || "일반");
+        if (!counts[id]) counts[id] = Object.fromEntries(CARD_RARITIES.map((item) => [item, 0])); counts[id][rarity] += 1; return counts;
+      }, {}) : (student.cards && typeof student.cards === "object" ? student.cards : {});
+      const cards = Object.fromEntries(Object.entries(legacyCards).map(([cardId, value]) => {
+        const baseRarity = legacyRarityByCardId[cardId] || "일반";
+        const inventory = Object.fromEntries(CARD_RARITIES.map((rarity) => {
+          const rarityValue = value && typeof value === "object" && !Array.isArray(value) ? value[rarity] : (rarity === baseRarity ? value : 0);
+          if (rarityValue && typeof rarityValue === "object" && !Array.isArray(rarityValue)) return [rarity, Object.fromEntries(CARD_ABILITIES.map((ability) => [ability.id, Math.max(0, Number(rarityValue[ability.id]) || 0)]))];
+          const counts = Object.fromEntries(CARD_ABILITIES.map((ability) => [ability.id, 0]));
+          for (let count = 0; count < Math.max(0, Number(rarityValue) || 0); count += 1) counts[CARD_ABILITIES[Math.floor(Math.random() * CARD_ABILITIES.length)].id] += 1;
+          return [rarity, counts];
+        }));
+        return [cardId, inventory];
+      }));
+      const representative = student.representativeCard;
+      const representedAbilities = cards[representative?.cardId]?.[representative?.rarity] || {}; const fallbackAbility = CARD_ABILITIES.find((ability) => Number(representedAbilities[ability.id]) > 0)?.id;
+      const representativeAbilityId = representedAbilities[representative?.abilityId] > 0 ? representative.abilityId : fallbackAbility;
+      const representativeCard = representative && CARD_RARITIES.includes(representative.rarity) && representativeAbilityId
+        ? { cardId: representative.cardId, rarity: representative.rarity, abilityId: representativeAbilityId } : null;
+      return { ...student, cards, representativeCard, cardUpgradeHistory: Array.isArray(student.cardUpgradeHistory) ? student.cardUpgradeHistory : [], cardAcquisitionHistory: Array.isArray(student.cardAcquisitionHistory) ? student.cardAcquisitionHistory : [], pointHistory: Array.isArray(student.pointHistory) ? student.pointHistory : [] };
+    });
     if (!Array.isArray(saved.currentRoles)) saved.currentRoles = structuredClone(DEFAULT_ROLES);
     saved.currentRoles = saved.currentRoles.map((role) => ({ ...role, description: role.description || "" }));
     if (!Array.isArray(saved.roleTemplates)) {
@@ -114,6 +236,10 @@ function loadData() {
     saved.observationQuickItems = Object.fromEntries(OBSERVATION_CATEGORIES.map((category) => [category,
       Array.isArray(savedQuickItems[category]) ? [...new Set(savedQuickItems[category].filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 30)))] : [...DEFAULT_OBSERVATION_QUICK_ITEMS[category]]
     ]));
+    saved.rankingVisibility = Object.fromEntries(RANKING_TYPES.map((ranking) => [ranking.id, saved.rankingVisibility?.[ranking.id] !== false]));
+    saved.weeklyTimetable = Object.fromEntries(TIMETABLE_DAYS.map((day) => [day.key, Array.from({ length: Math.max(6, Array.isArray(saved.weeklyTimetable?.[day.key]) ? saved.weeklyTimetable[day.key].length : 0) }, (_, index) => String(saved.weeklyTimetable?.[day.key]?.[index] || "").slice(0, 40))]));
+    saved.dateTimetableOverrides = saved.dateTimetableOverrides && typeof saved.dateTimetableOverrides === "object" && !Array.isArray(saved.dateTimetableOverrides) ? Object.fromEntries(Object.entries(saved.dateTimetableOverrides).filter(([date, periods]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(periods)).map(([date, periods]) => [date, periods.map((period) => String(period || "").slice(0, 40))])) : {};
+    saved.dailyClassNotes = saved.dailyClassNotes && typeof saved.dailyClassNotes === "object" && !Array.isArray(saved.dailyClassNotes) ? Object.fromEntries(Object.entries(saved.dailyClassNotes).filter(([date]) => /^\d{4}-\d{2}-\d{2}$/.test(date)).map(([date, note]) => [date, { text: String(typeof note === "string" ? note : note?.text || "").slice(0, 2000), updatedAt: typeof note === "object" ? note.updatedAt || "" : "" }])) : {};
     return saved;
   }
   catch { return createDemoData(); }
@@ -121,11 +247,17 @@ function loadData() {
 
 let data = loadData();
 let session = { mode: "welcome", studentId: null, view: "home" };
+let teacherCardSetId = data.activeCardSetIds[0] || data.cardSets.find((cardSet) => !cardSet.deleted)?.id || "";
+let collectionCardSetFilter = "all";
 let editingTemplateId = null;
 let assignmentFilter = "all";
 let assignmentStudentView = "";
 let observationFilters = { studentId: "", category: "", keyword: "" };
+let rankingPeriod = "week";
+let dashboardSelectedDate = todayString();
+let dashboardMonth = dashboardSelectedDate.slice(0, 7);
 const assignmentSelections = {};
+const selectedPointStudentIds = new Set();
 let toastTimer;
 const app = document.querySelector("#app");
 
@@ -137,7 +269,41 @@ function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 function studentById(id) { return data.students.find((student) => student.id === id); }
 function roleById(id) { return data.currentRoles.find((role) => role.id === id); }
 function currentStudent() { return studentById(session.studentId); }
-function cardCount(student) { return Object.values(student.cards).reduce((sum, count) => sum + count, 0); }
+function cardInventory(student, cardId) { return student.cards[cardId] || {}; }
+function abilityInventory(student, cardId, rarity) { return cardInventory(student, cardId)[rarity] || {}; }
+function rarityInventoryCount(student, cardId, rarity) { return CARD_ABILITIES.reduce((sum, ability) => sum + (Number(abilityInventory(student, cardId, rarity)[ability.id]) || 0), 0); }
+function cardInventoryCount(student, cardId) { return CARD_RARITIES.reduce((sum, rarity) => sum + rarityInventoryCount(student, cardId, rarity), 0); }
+function cardCount(student) { return Object.keys(student.cards).reduce((sum, cardId) => sum + cardInventoryCount(student, cardId), 0); }
+function cardSetById(id) { return data.cardSets.find((cardSet) => cardSet.id === id); }
+function usableCardSets() { return data.cardSets.filter((cardSet) => cardSet.active && !cardSet.deleted); }
+function normalizeActiveCardSets() { data.activeCardSetIds = [...new Set(data.activeCardSetIds || [])].filter((id) => usableCardSets().some((cardSet) => cardSet.id === id)); }
+function drawRate(rarity, rates) { return Number(rates?.[CARD_RATE_KEYS[rarity]]) || 0; }
+function upgradeStepFrom(rarity) { return CARD_UPGRADE_STEPS.find((step) => step.from === rarity); }
+function upgradeRequired(rarity) { const step = upgradeStepFrom(rarity); return step ? data.cardUpgradeSettings[step.key] : null; }
+function cardAbilitySetting(rarity) { return data.cardAbilitySettings?.[rarity] || DEFAULT_CARD_ABILITY_SETTINGS[rarity]; }
+function cardAbilityById(id) { return CARD_ABILITIES.find((ability) => ability.id === id); }
+function abilityPercent(rarity, abilityId, originalSource) { const setting = cardAbilitySetting(rarity).abilities?.[abilityId]; return Number(originalSource === "과제" ? setting?.assignmentPercent : setting?.rolePercent) || 0; }
+function abilitySummary(rarity, abilityId) { const ability = cardAbilityById(abilityId); const setting = cardAbilitySetting(rarity).abilities?.[abilityId] || {}; const assignment = Number(setting.assignmentPercent) || 0; const role = Number(setting.rolePercent) || 0; return `${ability?.icon || "✨"} ${ability?.name || "특수능력"} · ${assignment && role ? `과제·1인1역 +${assignment}%` : assignment ? `과제 +${assignment}%` : `1인1역 +${role}%`}`; }
+function randomAbilityId() { const total = CARD_ABILITIES.reduce((sum, ability) => sum + ability.weight, 0); let value = Math.random() * total; for (const ability of CARD_ABILITIES) { value -= ability.weight; if (value < 0) return ability.id; } return CARD_ABILITIES[0].id; }
+function representativeCardInfo(student) {
+  const equipped = student?.representativeCard; if (!equipped || !CARD_RARITIES.includes(equipped.rarity)) return null;
+  const card = data.cards.find((item) => item.id === equipped.cardId); if (!card || Number(abilityInventory(student, card.id, equipped.rarity)[equipped.abilityId]) < 1) return null;
+  return { card, rarity: equipped.rarity, abilityId: equipped.abilityId, ability: cardAbilityById(equipped.abilityId), setting: cardAbilitySetting(equipped.rarity) };
+}
+function historyDateKey(value) { const parts = String(value || "").match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/); return parts ? `${parts[1]}-${parts[2].padStart(2, "0")}-${parts[3].padStart(2, "0")}` : ""; }
+function todayCardBonus(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (item.source === "카드 능력 보너스" && historyDateKey(item.date) === todayString() ? Number(item.amount) || 0 : 0), 0); }
+function cardBonusAward(student, baseAmount, originalSource, relatedId) {
+  const representative = representativeCardInfo(student); if (!representative || baseAmount <= 0) return { amount: 0 };
+  const percent = abilityPercent(representative.rarity, representative.abilityId, originalSource); const cap = Number(representative.setting.dailyCap) || 0;
+  const amount = Math.max(0, Math.min(Math.round(baseAmount * percent / 100), Math.max(0, cap - todayCardBonus(student))));
+  const snapshot = { amount, cardId: representative.card.id, cardName: representative.card.name, rarity: representative.rarity, abilityId: representative.abilityId, abilityName: representative.ability?.name, bonusPercent: percent, dailyCap: cap, originalSource, baseAmount, relatedId };
+  if (amount > 0) student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: `${representative.card.name} ${representative.ability?.name} 카드 능력 보너스`, source: "카드 능력 보너스", studentId: student.id, representativeCardId: representative.card.id, representativeCardName: representative.card.name, representativeCardRarity: representative.rarity, representativeCardAbilityId: representative.abilityId, representativeCardAbilityName: representative.ability?.name, originalSource, baseAmount, bonusPercent: percent, bonusAmount: amount, relatedId, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+  return snapshot;
+}
+function reverseCardBonus(student, snapshot, reason) {
+  const amount = Number(snapshot?.amount) || 0; if (amount <= 0) return;
+  student.pointHistory.push({ id: crypto.randomUUID(), amount: -amount, reason, source: "카드 능력 보너스", studentId: student.id, representativeCardId: snapshot.cardId, representativeCardName: snapshot.cardName, representativeCardRarity: snapshot.rarity, representativeCardAbilityId: snapshot.abilityId, representativeCardAbilityName: snapshot.abilityName, originalSource: snapshot.originalSource, baseAmount: snapshot.baseAmount, bonusPercent: snapshot.bonusPercent, bonusAmount: -amount, relatedId: snapshot.relatedId, reversal: true, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+}
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
 function toast(message) { const element = document.querySelector("#toast"); element.textContent = message; element.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove("show"), 2200); }
 saveData();
@@ -147,7 +313,7 @@ function renderWelcome(showStudents = false) {
 }
 
 const STUDENT_NAV = [["home", "⌂", "홈"], ["roles", "✓", "오늘의 역할"], ["draw", "★", "카드 뽑기"], ["collection", "▦", "위인 도감"], ["ranking", "♛", "랭킹"]];
-const TEACHER_NAV = [["dashboard", "⌂", "대시보드"], ["students", "♙", "학생 관리"], ["roles", "✓", "1인1역"], ["assignments", "▣", "과제"], ["observations", "✎", "관찰 기록"], ["points", "◆", "포인트"], ["cards", "★", "카드 관리"]];
+const TEACHER_NAV = [["dashboard", "⌂", "대시보드"], ["students", "♙", "학생 관리"], ["roles", "✓", "1인1역"], ["assignments", "▣", "과제"], ["observations", "✎", "관찰 기록"], ["points", "◆", "포인트"], ["cards", "★", "카드 관리"], ["ranking", "♛", "랭킹"]];
 
 function navHtml(items) { return items.map(([id, icon, label]) => `<button class="nav-button ${session.view === id ? "active" : ""}" data-action="navigate" data-view="${id}"><span>${icon}</span>${label}</button>`).join(""); }
 function shell(content, teacher = false) {
@@ -192,7 +358,9 @@ function studentHome() {
   const recent = student.pointHistory.slice(-4).reverse();
   const activeAssignments = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment));
   const completedAssignments = data.assignments.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
-  return `<section class="hero"><h2>오늘도 우리 반을 위해<br>퀘스트를 완료해 보세요! ✨</h2><p>작은 도움이 모여 멋진 교실을 만들어요.</p></section><h2 class="section-title">오늘의 과제</h2>${activeAssignments.length ? `<div class="grid">${activeAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}${completedAssignments.length ? `<details class="completed-assignments"><summary>지난 과제 ${completedAssignments.length}개 보기</summary><div class="grid">${completedAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex, true)).join("")}</div></details>` : ""}<h2 class="section-title">최근 포인트 내역</h2>${recent.length ? `<div class="list">${recent.map((item) => pointHistoryRow(item)).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}`;
+  const representative = representativeCardInfo(student);
+  const representativeHtml = representative ? `<section class="representative-card-summary"><div><small>나의 대표 카드</small><h2>${escapeHtml(representative.card.name)} <span class="pill rarity-${rarityClass(representative.rarity)}">${representative.rarity}</span></h2></div><div><strong>특수능력</strong><p>${abilitySummary(representative.rarity, representative.abilityId)}</p><small>오늘 카드 보너스 ${todayCardBonus(student)} / ${representative.setting.dailyCap}P</small></div></section>` : `<section class="representative-card-summary empty-representative"><div><small>나의 대표 카드</small><h2>아직 장착한 카드가 없어요.</h2><p>위인 도감에서 보유 카드를 대표 카드로 장착해 보세요.</p></div></section>`;
+  return `<section class="hero"><h2>오늘도 우리 반을 위해<br>퀘스트를 완료해 보세요! ✨</h2><p>작은 도움이 모여 멋진 교실을 만들어요.</p></section>${representativeHtml}<h2 class="section-title">오늘의 과제</h2>${activeAssignments.length ? `<div class="grid">${activeAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}${completedAssignments.length ? `<details class="completed-assignments"><summary>지난 과제 ${completedAssignments.length}개 보기</summary><div class="grid">${completedAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex, true)).join("")}</div></details>` : ""}<h2 class="section-title">최근 포인트 내역</h2>${recent.length ? `<div class="list">${recent.map((item) => pointHistoryRow(item)).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}`;
 }
 
 function studentRoles() {
@@ -213,25 +381,53 @@ function studentRoles() {
 
 function studentDraw() {
   const student = currentStudent();
-  return `<h1 class="page-heading">역사 위인 카드 뽑기</h1><p class="page-description">50P로 역사 속 멋진 인물을 만나 보세요.</p><section class="card draw-zone"><p>내 포인트 <strong class="points">${student.points}P</strong></p><div id="draw-card" class="draw-card"><div class="draw-card-inner"><div class="draw-face draw-back">?</div><div id="draw-result" class="draw-face draw-front"><span class="muted">카드를 뽑아 보세요!</span></div></div></div><button class="button gold" data-action="draw-card" ${student.points < 50 ? "disabled" : ""}>50P로 카드 뽑기</button>${student.points < 50 ? `<p class="muted">포인트가 부족합니다.</p>` : `<p class="muted">같은 카드도 다시 나올 수 있어요.</p>`}</section>`;
+  const activeSetTags = usableCardSets().filter((cardSet) => data.activeCardSetIds.includes(cardSet.id)).map((cardSet) => `<span class="pill">${escapeHtml(cardSet.name)}</span>`).join("");
+  const options = data.drawOptions.filter((option) => option.active && !option.deleted);
+  const optionCards = options.map((option) => { const rateTags = CARD_RARITIES.map((rarity) => `<span class="pill rarity-${rarityClass(rarity)}">${rarity} ${drawRate(rarity, option.rates)}%</span>`).join(""); const insufficient = student.points < option.price; return `<article class="draw-option-card"><h3>${escapeHtml(option.name)}</h3><strong class="draw-option-price">${option.price}P</strong><p class="muted">전설 ${drawRate("전설", option.rates)}% · 고대 ${drawRate("고대", option.rates)}%</p><details class="draw-rate-details"><summary>전체 확률 보기</summary><div>${rateTags}</div></details><button class="button gold" data-action="draw-option" data-id="${option.id}" ${insufficient || !activeSetTags ? "disabled" : ""}>${insufficient ? "포인트 부족" : `${option.price}P로 뽑기`}</button></article>`; }).join("");
+  return `<h1 class="page-heading">역사 위인 카드 뽑기</h1><p class="page-description">원하는 가격과 확률의 뽑기 옵션을 선택하세요.</p><div class="active-card-set-tags"><strong>현재 카드팩</strong>${activeSetTags || `<span class="muted">선택된 카드셋 없음</span>`}</div><section class="card draw-zone"><p>내 포인트 <strong id="draw-current-points" class="points">${student.points}P</strong></p><div id="draw-card" class="draw-card"><div class="draw-card-inner"><div class="draw-face draw-back">?</div><div id="draw-result" class="draw-face draw-front"><span class="muted">아래에서 뽑기 옵션을 선택하세요!</span></div></div></div></section><div class="draw-option-grid">${optionCards || `<div class="empty">현재 사용할 수 있는 뽑기 옵션이 없습니다.</div>`}</div>`;
 }
 
-function rarityClass(rarity) { return { 일반: "common", 희귀: "rare", 영웅: "hero", 전설: "legend" }[rarity]; }
+function rarityClass(rarity) { return { 일반: "common", 희귀: "rare", 영웅: "hero", 전설: "legend", 고대: "ancient" }[rarity]; }
+function sortedCards(includeDeleted = false, cardSetId = "") { return data.cards.filter((card) => (includeDeleted || !card.deleted) && (!cardSetId || card.cardSetId === cardSetId)).sort((first, second) => first.order - second.order); }
 function studentCollection() {
-  const student = currentStudent(); const unique = Object.keys(student.cards).filter((id) => student.cards[id] > 0).length;
-  return `<h1 class="page-heading">위인 도감</h1><p class="page-description">수집 <strong>${unique} / ${FIGURES.length}</strong> · 역사 속 인물들을 모두 만나 보세요!</p><div class="collection">${FIGURES.map((figure) => { const count = student.cards[figure.id] || 0; return count ? `<article class="figure-card rarity-${rarityClass(figure.rarity)}">${count > 1 ? `<span class="count-badge">x${count}</span>` : ""}<span class="pill">${figure.rarity}</span><h3>${figure.name}</h3><p class="muted">${figure.era}</p><small>${figure.achievement}</small></article>` : `<article class="figure-card locked" aria-label="아직 획득하지 못한 카드">?</article>`; }).join("")}</div>`;
+  const student = currentStudent();
+  const availableSets = [...data.cardSets].filter((cardSet) => !cardSet.deleted || sortedCards(true, cardSet.id).some((card) => cardInventoryCount(student, card.id) > 0));
+  const orderedSets = availableSets.sort((first, second) => Number(data.activeCardSetIds.includes(second.id)) - Number(data.activeCardSetIds.includes(first.id)) || new Date(first.createdAt) - new Date(second.createdAt));
+  if (collectionCardSetFilter !== "all" && !orderedSets.some((cardSet) => cardSet.id === collectionCardSetFilter)) collectionCardSetFilter = "all";
+  const shownSets = collectionCardSetFilter === "all" ? orderedSets : orderedSets.filter((cardSet) => cardSet.id === collectionCardSetFilter);
+  const filterButtons = `<button class="collection-filter ${collectionCardSetFilter === "all" ? "selected" : ""}" data-action="filter-card-collection" data-id="all">전체</button>${orderedSets.map((cardSet) => `<button class="collection-filter ${collectionCardSetFilter === cardSet.id ? "selected" : ""}" data-action="filter-card-collection" data-id="${cardSet.id}">${escapeHtml(cardSet.name)}</button>`).join("")}`;
+  const sections = shownSets.map((cardSet) => {
+    const setCards = sortedCards(true, cardSet.id); const activeCards = setCards.filter((card) => card.active && !card.deleted);
+    const unique = activeCards.filter((card) => cardInventoryCount(student, card.id) > 0).length;
+    const visibleCards = setCards.filter((card) => !card.deleted || cardInventoryCount(student, card.id) > 0);
+    if (!visibleCards.length) return "";
+    return `<section class="collection-set"><div class="section-heading"><div><h2>${escapeHtml(cardSet.name)} ${data.activeCardSetIds.includes(cardSet.id) ? `<span class="pill success">뽑기 사용 중</span>` : ""}</h2><p class="muted">${unique} / ${activeCards.length} 수집</p></div></div><div class="collection">${visibleCards.map((figure) => {
+      const inventory = cardInventory(student, figure.id); const count = cardInventoryCount(student, figure.id);
+      const rarityCounts = CARD_RARITIES.map((rarity) => { const quantity = rarityInventoryCount(student, figure.id, rarity); const step = upgradeStepFrom(rarity); const needed = upgradeRequired(rarity); const abilities = CARD_ABILITIES.map((ability) => { const abilityCount = Number(abilityInventory(student, figure.id, rarity)[ability.id]) || 0; if (!abilityCount) return ""; const equipped = student.representativeCard?.cardId === figure.id && student.representativeCard?.rarity === rarity && student.representativeCard?.abilityId === ability.id; return `<div class="owned-ability"><span><strong>${ability.icon} ${ability.name}</strong> ×${abilityCount}</span><small>${abilitySummary(rarity, ability.id).split(" · ")[1]}</small><button class="representative-equip-button ${equipped ? "equipped" : ""}" data-action="equip-representative-card" data-card-id="${figure.id}" data-rarity="${rarity}" data-ability-id="${ability.id}" ${equipped ? "disabled" : ""}>${equipped ? "대표 카드 ✓" : "대표 카드로 설정"}</button></div>`; }).join(""); const upgradeControl = step ? quantity >= needed ? `<button class="upgrade-button" data-action="ask-upgrade-card" data-card-id="${figure.id}" data-rarity="${rarity}">⬆ ${step.to} 등급으로 업그레이드</button>` : `<small class="upgrade-progress">총 ${quantity} / ${needed}</small>` : `<small class="upgrade-progress">최고 등급</small>`; return `<div class="rarity-status ${quantity > 0 ? `owned rarity-${rarityClass(rarity)}` : "locked"}"><strong>${rarity}</strong><span>${quantity > 0 ? `총 ×${quantity}` : "-"}</span>${abilities}${upgradeControl}</div>`; }).join("");
+      return count ? `<article class="figure-card"><h3>${escapeHtml(figure.name)}</h3><p class="muted">${escapeHtml(figure.era)}</p><small>${escapeHtml(figure.achievement)}</small><div class="rarity-inventory">${rarityCounts}</div><strong class="owned-count">보유 ×${count}</strong>${(!figure.active || !cardSet.active) ? `<span class="inactive-card-note">현재 뽑기 제외</span>` : ""}</article>` : `<article class="figure-card locked" aria-label="${escapeHtml(figure.name)} 미획득 카드"><span>?</span><small>${escapeHtml(figure.name)} · 5개 등급</small></article>`;
+    }).join("")}</div></section>`;
+  }).join("");
+  const representative = representativeCardInfo(student); const bonusCap = representative?.setting.dailyCap || 0;
+  return `<h1 class="page-heading">위인 도감</h1><p class="page-description">한 인물의 등급과 특수능력별 보유 수량을 확인하세요.</p><div class="collection-bonus-summary"><strong>현재 대표 카드</strong><span>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity} · ${representative.ability?.name}` : "없음"}</span><span>오늘 카드 보너스 <b>${todayCardBonus(student)} / ${bonusCap}P</b></span></div><div class="collection-filters">${filterButtons}</div>${sections || `<div class="empty">표시할 카드가 없습니다.</div>`}`;
 }
 
 function studentRanking() {
-  const rankings = [
-    ["🏆", "이번 주 활동왕", [...data.students].sort((a,b) => b.pointHistory.length - a.pointHistory.length), "활동"],
-    ["🤝", "역할 수행왕", [...data.students].sort((a,b) => completedCount(b.id) - completedCount(a.id)), "회"],
-    ["🃏", "카드 수집왕", [...data.students].sort((a,b) => cardCount(b) - cardCount(a)), "장"]
-  ];
-  return `<h1 class="page-heading">우리 반 즐거운 랭킹</h1><p class="page-description">순위보다 서로의 멋진 활동을 응원해 주세요!</p><div class="grid">${rankings.map(([icon, title, students, unit]) => `<article class="card ranking-card"><div class="rank-icon">${icon}</div><div class="rank-list"><h3>${title}</h3>${students.slice(0,3).map((student, index) => `<div class="rank-line"><span>${index + 1}. ${student.name}</span><strong>${unit === "장" ? cardCount(student) : unit === "회" ? completedCount(student.id) : student.pointHistory.length}${unit}</strong></div>`).join("")}</div></article>`).join("")}</div>`;
+  const visibleRankings = RANKING_TYPES.filter((ranking) => data.rankingVisibility[ranking.id]);
+  return `<div class="section-heading"><div><h1 class="page-heading">우리 반 활동 랭킹</h1><p class="page-description">여러 활동에서 서로의 성장을 응원해 주세요!</p></div>${rankingPeriodButtons()}</div>${visibleRankings.length ? `<div class="ranking-grid">${visibleRankings.map((ranking) => studentRankingCard(ranking)).join("")}</div>` : `<div class="empty">선생님이 공개한 랭킹이 아직 없어요.</div>`}`;
 }
 
 function completedCount(studentId) { return data.roleApplications.filter((item) => item.studentId === studentId && item.status === "completed").length; }
+function weekStart() { const date = new Date(); const day = date.getDay(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return date; }
+function dateInRankingPeriod(value) { if (rankingPeriod === "all") return true; if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = historyDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= weekStart() && date <= new Date(); }
+function activityPointValue(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (["1인1역", "과제"].includes(item.source) && dateInRankingPeriod(item.createdAt || item.date) ? Number(item.amount) || 0 : 0), 0); }
+function roleRankingValue(student) { return data.roleApplications.filter((application) => application.studentId === student.id && application.status === "completed" && (rankingPeriod === "all" || dateInRankingPeriod(application.completedAt))).length; }
+function assignmentRankingValue(student) { const index = data.students.findIndex((item) => item.id === student.id); return data.assignments.filter((assignment) => assignment.statuses[index] === "submitted" && (rankingPeriod === "all" || dateInRankingPeriod(assignment.pointAwards?.[student.id]?.awardedAt))).length; }
+function collectionRankingValue(student) { const owned = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) owned.add(`${cardId}|${rarity}`); })); if (rankingPeriod === "all") return owned.size; const weekly = new Set((student.cardAcquisitionHistory || []).filter((item) => dateInRankingPeriod(item.createdAt)).map((item) => `${item.cardId}|${item.rarity}`)); return [...owned].filter((key) => weekly.has(key)).length; }
+function rankingValue(type, student) { return type === "activity" ? activityPointValue(student) : type === "roles" ? roleRankingValue(student) : type === "assignments" ? assignmentRankingValue(student) : collectionRankingValue(student); }
+function rankedStudents(type) { const sorted = data.students.map((student) => ({ student, value: rankingValue(type, student) })).sort((first, second) => second.value - first.value || first.student.name.localeCompare(second.student.name, "ko")); let previousValue; let previousRank = 0; return sorted.map((item, index) => { const rank = item.value === previousValue ? previousRank : index + 1; previousValue = item.value; previousRank = rank; return { ...item, rank }; }); }
+function rankingPeriodButtons() { return `<div class="ranking-period"><button class="button ${rankingPeriod === "week" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="week">이번 주</button><button class="button ${rankingPeriod === "all" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="all">전체</button></div>`; }
+function rankingRow(item, unit, mine = false) { return `<div class="ranking-row ${mine ? "mine" : ""}"><strong>${item.rank}위</strong><span>${escapeHtml(item.student.name)}</span><b>${item.value}${unit}</b></div>`; }
+function studentRankingCard(ranking) { const rows = rankedStudents(ranking.id); const top = rows.slice(0, 5); const mine = rows.find((item) => item.student.id === session.studentId); return `<article class="card ranking-card"><div class="ranking-card-title"><span>${ranking.icon}</span><h2>${ranking.title}</h2></div><div class="ranking-list">${top.map((item) => rankingRow(item, ranking.unit, item.student.id === session.studentId)).join("")}</div>${mine && !top.some((item) => item.student.id === mine.student.id) ? `<div class="my-ranking"><small>내 순위</small>${rankingRow(mine, ranking.unit, true)}</div>` : ""}</article>`; }
 function pointHistoryRow(item) { return `<div class="list-row"><div class="list-main"><strong>${escapeHtml(item.reason)}</strong><small class="muted">${item.date}</small></div><strong class="${item.amount >= 0 ? "points" : ""}">${item.amount >= 0 ? "+" : ""}${item.amount}P</strong></div>`; }
 
 function todayIssuedPoints() {
@@ -242,15 +438,41 @@ function todayIssuedPoints() {
   };
   return data.students.reduce((total, student) => total + (Array.isArray(student.pointHistory) ? student.pointHistory : []).reduce((studentTotal, item) => {
     const isToday = dateKey(item.date) === today;
-    const isStudentSpending = item.amount < 0 && String(item.reason || "").includes("카드 뽑기");
+    const isStudentSpending = item.amount < 0 && (item.source === "카드 뽑기" || String(item.reason || "").includes("카드 뽑기"));
     return studentTotal + (isToday && !isStudentSpending ? Number(item.amount) || 0 : 0);
   }, 0), 0);
 }
 
+function localDateKey(value) { if (!value) return ""; const text = String(value); if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text; if (/^\d{4}-\d{2}-\d{2}T/.test(text)) { const isoDate = new Date(text); return Number.isNaN(isoDate.getTime()) ? "" : `${isoDate.getFullYear()}-${String(isoDate.getMonth() + 1).padStart(2, "0")}-${String(isoDate.getDate()).padStart(2, "0")}`; } const parsed = historyDateKey(text); if (parsed) return parsed; const date = new Date(text); return Number.isNaN(date.getTime()) ? "" : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+function assignmentDateKeys(assignment) { return new Set([localDateKey(assignment.createdAt), localDateKey(assignment.dueDate), localDateKey(assignment.completedAt)].filter(Boolean)); }
+function assignmentsForDate(dateKey) { return data.assignments.filter((assignment) => assignmentDateKeys(assignment).has(dateKey)); }
+function rolesForDate(dateKey) { return data.roleApplications.filter((application) => application.status !== "cancelled" && [localDateKey(application.appliedAt), localDateKey(application.completedAt)].includes(dateKey)); }
+function observationsForDate(dateKey) { return data.observations.filter((observation) => localDateKey(observation.date || observation.createdAt) === dateKey).sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)); }
+function pointTransactionsForDate(dateKey) { return data.students.flatMap((student) => (student.pointHistory || []).filter((item) => localDateKey(item.createdAt || item.date) === dateKey).map((item) => ({ ...item, studentName: student.name }))); }
+function assignmentStatusCounts(assignment) { return { submitted: assignment.statuses.filter((status) => status === "submitted").length, review: assignment.statuses.filter((status) => status === "review").length, missing: assignment.statuses.filter((status) => status === "missing").length }; }
+function pointCategory(item) { if (item.source === "1인1역") return "role"; if (item.source === "과제") return "assignment"; if (item.source === "카드 능력 보너스") return "bonus"; if (item.source === "교사 직접 지급") return "teacherGive"; if (item.source === "교사 직접 차감") return "teacherTake"; if (item.source === "카드 뽑기" || String(item.reason || "").includes("카드 뽑기")) return "draw"; return "other"; }
+function calendarActivity(dateKey) { return { assignments: assignmentsForDate(dateKey).length, roles: rolesForDate(dateKey).length, observations: observationsForDate(dateKey).length, note: Boolean(data.dailyClassNotes?.[dateKey]?.text) }; }
+function timetableDayForDate(dateKey) { const [year, month, day] = dateKey.split("-").map(Number); const weekday = new Date(year, month - 1, day).getDay(); return TIMETABLE_DAYS.find((item) => item.day === weekday); }
+function timetableForDate(dateKey) { const override = data.dateTimetableOverrides?.[dateKey]; if (Array.isArray(override)) return { periods: override, override: true }; const weekday = timetableDayForDate(dateKey); return { periods: weekday ? data.weeklyTimetable[weekday.key] || [] : [], override: false }; }
+function timetableRows(periods) { const filled = periods.map((subject, index) => ({ subject, index })).filter((item) => item.subject.trim()); if (!filled.length) return `<div class="empty">등록된 시간표가 없습니다.</div>`; return `<div class="timetable-list">${filled.map((item) => `<div><strong>${item.index + 1}교시</strong><span>${escapeHtml(item.subject)}</span></div>`).join("")}</div>`; }
+function dashboardClassPlan() { const timetable = timetableForDate(dashboardSelectedDate); const note = data.dailyClassNotes?.[dashboardSelectedDate]?.text || ""; return `<div class="dashboard-class-plan"><section class="card dashboard-detail"><div class="section-heading"><div><h2>시간표</h2>${timetable.override ? `<span class="pill waiting">이 날짜만 수정됨</span>` : ""}</div><div class="list-actions"><button class="button secondary compact" data-action="edit-date-timetable">이 날짜 시간표 수정</button>${timetable.override ? `<button class="button danger compact" data-action="reset-date-timetable">기본 시간표로 되돌리기</button>` : ""}<button class="button secondary compact" data-action="edit-weekly-timetable">기본 시간표 설정</button></div></div>${timetableRows(timetable.periods)}</section><section class="card dashboard-detail"><div class="section-heading"><h2>주요 사항</h2><button class="button secondary compact" data-action="edit-daily-note">${note ? "수정" : "작성"}</button></div>${note ? `<div class="daily-note-text">${escapeHtml(note).replace(/\n/g, "<br>")}</div>` : `<div class="empty">등록된 주요 사항이 없습니다.</div>`}</section></div>`; }
+function periodInputs(periods, prefix = "period") { const length = Math.max(6, periods.length); return Array.from({ length }, (_, index) => `<label>${index + 1}교시<input name="${prefix}-${index}" maxlength="40" value="${escapeHtml(periods[index] || "")}" placeholder="과목 또는 활동"></label>`).join(""); }
+function openWeeklyTimetableModal() { const periodCount = Math.max(6, ...TIMETABLE_DAYS.map((day) => data.weeklyTimetable[day.key]?.length || 0)); const header = TIMETABLE_DAYS.map((day) => `<th scope="col">${day.label}</th>`).join(""); const rows = Array.from({ length: periodCount }, (_, periodIndex) => `<tr><th scope="row">${periodIndex + 1}교시</th>${TIMETABLE_DAYS.map((day) => `<td><input name="${day.key}-${periodIndex}" maxlength="40" value="${escapeHtml(data.weeklyTimetable[day.key]?.[periodIndex] || "")}" placeholder="과목 또는 활동" aria-label="${day.label} ${periodIndex + 1}교시"></td>`).join("")}</tr>`).join(""); app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="weekly-timetable-form" class="modal-card form timetable-modal"><div class="section-heading"><div><h2>기본 주간 시간표 설정</h2><p class="muted">각 칸에 과목이나 활동을 입력하세요. 빈 교시는 그대로 두어도 됩니다.</p></div></div><div class="weekly-timetable-table-wrap"><table class="weekly-timetable-table"><thead><tr><th scope="col">교시</th>${header}</tr></thead><tbody>${rows}</tbody></table></div><div class="button-row timetable-modal-actions"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+function openDateTimetableModal() { const periods = timetableForDate(dashboardSelectedDate).periods; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="date-timetable-form" class="modal-card form" data-date="${dashboardSelectedDate}"><h2>${selectedDateTitle(dashboardSelectedDate)} 시간표 수정</h2><p class="muted">이 날짜에만 적용되며 기본 시간표는 바뀌지 않습니다.</p><div class="timetable-input-grid">${periodInputs(periods)}</div><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+function openDailyNoteModal() { const note = data.dailyClassNotes?.[dashboardSelectedDate]?.text || ""; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="daily-note-form" class="modal-card form" data-date="${dashboardSelectedDate}"><h2>${selectedDateTitle(dashboardSelectedDate)} 주요 사항</h2><label>여러 줄로 자유롭게 입력하세요<textarea name="text" maxlength="2000" rows="8" placeholder="예: 2교시 소방훈련\n수학 단원평가">${escapeHtml(note)}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${note ? `<button class="button danger" type="submit" data-kind="delete">내용 삭제</button>` : ""}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+function dashboardCalendar() {
+  const [year, month] = dashboardMonth.split("-").map(Number); const firstDay = new Date(year, month - 1, 1).getDay(); const lastDate = new Date(year, month, 0).getDate(); const cells = Array.from({ length: firstDay }, () => `<div class="calendar-day blank"></div>`);
+  for (let day = 1; day <= lastDate; day += 1) { const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`; const activity = calendarActivity(dateKey); const markers = [activity.assignments ? `<span>과제 ${activity.assignments}</span>` : "", activity.roles ? `<span>역할 ${activity.roles}</span>` : "", activity.observations ? `<span>관찰 ${activity.observations}</span>` : "", activity.note ? `<span>주요 사항</span>` : ""].join(""); cells.push(`<button class="calendar-day ${dateKey === dashboardSelectedDate ? "selected" : ""} ${dateKey === todayString() ? "today" : ""}" data-action="select-dashboard-date" data-date="${dateKey}"><strong>${day}</strong><small>${markers}</small></button>`); }
+  return `<section class="dashboard-calendar card"><div class="calendar-heading"><button class="icon-button" data-action="move-dashboard-month" data-direction="prev" aria-label="이전 달">‹</button><h2>${year}년 ${month}월</h2><button class="icon-button" data-action="move-dashboard-month" data-direction="next" aria-label="다음 달">›</button><button class="button secondary compact" data-action="dashboard-today">오늘</button></div><div class="calendar-weekdays">${["일", "월", "화", "수", "목", "금", "토"].map((dayName) => `<span>${dayName}</span>`).join("")}</div><div class="calendar-grid">${cells.join("")}</div></section><h2 class="dashboard-date-heading">${selectedDateTitle(dashboardSelectedDate)}</h2>${dashboardClassPlan()}`;
+}
+function selectedDateTitle(dateKey) { const [year, month, day] = dateKey.split("-").map(Number); const date = new Date(year, month - 1, day); return `${year}년 ${month}월 ${day}일 ${["일", "월", "화", "수", "목", "금", "토"][date.getDay()]}요일`; }
+function dashboardAssignmentList(assignments) { if (!assignments.length) return `<div class="empty">관련 과제가 없습니다.</div>`; return `<div class="dashboard-detail-list">${assignments.map((assignment) => { const counts = assignmentStatusCounts(assignment); return `<article><div><span class="subject-badge">${escapeHtml(assignment.subject)}</span><strong>${escapeHtml(assignment.title)}</strong></div><small>마감 ${assignment.dueDate || "날짜 없음"} · 제출 ${counts.submitted}명 · 확인 대기 ${counts.review}명 · 미제출 ${counts.missing}명</small><span class="pill ${isAssignmentCompleted(assignment) ? "success" : "waiting"}">${isAssignmentCompleted(assignment) ? "과제 완료" : "진행 중"}</span></article>`; }).join("")}</div>`; }
+function dashboardRoleList(roles) { if (!roles.length) return `<div class="empty">해당 날짜의 역할 기록이 없습니다.</div>`; return `<div class="dashboard-detail-list">${roles.map((application) => { const role = roleById(application.roleId); const student = studentById(application.studentId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span>${escapeHtml(student?.name || "학생 정보 없음")}</span></div><span class="pill ${application.status === "completed" ? "success" : "waiting"}">${application.status === "completed" ? "완료" : "수행 대기"}</span><b>${application.status === "completed" ? (application.awardedPoints ?? role?.points ?? 0) : (role?.points ?? 0)}P</b></article>`; }).join("")}</div>`; }
 function teacherDashboard() {
-  const active = data.roleApplications.filter((item) => item.status !== "cancelled");
-  const completed = active.filter((item) => item.status === "completed");
-  return `<h1 class="page-heading">선생님 대시보드</h1><p class="page-description">오늘 우리 반의 활동을 한눈에 확인하세요.</p><div class="grid four"><article class="card"><span class="muted">학생 수</span><strong class="big-number">${data.students.length}명</strong></article><article class="card"><span class="muted">오늘 역할 신청</span><strong class="big-number">${active.length}건</strong></article><article class="card"><span class="muted">오늘 완료 역할</span><strong class="big-number">${completed.length}건</strong></article><article class="card"><span class="muted">오늘 지급 포인트</span><strong class="big-number">${todayIssuedPoints()}P</strong></article></div><h2 class="section-title">최근 역할 신청</h2>${teacherRoleList(active.slice(-5).reverse())}`;
+  const assignments = assignmentsForDate(dashboardSelectedDate); const roles = rolesForDate(dashboardSelectedDate); const points = pointTransactionsForDate(dashboardSelectedDate); const observations = observationsForDate(dashboardSelectedDate); const submitted = data.assignments.reduce((sum, assignment) => sum + Object.values(assignment.pointAwards || {}).filter((award) => award.awarded && localDateKey(award.awardedAt) === dashboardSelectedDate).length, 0); const completedRoles = roles.filter((role) => role.status === "completed").length; const waitingRoles = roles.filter((role) => role.status === "waiting").length; const issued = points.filter((item) => pointCategory(item) !== "draw").reduce((sum, item) => sum + (Number(item.amount) || 0), 0); const pointTotals = points.reduce((totals, item) => { const key = pointCategory(item); totals[key] = (totals[key] || 0) + (Number(item.amount) || 0); return totals; }, {});
+  const pointLabels = [["role", "1인1역"], ["assignment", "과제"], ["bonus", "카드 능력 보너스"], ["teacherGive", "교사 직접 지급"], ["teacherTake", "교사 직접 차감"], ["draw", "카드 뽑기 사용"]];
+  const observationList = observations.length ? `<div class="dashboard-detail-list">${observations.slice(0, 5).map((observation) => `<article><div><strong>${escapeHtml(studentById(observation.studentId)?.name || "학생 정보 없음")}</strong><span class="pill">${escapeHtml(observation.category)}</span></div>${observation.quickItems?.length ? `<small>${observation.quickItems.map((item) => `#${escapeHtml(item)}`).join(" ")}</small>` : ""}<p>${escapeHtml(observation.content)}</p></article>`).join("")}</div>${observations.length > 5 ? `<button class="button secondary compact" data-action="navigate" data-view="observations">전체 보기</button>` : ""}` : `<div class="empty">관찰 기록이 없습니다.</div>`;
+  return `<div class="section-heading"><div><h1 class="page-heading">선생님 통합 대시보드</h1><p class="page-description">달력에서 날짜를 선택해 학급 활동을 확인하세요.</p></div></div>${dashboardCalendar()}<section class="dashboard-selected-date"><h2>${selectedDateTitle(dashboardSelectedDate)}</h2><div class="dashboard-summary-grid"><article><span>학생 수</span><strong>${data.students.length}명</strong></article><article><span>관련 과제</span><strong>${assignments.length}개</strong></article><article><span>과제 제출 완료</span><strong>${submitted}건</strong></article><article><span>1인1역 완료</span><strong>${completedRoles}건</strong></article><article><span>지급 포인트</span><strong>${issued}P</strong></article><article><span>관찰 기록</span><strong>${observations.length}건</strong></article></div><div class="dashboard-detail-grid"><section class="card dashboard-detail"><div class="section-heading"><h2>과제</h2></div>${dashboardAssignmentList(assignments)}</section><section class="card dashboard-detail"><div class="section-heading"><h2>1인1역</h2><span class="muted">완료 ${completedRoles}명 · 대기 ${waitingRoles}명</span></div>${dashboardRoleList(roles)}</section><section class="card dashboard-detail"><h2>포인트</h2><div class="point-source-summary">${pointLabels.map(([key, label]) => `<div><span>${label}</span><strong class="${(pointTotals[key] || 0) > 0 ? "points" : ""}">${(pointTotals[key] || 0) > 0 ? "+" : ""}${pointTotals[key] || 0}P</strong></div>`).join("")}</div>${points.length ? `<small class="muted">거래 ${points.length}건</small>` : `<div class="empty">포인트 거래가 없습니다.</div>`}</section><section class="card dashboard-detail"><div class="section-heading"><h2>관찰 기록</h2><span class="muted">최근 ${Math.min(5, observations.length)}건</span></div>${observationList}</section></div></section>`;
 }
 
 function teacherStudents() {
@@ -330,11 +552,55 @@ function teacherObservations() {
 }
 
 function teacherPoints() {
-  return `<h1 class="page-heading">포인트 관리</h1><p class="page-description">학생에게 포인트를 지급하거나 잘못 지급한 포인트를 차감할 수 있습니다.</p><div class="list">${data.students.map((student) => `<div class="list-row"><div class="list-main"><strong>${student.name}</strong><span class="points">${student.points}P</span></div><div class="list-actions"><button class="button success" data-action="open-points" data-id="${student.id}" data-kind="add">포인트 지급</button><button class="button danger" data-action="open-points" data-id="${student.id}" data-kind="subtract">포인트 차감</button></div></div>`).join("")}</div>`;
+  const quickAmounts = [1, 5, 10, 20];
+  return `<h1 class="page-heading">포인트 관리</h1><p class="page-description">학생을 여러 명 선택하고 같은 포인트를 빠르게 지급하거나 차감하세요.</p><section class="card point-quick-panel"><div class="point-selection-heading"><strong>선택 학생 <span id="point-selected-count">${selectedPointStudentIds.size}</span>명</strong><div class="button-row"><button class="button secondary compact" data-action="select-all-point-students">전체 선택</button><button class="button secondary compact" data-action="clear-point-students">선택 해제</button></div></div><div class="point-quick-actions"><div><strong>빠른 지급</strong><div class="button-row">${quickAmounts.map((amount) => `<button class="button success compact" data-action="quick-teacher-points" data-amount="${amount}">+${amount}P</button>`).join("")}</div></div><div><strong>빠른 차감</strong><div class="button-row">${quickAmounts.map((amount) => `<button class="button danger compact" data-action="quick-teacher-points" data-amount="-${amount}">-${amount}P</button>`).join("")}</div></div><form id="point-bulk-form" class="point-direct-form"><label>직접 입력<input name="amount" type="number" min="1" step="1" value="1" required></label><div class="button-row"><button class="button success compact" type="submit" data-kind="add">지급</button><button class="button danger compact" type="submit" data-kind="subtract">차감</button></div></form></div></section><div class="point-student-grid">${data.students.map((student) => `<label class="point-student-card ${selectedPointStudentIds.has(student.id) ? "selected" : ""}"><input type="checkbox" data-action="toggle-point-student" data-id="${student.id}" ${selectedPointStudentIds.has(student.id) ? "checked" : ""}><span>${escapeHtml(student.name)}</span><strong>${student.points}P</strong></label>`).join("")}</div>`;
+}
+
+function applyTeacherPointChange(amount) {
+  if (!Number.isInteger(amount) || amount === 0) return;
+  const students = data.students.filter((student) => selectedPointStudentIds.has(student.id));
+  if (!students.length) { toast("포인트를 처리할 학생을 먼저 선택해 주세요."); return; }
+  if (amount < 0) {
+    const insufficient = students.filter((student) => student.points < Math.abs(amount));
+    if (insufficient.length) {
+      app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>포인트를 차감할 수 없습니다</h2><p><strong>${escapeHtml(insufficient.map((student) => student.name).join(", "))}</strong>의 포인트가 부족합니다.</p><p class="muted">선택한 학생 모두에게서 포인트를 차감하지 않았습니다.</p><div class="button-row"><button class="button secondary" type="button" data-action="close-modal">확인</button></div></section></div>`); return;
+    }
+  }
+  const source = amount > 0 ? "교사 직접 지급" : "교사 직접 차감";
+  students.forEach((student) => {
+    student.points += amount;
+    student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: source, source, date: new Date().toLocaleDateString("ko-KR") });
+  });
+  saveData(); render(); toast(`${students.length}명에게 ${amount > 0 ? "+" : ""}${amount}P를 반영했습니다.`);
 }
 
 function teacherCards() {
-  return `<h1 class="page-heading">카드 관리</h1><p class="page-description">위인 설명은 프로토타입용입니다. 실제 사용 전 선생님의 검토가 필요합니다.</p><div class="collection">${FIGURES.map((figure) => `<article class="figure-card rarity-${rarityClass(figure.rarity)}"><span class="pill">${figure.rarity}</span><h3>${figure.name}</h3><p class="muted">${figure.era}</p><small>${figure.achievement}</small></article>`).join("")}</div><section class="card" style="margin-top:24px"><h2>데모 설정</h2><p class="muted">모든 신청, 포인트, 카드, 관찰 기록을 처음 상태로 되돌립니다.</p><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
+  const cardSets = data.cardSets.filter((cardSet) => !cardSet.deleted); if (!cardSets.some((cardSet) => cardSet.id === teacherCardSetId)) teacherCardSetId = data.activeCardSetIds[0] || cardSets[0]?.id || "";
+  const selectedSet = cardSetById(teacherCardSetId) || cardSets[0]; const cards = selectedSet ? sortedCards(false, selectedSet.id) : [];
+  const setRows = cardSets.map((cardSet) => `<article class="card-set-item ${cardSet.id === teacherCardSetId ? "selected" : ""}"><button class="card-set-select" data-action="select-card-set" data-id="${cardSet.id}"><strong>${escapeHtml(cardSet.name)}</strong><small>${escapeHtml(cardSet.description || "설명 없음")}</small><span>${sortedCards(false, cardSet.id).length}명 · ${cardSet.active ? "사용 중" : "사용 중지"}</span></button><label class="card-set-draw-toggle"><input type="checkbox" data-action="toggle-card-set-selection" data-id="${cardSet.id}" ${data.activeCardSetIds.includes(cardSet.id) ? "checked" : ""} ${!cardSet.active ? "disabled" : ""}><span>카드 뽑기에 사용</span></label><div class="button-row"><button class="button secondary compact" data-action="edit-card-set" data-id="${cardSet.id}">이름 수정</button><button class="button secondary compact" data-action="duplicate-card-set" data-id="${cardSet.id}">복제</button><button class="button ${cardSet.active ? "danger" : "success"} compact" data-action="toggle-card-set" data-id="${cardSet.id}">${cardSet.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card-set" data-id="${cardSet.id}">삭제</button></div></article>`).join("");
+  const drawOptionRows = data.drawOptions.filter((option) => !option.deleted).map((option) => `<article class="draw-option-manage-card"><div class="teacher-card-top"><span class="pill ${option.active ? "success" : "danger"}">${option.active ? "사용 중" : "사용 중지"}</span><strong>${option.price}P</strong></div><h3>${escapeHtml(option.name)}</h3><div class="draw-option-rate-summary">${CARD_RARITIES.map((rarity) => `<span>${rarity} <strong>${drawRate(rarity, option.rates)}%</strong></span>`).join("")}</div><div class="button-row"><button class="button secondary compact" data-action="edit-draw-option" data-id="${option.id}">수정</button><button class="button ${option.active ? "danger" : "success"} compact" data-action="toggle-draw-option" data-id="${option.id}">${option.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-draw-option" data-id="${option.id}">삭제</button></div></article>`).join("");
+  let upgradeSettingInputs = CARD_UPGRADE_STEPS.map((step) => `<label><span>${step.from} → ${step.to}</span><span class="upgrade-setting-input"><input name="${step.key}" type="number" min="2" step="1" value="${data.cardUpgradeSettings[step.key]}" required><b>장</b></span></label>`).join("");
+  const abilitySettingInputs = CARD_RARITIES.map((rarity) => { const setting = cardAbilitySetting(rarity); const key = CARD_RATE_KEYS[rarity]; return `<label class="ability-setting-row"><strong>${rarity}</strong><span>보너스 <input name="${key}Percent" type="number" min="0" max="100" step="1" value="${setting.bonusPercent}" required> %</span><span>하루 최대 <input name="${key}Cap" type="number" min="0" step="1" value="${setting.dailyCap}" required> P</span></label>`; }).join("");
+  const abilitySettingsPanel = `<div class="ability-settings-panel"><div><h3>등급 능력 설정</h3><p class="muted">대표 카드의 역할·과제 포인트 보너스와 학생별 하루 한도입니다.</p></div><div class="ability-settings-grid">${abilitySettingInputs}</div></div>`;
+  upgradeSettingInputs += abilitySettingsPanel;
+  return `<div class="section-heading card-page-heading"><div><h1 class="page-heading">카드 관리</h1><p class="page-description">카드셋은 등장 인물을, 뽑기 옵션은 가격과 등급 확률을 결정합니다.</p></div><button class="button success" data-action="new-card-set">+ 새 카드셋 만들기</button></div><section class="management-section"><div class="section-heading"><h2>카드셋 관리</h2><span class="pill success">뽑기 사용 ${data.activeCardSetIds.length}개</span></div><div class="card-set-grid">${setRows}</div></section><section class="management-section"><div class="section-heading"><div><h2>뽑기 옵션 관리</h2><p class="muted">옵션마다 가격과 5개 등급 확률을 따로 설정하세요.</p></div><button class="button success" data-action="new-draw-option">+ 새 뽑기 옵션</button></div><div class="draw-option-manage-grid">${drawOptionRows || `<div class="empty">등록된 뽑기 옵션이 없습니다.</div>`}</div></section><section class="management-section"><div class="section-heading"><div><h2>업그레이드 설정</h2><p class="muted">각 단계에서 사용할 같은 등급 카드 수를 2장 이상으로 설정하세요.</p></div></div><form id="upgrade-settings-form"><div class="upgrade-settings-grid">${upgradeSettingInputs}</div><button class="button success" type="submit">업그레이드 설정 저장</button></form></section>${selectedSet ? `<section class="management-section"><div class="section-heading"><div><h2>${escapeHtml(selectedSet.name)} 인물 카드</h2><p class="muted">인물 정보 하나로 일반·희귀·영웅·전설·고대 5개 등급을 모두 사용합니다.</p></div><button class="button success" data-action="new-card" data-set-id="${selectedSet.id}">+ 새 인물 카드 추가</button></div><div class="teacher-card-grid">${cards.map((card) => `<article class="teacher-card-item"><div class="teacher-card-top"><span class="pill">5개 등급</span><span class="pill ${card.active ? "success" : "danger"}">${card.active ? "사용 중" : "사용 중지"}</span></div><h3>${escapeHtml(card.name)}</h3><p class="muted">${escapeHtml(card.era)}</p><small>${escapeHtml(card.achievement)}</small><div class="card-grade-list">${CARD_RARITIES.map((rarity) => `<span class="pill rarity-${rarityClass(rarity)}">${rarity}</span>`).join("")}</div><div class="button-row"><button class="button secondary compact" data-action="edit-card" data-id="${card.id}">수정</button><button class="button ${card.active ? "danger" : "success"} compact" data-action="toggle-card-active" data-id="${card.id}">${card.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card" data-id="${card.id}">삭제</button></div></article>`).join("") || `<div class="empty">이 카드셋에는 인물 카드가 없습니다.</div>`}</div></section>` : ""}<section class="card" style="margin-top:24px"><h2>데모 설정</h2><p class="muted">모든 신청, 포인트, 카드, 관찰 기록을 처음 상태로 되돌립니다.</p><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
+}
+
+function teacherCardsV2() {
+  const cardSets = data.cardSets.filter((cardSet) => !cardSet.deleted); if (!cardSets.some((cardSet) => cardSet.id === teacherCardSetId)) teacherCardSetId = data.activeCardSetIds[0] || cardSets[0]?.id || "";
+  const selectedSet = cardSetById(teacherCardSetId) || cardSets[0]; const cards = selectedSet ? sortedCards(false, selectedSet.id) : [];
+  const drawOptions = data.drawOptions.filter((option) => !option.deleted).map((option) => `<article class="draw-option-manage-card"><div class="teacher-card-top"><span class="pill ${option.active ? "success" : "danger"}">${option.active ? "사용 중" : "사용 중지"}</span><strong>${option.price}P</strong></div><h3>${escapeHtml(option.name)}</h3><div class="draw-option-rate-summary">${CARD_RARITIES.map((rarity) => `<span>${rarity} <strong>${drawRate(rarity, option.rates)}%</strong></span>`).join("")}</div><div class="button-row"><button class="button secondary compact" data-action="edit-draw-option" data-id="${option.id}">수정</button><button class="button ${option.active ? "danger" : "success"} compact" data-action="toggle-draw-option" data-id="${option.id}">${option.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-draw-option" data-id="${option.id}">삭제</button></div></article>`).join("");
+  const upgradeInputs = CARD_UPGRADE_STEPS.map((step) => `<label><span>${step.from} → ${step.to}</span><span class="upgrade-setting-input"><input name="${step.key}" type="number" min="2" step="1" value="${data.cardUpgradeSettings[step.key]}" required><b>장</b></span></label>`).join("");
+  const abilityInputs = CARD_RARITIES.map((rarity) => { const setting = cardAbilitySetting(rarity); return `<fieldset class="ability-rarity-card"><legend>${rarity}</legend>${CARD_ABILITIES.map((ability) => { const abilitySetting = setting.abilities[ability.id]; return `<label><strong>${ability.icon} ${ability.name}</strong><span>${ability.description} + <input name="${CARD_RATE_KEYS[rarity]}-${ability.id}" type="number" min="0" max="100" step="1" value="${ability.id === "responsibility" ? abilitySetting.rolePercent : abilitySetting.assignmentPercent}" required> %</span></label>`; }).join("")}<label class="daily-cap-row"><strong>하루 최대 보너스</strong><span>+ <input name="${CARD_RATE_KEYS[rarity]}-dailyCap" type="number" min="0" step="1" value="${setting.dailyCap}" required> P</span></label></fieldset>`; }).join("");
+  const setRows = cardSets.map((cardSet) => `<article class="card-set-item ${cardSet.id === teacherCardSetId ? "selected" : ""}"><button class="card-set-select" data-action="select-card-set" data-id="${cardSet.id}"><strong>${escapeHtml(cardSet.name)}</strong><small>${escapeHtml(cardSet.description || "설명 없음")}</small><span>${sortedCards(false, cardSet.id).length}명 · ${cardSet.active ? "사용 중" : "사용 중지"}</span></button><label class="card-set-draw-toggle"><input type="checkbox" data-action="toggle-card-set-selection" data-id="${cardSet.id}" ${data.activeCardSetIds.includes(cardSet.id) ? "checked" : ""} ${!cardSet.active ? "disabled" : ""}><span>카드 뽑기에 사용</span></label><div class="button-row"><button class="button secondary compact" data-action="edit-card-set" data-id="${cardSet.id}">이름 수정</button><button class="button secondary compact" data-action="duplicate-card-set" data-id="${cardSet.id}">복제</button><button class="button ${cardSet.active ? "danger" : "success"} compact" data-action="toggle-card-set" data-id="${cardSet.id}">${cardSet.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card-set" data-id="${cardSet.id}">삭제</button></div></article>`).join("");
+  const personCards = cards.map((card) => `<article class="teacher-card-item"><div class="teacher-card-top"><span class="pill">5개 등급·3개 능력</span><span class="pill ${card.active ? "success" : "danger"}">${card.active ? "사용 중" : "사용 중지"}</span></div><h3>${escapeHtml(card.name)}</h3><p class="muted">${escapeHtml(card.era)}</p><small>${escapeHtml(card.achievement)}</small><div class="button-row"><button class="button secondary compact" data-action="edit-card" data-id="${card.id}">수정</button><button class="button ${card.active ? "danger" : "success"} compact" data-action="toggle-card-active" data-id="${card.id}">${card.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card" data-id="${card.id}">삭제</button></div></article>`).join("");
+  return `<div class="section-heading card-page-heading"><div><h1 class="page-heading">카드 관리</h1><p class="page-description">전체 규칙을 정한 뒤 카드셋과 인물 카드를 관리하세요.</p></div></div><section class="management-section"><div class="section-heading"><div><h2>1. 뽑기 옵션·가격·등급 확률</h2></div><button class="button success" data-action="new-draw-option">+ 새 뽑기 옵션</button></div><div class="draw-option-manage-grid">${drawOptions}</div></section><section class="management-section"><h2>2. 카드 업그레이드 설정</h2><form id="upgrade-settings-form"><div class="upgrade-settings-grid">${upgradeInputs}</div><button class="button success" type="submit">업그레이드 설정 저장</button></form></section><section class="management-section"><h2>3. 특수능력 설정</h2><p class="muted">등급별 능력 보너스와 하루 최대 보너스를 설정하세요.</p><form id="card-ability-settings-form"><div class="special-ability-settings">${abilityInputs}</div><button class="button success" type="submit">특수능력 설정 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>4. 카드셋 관리</h2><span class="pill success">뽑기 사용 ${data.activeCardSetIds.length}개</span></div><button class="button success" data-action="new-card-set">+ 새 카드셋 만들기</button></div><div class="card-set-grid">${setRows}</div></section>${selectedSet ? `<section class="management-section"><div class="section-heading"><div><h2>5. ${escapeHtml(selectedSet.name)} 인물 카드</h2><p class="muted">각 인물은 5개 등급과 3개 특수능력을 가질 수 있습니다.</p></div><button class="button success" data-action="new-card" data-set-id="${selectedSet.id}">+ 새 인물 카드 추가</button></div><div class="teacher-card-grid">${personCards || `<div class="empty">이 카드셋에는 인물 카드가 없습니다.</div>`}</div></section>` : ""}<section class="card" style="margin-top:24px"><h2>데모 설정</h2><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
+}
+
+function teacherRanking() {
+  const visibility = RANKING_TYPES.map((ranking) => `<label class="ranking-visibility-option"><input type="checkbox" data-action="toggle-ranking-visibility" data-ranking="${ranking.id}" ${data.rankingVisibility[ranking.id] ? "checked" : ""}><span>${ranking.icon} ${ranking.title}</span></label>`).join("");
+  const cards = RANKING_TYPES.map((ranking) => `<article class="card ranking-card teacher-ranking-card"><div class="ranking-card-title"><span>${ranking.icon}</span><h2>${ranking.title}</h2></div><div class="ranking-list">${rankedStudents(ranking.id).map((item) => rankingRow(item, ranking.unit)).join("")}</div></article>`).join("");
+  return `<div class="section-heading"><div><h1 class="page-heading">학급 활동 랭킹</h1><p class="page-description">기존 활동 기록을 기준으로 자동 계산합니다.</p></div>${rankingPeriodButtons()}</div><section class="management-section"><div class="section-heading"><div><h2>학생 화면 공개 설정</h2><p class="muted">체크한 랭킹만 학생에게 보입니다.</p></div></div><div class="ranking-visibility-grid">${visibility}</div></section><div class="ranking-grid teacher-ranking-grid">${cards}</div>`;
 }
 
 function renderStudent() {
@@ -342,7 +608,7 @@ function renderStudent() {
   app.innerHTML = shell((views[session.view] || studentHome)());
 }
 function renderTeacher() {
-  const views = { dashboard: teacherDashboard, students: teacherStudents, roles: teacherRoles, assignments: teacherAssignments, observations: teacherObservations, points: teacherPoints, cards: teacherCards };
+  const views = { dashboard: teacherDashboard, students: teacherStudents, roles: teacherRoles, assignments: teacherAssignments, observations: teacherObservations, points: teacherPoints, cards: teacherCardsV2, ranking: teacherRanking };
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
 function render() { session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
@@ -354,7 +620,7 @@ function applyRole(roleId) {
   if (active.length >= 2) return toast("하루에 역할은 2개까지 신청할 수 있어요.");
   if (roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
   if (roleApplicants.some((item) => item.studentId === session.studentId)) return;
-  data.roleApplications.push({ id: crypto.randomUUID(), studentId: session.studentId, roleId, status: "waiting" }); saveData(); render(); toast("역할 신청이 완료됐어요!");
+  data.roleApplications.push({ id: crypto.randomUUID(), studentId: session.studentId, roleId, status: "waiting", appliedAt: new Date().toISOString() }); saveData(); render(); toast("역할 신청이 완료됐어요!");
 }
 
 function openStudentCancelModal(applicationId) {
@@ -376,11 +642,11 @@ function completeRole(id) {
   if (!application || application.status !== "waiting") return;
   const student = studentById(application.studentId); const role = roleById(application.roleId);
   if (!student || !role) return;
-  application.status = "completed";
-  application.awardedPoints = role.points;
-  student.points += role.points;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: role.points, reason: `${role.name} 완료`, date: new Date().toLocaleDateString("ko-KR") });
-  saveData(); render(); toast(`${student.name}에게 ${role.points}P를 지급했습니다.`);
+  const baseAmount = role.points; const cardAbilityAward = cardBonusAward(student, baseAmount, "1인1역", role.id); const bonusAmount = cardAbilityAward.amount || 0;
+  application.status = "completed"; application.completedAt = new Date().toISOString(); application.awardedBasePoints = baseAmount; application.awardedBonusPoints = bonusAmount; application.cardAbilityAward = cardAbilityAward; application.awardedPoints = baseAmount + bonusAmount;
+  student.points += baseAmount + bonusAmount;
+  student.pointHistory.push({ id: crypto.randomUUID(), amount: baseAmount, reason: `${role.name} 완료`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+  saveData(); render(); toast(`${student.name}에게 ${baseAmount + bonusAmount}P를 지급했습니다.${bonusAmount ? ` (카드 보너스 +${bonusAmount}P)` : ""}`);
 }
 
 function undoCompleteRole(id) {
@@ -388,7 +654,7 @@ function undoCompleteRole(id) {
   if (!application || application.status !== "completed") return;
   const student = studentById(application.studentId); const role = roleById(application.roleId);
   if (!student || !role) return;
-  const pointsToRecover = application.awardedPoints ?? role.points;
+  const baseToRecover = application.awardedBasePoints ?? application.awardedPoints ?? role.points; const bonusToRecover = application.awardedBonusPoints ?? 0; const pointsToRecover = baseToRecover + bonusToRecover;
 
   if (!confirm("이 역할의 완료 처리를 취소하시겠습니까?\n지급된 포인트도 함께 회수됩니다.")) return;
   if (application.status !== "completed") return;
@@ -398,33 +664,74 @@ function undoCompleteRole(id) {
   }
 
   student.points -= pointsToRecover;
-  application.status = "waiting";
-  application.awardedPoints = 0;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: -pointsToRecover, reason: `${role.name} 완료 취소`, date: new Date().toLocaleDateString("ko-KR") });
+  application.status = "waiting"; application.completedAt = null;
+  application.awardedPoints = 0; application.awardedBasePoints = 0; application.awardedBonusPoints = 0;
+  student.pointHistory.push({ id: crypto.randomUUID(), amount: -baseToRecover, reason: `${role.name} 완료 취소`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+  reverseCardBonus(student, application.cardAbilityAward, `${role.name} 완료 카드 보너스 취소`); application.cardAbilityAward = null;
   saveData(); render(); toast(`${student.name}의 역할 완료를 취소하고 ${pointsToRecover}P를 회수했습니다.`);
 }
 
-function pickRarity() {
+function pickRarity(rates) {
   const value = Math.random() * 100; let total = 0;
-  for (const [rarity, rate] of Object.entries(CARD_RATES)) { total += rate; if (value < total) return rarity; }
+  for (const rarity of CARD_RARITIES) { total += drawRate(rarity, rates); if (value < total) return rarity; }
   return "일반";
 }
-function drawCard() {
-  const student = currentStudent(); if (student.points < 50) return;
-  const rarity = pickRarity(); const pool = FIGURES.filter((figure) => figure.rarity === rarity); const figure = pool[Math.floor(Math.random() * pool.length)];
-  student.points -= 50; student.cards[figure.id] = (student.cards[figure.id] || 0) + 1;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: -50, reason: `${figure.name} 카드 뽑기`, date: new Date().toLocaleDateString("ko-KR") }); saveData();
+function drawCard(optionId) {
+  const student = currentStudent(); const option = data.drawOptions.find((item) => item.id === optionId && item.active && !item.deleted); if (!option || student.points < option.price) return;
+  const activeCards = data.cards.filter((card) => data.activeCardSetIds.includes(card.cardSetId) && cardSetById(card.cardSetId)?.active && card.active && !card.deleted); if (!activeCards.length) { toast("선택한 카드셋에서 뽑을 수 있는 카드가 없습니다."); return; }
+  const rarity = pickRarity(option.rates); const figure = activeCards[Math.floor(Math.random() * activeCards.length)]; const abilityId = randomAbilityId(); const ability = cardAbilityById(abilityId);
+  student.points -= option.price; if (!student.cards[figure.id]) student.cards[figure.id] = {}; if (!student.cards[figure.id][rarity]) student.cards[figure.id][rarity] = Object.fromEntries(CARD_ABILITIES.map((item) => [item.id, 0])); student.cards[figure.id][rarity][abilityId] = (student.cards[figure.id][rarity][abilityId] || 0) + 1;
+  student.cardAcquisitionHistory.push({ id: crypto.randomUUID(), cardId: figure.id, rarity, abilityId, source: "카드 뽑기", createdAt: new Date().toISOString() });
+  student.pointHistory.push({ id: crypto.randomUUID(), amount: -option.price, reason: `${option.name} · ${figure.name} 카드 뽑기`, source: "카드 뽑기", drawOptionId: option.id, drawOptionName: option.name, drawPrice: option.price, date: new Date().toLocaleDateString("ko-KR") }); saveData();
   const card = document.querySelector("#draw-card"); const result = document.querySelector("#draw-result");
-  result.className = `draw-face draw-front rarity-${rarityClass(figure.rarity)}`;
-  result.innerHTML = `<div><span class="pill">${figure.rarity}</span><h3>${figure.name}</h3><p>${figure.era}</p><small>${figure.achievement}</small></div>`;
+  result.className = `draw-face draw-front rarity-${rarityClass(rarity)}`;
+  result.innerHTML = `<div><span class="pill">${rarity}</span><h3>${figure.name}</h3><p>${figure.era}</p><strong>${ability.icon} ${ability.name}</strong><small>${abilitySummary(rarity, abilityId).split(" · ")[1]}</small></div>`;
   requestAnimationFrame(() => card.classList.add("revealed"));
-  const drawButton = document.querySelector('[data-action="draw-card"]'); drawButton.disabled = student.points < 50; drawButton.textContent = student.points < 50 ? "포인트가 부족합니다" : "50P로 한 장 더 뽑기";
-  toast(`${figure.rarity} 카드! ${figure.name}을(를) 만났어요.`);
+  document.querySelector("#draw-current-points").textContent = `${student.points}P`;
+  const summaryPoints = document.querySelector(".summary-item strong"); if (summaryPoints) summaryPoints.textContent = `${student.points}P`;
+  document.querySelectorAll('[data-action="draw-option"]').forEach((button) => { const item = data.drawOptions.find((candidate) => candidate.id === button.dataset.id); button.disabled = !item || student.points < item.price; button.textContent = button.disabled ? "포인트 부족" : `${item.price}P로 뽑기`; });
+  toast(`${option.name}: ${figure.name} ${rarity} · ${ability.name} 카드를 획득했어요.`);
 }
 
-function openPointModal(studentId, kind) {
-  const student = studentById(studentId); const subtract = kind === "subtract";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="point-form" class="modal-card form" data-id="${studentId}" data-kind="${kind}"><h2>${student.name} · 포인트 ${subtract ? "차감" : "지급"}</h2><label>포인트<input name="amount" type="number" min="1" value="10" required></label><label>간단한 사유<input name="reason" required placeholder="예: 친구 도와주기"></label><div class="button-row"><button class="button ${subtract ? "danger" : "success"}" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+function openCardModal(cardId = "", preferredSetId = "") {
+  const card = data.cards.find((item) => item.id === cardId);
+  const selectedSetId = card?.cardSetId || preferredSetId || teacherCardSetId || data.activeCardSetIds[0];
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="card-form" class="modal-card form" data-id="${cardId}"><h2>${card ? "인물 카드 수정" : "새 인물 카드 추가"}</h2><label>카드셋<select name="cardSetId">${data.cardSets.filter((cardSet) => !cardSet.deleted).map((cardSet) => `<option value="${cardSet.id}" ${cardSet.id === selectedSetId ? "selected" : ""}>${escapeHtml(cardSet.name)}</option>`).join("")}</select></label><label>인물 이름<input name="name" maxlength="40" required value="${card ? escapeHtml(card.name) : ""}" placeholder="예: 장영실"></label><label>시대<input name="era" maxlength="40" required value="${card ? escapeHtml(card.era) : ""}" placeholder="예: 조선"></label><label>한 줄 설명<input name="achievement" maxlength="160" required value="${card ? escapeHtml(card.achievement) : ""}" placeholder="예: 과학 기술 발전에 기여한 발명가"></label><p class="form-help">인물 정보를 한 번만 등록하면 일반·희귀·영웅·전설·고대 등급을 모두 사용할 수 있습니다.</p><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+
+function openCardSetModal(cardSetId = "") {
+  const cardSet = cardSetById(cardSetId);
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="card-set-form" class="modal-card form" data-id="${cardSetId}"><h2>${cardSet ? "카드셋 수정" : "새 카드셋 만들기"}</h2><label>카드셋 이름<input name="name" maxlength="50" required value="${cardSet ? escapeHtml(cardSet.name) : ""}" placeholder="예: 조선 시대 인물"></label><label>설명 (선택)<textarea name="description" maxlength="200" placeholder="카드셋을 간단히 설명해 주세요.">${cardSet ? escapeHtml(cardSet.description) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+
+function openDrawOptionModal(optionId = "") {
+  const option = data.drawOptions.find((item) => item.id === optionId); const rates = option?.rates || DEFAULT_DRAW_RATES;
+  const rateInputs = CARD_RARITIES.map((rarity) => `<label><span>${rarity}</span><span class="rate-input-wrap"><input name="${CARD_RATE_KEYS[rarity]}" type="number" min="0" max="100" step="1" value="${drawRate(rarity, rates)}" required><b>%</b></span></label>`).join("");
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="draw-option-form" class="modal-card form" data-id="${optionId}"><h2>${option ? "뽑기 옵션 수정" : "새 뽑기 옵션"}</h2><label>옵션 이름<input name="name" maxlength="40" required value="${option ? escapeHtml(option.name) : ""}" placeholder="예: 고급 뽑기"></label><label>1회 가격<input name="price" type="number" min="0" step="1" required value="${option?.price ?? 50}"></label><fieldset class="draw-option-rate-fieldset"><legend>등급별 확률</legend><div class="draw-rate-grid">${rateInputs}</div></fieldset><div class="draw-rate-total-line"><strong>합계: <span id="draw-rate-total">100</span>%</strong></div><p id="draw-rate-error" class="form-error" hidden>등급별 확률의 합계가 100%가 되어야 합니다.</p><div class="button-row"><button id="draw-rate-save" class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+
+function openDeleteDrawOptionModal(optionId) {
+  const option = data.drawOptions.find((item) => item.id === optionId && !item.deleted); if (!option) return;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>뽑기 옵션 삭제</h2><p><strong>${escapeHtml(option.name)}</strong> 옵션을 삭제하시겠습니까?</p><p class="muted">기존 포인트 거래 기록은 그대로 유지됩니다.</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-draw-option" data-id="${option.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
+}
+
+function openCardUpgradeModal(cardId, rarity) {
+  const student = currentStudent(); const card = data.cards.find((item) => item.id === cardId); const step = upgradeStepFrom(rarity); const required = upgradeRequired(rarity); if (!student || !card || !step || rarityInventoryCount(student, cardId, rarity) < required) return;
+  const materialRows = CARD_ABILITIES.map((ability) => { const count = Number(abilityInventory(student, cardId, rarity)[ability.id]) || 0; return count ? `<label class="upgrade-material-row"><span>${ability.icon} ${ability.name} <b>×${count}</b></span><input name="material-${ability.id}" type="number" min="0" max="${count}" step="1" value="0"></label>` : ""; }).join("");
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>카드 업그레이드</h2><p><strong>${escapeHtml(card.name)} ${rarity}</strong> 카드 중 사용할 재료를 정확히 ${required}장 선택해 주세요.</p><div class="upgrade-material-list">${materialRows}</div><p class="muted">결과 카드의 특수능력은 새로 무작위 결정됩니다.</p><div class="button-row"><button class="button success" type="button" data-action="confirm-card-upgrade" data-card-id="${card.id}" data-rarity="${rarity}">${step.to} 카드로 업그레이드</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
+}
+
+function openDeleteCardSetModal(cardSetId) {
+  const cardSet = cardSetById(cardSetId); if (!cardSet || cardSet.deleted) return;
+  const setCards = sortedCards(true, cardSet.id); const ownerCount = data.students.filter((student) => setCards.some((card) => cardInventoryCount(student, card.id) > 0)).length;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>카드셋 삭제</h2><p><strong>${escapeHtml(cardSet.name)}</strong> 카드셋을 삭제하시겠습니까?</p>${setCards.length ? `<p>이 카드셋에는 카드 ${setCards.length}장이 있습니다.</p>` : ""}${ownerCount ? `<p><strong>현재 ${ownerCount}명의 학생이 이 카드셋의 카드를 보유하고 있습니다.</strong><br>삭제해도 학생 도감의 보유 기록은 유지됩니다.</p>` : ""}<p class="muted">안전을 위해 실제 보유 데이터는 지우지 않고 카드셋을 사용 중지·숨김 처리합니다.</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-card-set" data-id="${cardSet.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
+}
+
+function openDeleteCardModal(cardId) {
+  const card = data.cards.find((item) => item.id === cardId && !item.deleted); if (!card) return;
+  const ownerCount = data.students.filter((student) => cardInventoryCount(student, card.id) > 0).length;
+  const ownerWarning = ownerCount ? `<p><strong>현재 ${ownerCount}명의 학생이 이 카드를 보유하고 있습니다.</strong><br>삭제해도 학생 도감의 보유 카드는 안전하게 유지됩니다.</p>` : "";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>카드 삭제</h2><p>이 카드를 삭제하시겠습니까?</p>${ownerWarning}<p class="muted">삭제된 카드는 새 카드 뽑기와 선생님 목록에서 제외됩니다.</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-card" data-id="${card.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
 }
 
 function observationQuickSectionHtml(category, selected = [], managing = false) {
@@ -476,18 +783,20 @@ function changeAssignmentStudentStatus(assignment, studentIndex, nextStatus) {
       alert(`${student.name}의 현재 포인트가 ${student.points}P라서 ${award.amount}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
       return false;
     }
+    const baseAmount = award.baseAmount ?? award.amount; const bonusAmount = award.bonusAmount ?? 0;
     student.points -= award.amount;
-    student.pointHistory.push({ id: crypto.randomUUID(), amount: -award.amount, reason: `${assignment.title} 제출 완료 취소`, date: new Date().toLocaleDateString("ko-KR") });
+    student.pointHistory.push({ id: crypto.randomUUID(), amount: -baseAmount, reason: `${assignment.title} 제출 완료 취소`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+    reverseCardBonus(student, award.cardAbilityAward, `${assignment.title} 제출 완료 카드 보너스 취소`);
     assignment.pointAwards[student.id] = { ...award, awarded: false, revokedAt: new Date().toISOString() };
   }
   assignment.statuses[studentIndex] = nextStatus;
   if (nextStatus === "submitted" && !assignmentAward(assignment, student.id).awarded) {
-    const amount = assignment.points;
-    if (amount > 0) {
+    const baseAmount = assignment.points; const cardAbilityAward = cardBonusAward(student, baseAmount, "과제", assignment.id); const bonusAmount = cardAbilityAward.amount || 0; const amount = baseAmount + bonusAmount;
+    if (baseAmount > 0) {
       student.points += amount;
-      student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: `${assignment.title} 제출 완료`, date: new Date().toLocaleDateString("ko-KR") });
+      student.pointHistory.push({ id: crypto.randomUUID(), amount: baseAmount, reason: `${assignment.title} 제출 완료`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
     }
-    assignment.pointAwards[student.id] = { awarded: true, amount, awardedAt: new Date().toISOString(), revokedAt: null };
+    assignment.pointAwards[student.id] = { awarded: true, amount, baseAmount, bonusAmount, cardAbilityAward, awardedAt: new Date().toISOString(), revokedAt: null };
   }
   refreshAssignmentCompletion(assignment);
   return true;
@@ -586,13 +895,22 @@ app.addEventListener("click", (event) => {
   if (action === "enter-teacher") { session = { mode: "teacher", studentId: null, view: "dashboard" }; return render(); }
   if (action === "logout") { session = { mode: "welcome", studentId: null, view: "home" }; return render(); }
   if (action === "navigate") { session.view = target.dataset.view; return render(); }
+  if (action === "select-dashboard-date") { dashboardSelectedDate = target.dataset.date; return render(); }
+  if (action === "move-dashboard-month") { const [year, month] = dashboardMonth.split("-").map(Number); const moved = new Date(year, month - 1 + (target.dataset.direction === "prev" ? -1 : 1), 1); dashboardMonth = `${moved.getFullYear()}-${String(moved.getMonth() + 1).padStart(2, "0")}`; return render(); }
+  if (action === "dashboard-today") { dashboardSelectedDate = todayString(); dashboardMonth = dashboardSelectedDate.slice(0, 7); return render(); }
+  if (action === "edit-weekly-timetable") return openWeeklyTimetableModal();
+  if (action === "edit-date-timetable") return openDateTimetableModal();
+  if (action === "edit-daily-note") return openDailyNoteModal();
+  if (action === "reset-date-timetable") { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>기본 시간표로 되돌리기</h2><p>${selectedDateTitle(dashboardSelectedDate)}의 예외 시간표를 삭제하고 기본 시간표를 사용하시겠습니까?</p><div class="button-row"><button class="button danger" data-action="confirm-reset-date-timetable" data-date="${dashboardSelectedDate}">되돌리기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
+  if (action === "confirm-reset-date-timetable") { delete data.dateTimetableOverrides[target.dataset.date]; saveData(); render(); toast("기본 시간표로 되돌렸습니다."); return; }
+  if (action === "set-ranking-period") { rankingPeriod = target.dataset.period === "all" ? "all" : "week"; return render(); }
   if (action === "apply-role") return applyRole(target.dataset.id);
   if (action === "open-student-cancel") return openStudentCancelModal(target.dataset.id);
   if (action === "confirm-student-cancel") return cancelOwnRole(target.dataset.id);
   if (action === "complete-role") return completeRole(target.dataset.id);
   if (action === "undo-complete") return undoCompleteRole(target.dataset.id);
   if (action === "cancel-role") { const item = data.roleApplications.find((entry) => entry.id === target.dataset.id); if (item && item.status === "waiting") { item.status = "cancelled"; saveData(); render(); toast("역할 신청을 취소했습니다."); } return; }
-  if (action === "draw-card") return drawCard();
+  if (action === "draw-option") return drawCard(target.dataset.id);
   if (action === "open-assignment-request") return openAssignmentRequestModal(target.dataset.id);
   if (action === "confirm-assignment-request") return requestAssignmentReview(target.dataset.id);
   if (action === "new-assignment") return openAssignmentModal();
@@ -635,7 +953,82 @@ app.addEventListener("click", (event) => {
     data.assignments = data.assignments.filter((assignment) => assignment.id !== target.dataset.id); delete assignmentSelections[target.dataset.id];
     saveData(); render(); toast("과제와 제출 기록을 삭제했습니다."); return;
   }
-  if (action === "open-points") return openPointModal(target.dataset.id, target.dataset.kind);
+  if (action === "toggle-point-student") {
+    target.checked ? selectedPointStudentIds.add(target.dataset.id) : selectedPointStudentIds.delete(target.dataset.id);
+    target.closest(".point-student-card")?.classList.toggle("selected", target.checked);
+    const count = document.querySelector("#point-selected-count"); if (count) count.textContent = selectedPointStudentIds.size; return;
+  }
+  if (action === "select-all-point-students") { data.students.forEach((student) => selectedPointStudentIds.add(student.id)); render(); return; }
+  if (action === "clear-point-students") { selectedPointStudentIds.clear(); render(); return; }
+  if (action === "quick-teacher-points") return applyTeacherPointChange(Number(target.dataset.amount));
+  if (action === "new-card") return openCardModal("", target.dataset.setId);
+  if (action === "edit-card") return openCardModal(target.dataset.id);
+  if (action === "new-draw-option") return openDrawOptionModal();
+  if (action === "edit-draw-option") return openDrawOptionModal(target.dataset.id);
+  if (action === "toggle-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id && !item.deleted); if (!option) return; option.active = !option.active; saveData(); render(); toast(option.active ? "뽑기 옵션을 다시 사용합니다." : "뽑기 옵션을 사용 중지했습니다."); return; }
+  if (action === "ask-delete-draw-option") return openDeleteDrawOptionModal(target.dataset.id);
+  if (action === "confirm-delete-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id); if (!option) return; option.active = false; option.deleted = true; saveData(); render(); toast("뽑기 옵션을 삭제했습니다."); return; }
+  if (action === "ask-upgrade-card") return openCardUpgradeModal(target.dataset.cardId, target.dataset.rarity);
+  if (action === "equip-representative-card") {
+    const student = currentStudent(); const card = data.cards.find((item) => item.id === target.dataset.cardId); const rarity = target.dataset.rarity; const abilityId = target.dataset.abilityId;
+    if (!student || !card || !CARD_RARITIES.includes(rarity) || Number(abilityInventory(student, card.id, rarity)[abilityId]) < 1) { toast("보유한 카드만 대표 카드로 장착할 수 있습니다."); return; }
+    student.representativeCard = { cardId: card.id, rarity, abilityId }; saveData(); render(); toast(`${card.name} ${rarity} · ${cardAbilityById(abilityId).name} 카드를 대표 카드로 장착했습니다.`); return;
+  }
+  if (action === "confirm-card-upgrade") {
+    const student = currentStudent(); const card = data.cards.find((item) => item.id === target.dataset.cardId); const rarity = target.dataset.rarity; const step = upgradeStepFrom(rarity); const required = upgradeRequired(rarity); if (!student || !card || !step || !Number.isInteger(required)) return;
+    const inventory = abilityInventory(student, card.id, rarity); const materials = Object.fromEntries(CARD_ABILITIES.map((ability) => [ability.id, Number(target.closest(".modal")?.querySelector(`[name="material-${ability.id}"]`)?.value) || 0])); const selectedCount = Object.values(materials).reduce((sum, count) => sum + count, 0);
+    if (selectedCount !== required || CARD_ABILITIES.some((ability) => !Number.isInteger(materials[ability.id]) || materials[ability.id] < 0 || materials[ability.id] > (Number(inventory[ability.id]) || 0))) { toast(`업그레이드 재료를 정확히 ${required}장 선택해 주세요.`); return; }
+    const equippedMaterial = student.representativeCard?.cardId === card.id && student.representativeCard?.rarity === rarity && materials[student.representativeCard?.abilityId] > 0;
+    if (equippedMaterial && !confirm("현재 대표 카드로 사용 중인 카드입니다.\n업그레이드 재료로 사용하시겠습니까?")) return;
+    CARD_ABILITIES.forEach((ability) => { inventory[ability.id] -= materials[ability.id]; }); const newAbilityId = randomAbilityId(); if (!cardInventory(student, card.id)[step.to]) cardInventory(student, card.id)[step.to] = Object.fromEntries(CARD_ABILITIES.map((ability) => [ability.id, 0])); cardInventory(student, card.id)[step.to][newAbilityId] += 1;
+    if (student.representativeCard?.cardId === card.id && student.representativeCard?.rarity === rarity && Number(inventory[student.representativeCard.abilityId]) < 1) student.representativeCard = null;
+    student.cardUpgradeHistory.push({ id: crypto.randomUUID(), studentId: student.id, cardId: card.id, cardName: card.name, fromRarity: rarity, toRarity: step.to, usedCount: required, materials, resultAbilityId: newAbilityId, resultAbilityName: cardAbilityById(newAbilityId).name, createdAt: new Date().toISOString() });
+    student.cardAcquisitionHistory.push({ id: crypto.randomUUID(), cardId: card.id, rarity: step.to, abilityId: newAbilityId, source: "카드 업그레이드", createdAt: new Date().toISOString() });
+    saveData(); render(); toast(`${card.name} ${step.to} · ${cardAbilityById(newAbilityId).name} 카드를 획득했습니다.`); return;
+  }
+  if (action === "new-card-set") return openCardSetModal();
+  if (action === "edit-card-set") return openCardSetModal(target.dataset.id);
+  if (action === "select-card-set") { teacherCardSetId = target.dataset.id; render(); return; }
+  if (action === "toggle-card-set-selection") {
+    const cardSet = cardSetById(target.dataset.id); if (!cardSet?.active || cardSet.deleted) return;
+    if (target.checked) data.activeCardSetIds.push(cardSet.id);
+    else if (data.activeCardSetIds.length === 1 && data.activeCardSetIds.includes(cardSet.id)) { render(); toast("카드 뽑기에 사용할 카드셋이 없습니다."); return; }
+    else data.activeCardSetIds = data.activeCardSetIds.filter((id) => id !== cardSet.id);
+    normalizeActiveCardSets(); saveData(); render(); return;
+  }
+  if (action === "toggle-card-set") {
+    const cardSet = cardSetById(target.dataset.id); if (!cardSet || cardSet.deleted) return;
+    if (cardSet.active && data.activeCardSetIds.includes(cardSet.id) && data.activeCardSetIds.length === 1) { toast("카드 뽑기에 사용할 카드셋이 없습니다."); return; }
+    cardSet.active = !cardSet.active; if (!cardSet.active) data.activeCardSetIds = data.activeCardSetIds.filter((id) => id !== cardSet.id); normalizeActiveCardSets(); saveData(); render(); toast(cardSet.active ? "카드셋을 다시 사용합니다." : "카드셋을 사용 중지했습니다."); return;
+  }
+  if (action === "duplicate-card-set") {
+    const sourceSet = cardSetById(target.dataset.id); if (!sourceSet || sourceSet.deleted) return;
+    const newSetId = crypto.randomUUID(); const copiedCards = sortedCards(false, sourceSet.id).map((card, index) => ({ ...structuredClone(card), id: crypto.randomUUID(), cardSetId: newSetId, order: index, active: true, deleted: false }));
+    data.cardSets.push({ id: newSetId, name: `${sourceSet.name} 복사본`, description: sourceSet.description, createdAt: new Date().toISOString(), active: true, deleted: false });
+    data.cards.push(...copiedCards); teacherCardSetId = newSetId; saveData(); render(); toast("카드셋과 소속 카드를 복제했습니다."); return;
+  }
+  if (action === "ask-delete-card-set") return openDeleteCardSetModal(target.dataset.id);
+  if (action === "confirm-delete-card-set") {
+    const cardSet = cardSetById(target.dataset.id); if (!cardSet) return;
+    if (data.activeCardSetIds.includes(cardSet.id) && data.activeCardSetIds.length === 1) { target.closest(".modal")?.remove(); toast("카드 뽑기에 사용할 카드셋이 없습니다."); return; }
+    cardSet.active = false; cardSet.deleted = true; data.cards.filter((card) => card.cardSetId === cardSet.id).forEach((card) => { card.active = false; });
+    data.activeCardSetIds = data.activeCardSetIds.filter((id) => id !== cardSet.id); normalizeActiveCardSets(); teacherCardSetId = data.activeCardSetIds[0] || data.cardSets.find((item) => !item.deleted)?.id || ""; saveData(); render(); toast("카드셋을 안전하게 삭제 처리했습니다."); return;
+  }
+  if (action === "toggle-card-active") {
+    const card = data.cards.find((item) => item.id === target.dataset.id && !item.deleted); if (!card) return;
+    card.active = !card.active; saveData(); render(); toast(card.active ? "카드를 다시 사용합니다." : "카드를 뽑기에서 제외했습니다."); return;
+  }
+  if (action === "move-card") {
+    const movedCard = data.cards.find((card) => card.id === target.dataset.id); if (!movedCard) return; const cards = sortedCards(false, movedCard.cardSetId); const index = cards.findIndex((card) => card.id === target.dataset.id); const nextIndex = index + (target.dataset.direction === "up" ? -1 : 1);
+    if (index < 0 || nextIndex < 0 || nextIndex >= cards.length) return;
+    [cards[index].order, cards[nextIndex].order] = [cards[nextIndex].order, cards[index].order]; saveData(); render(); return;
+  }
+  if (action === "ask-delete-card") return openDeleteCardModal(target.dataset.id);
+  if (action === "confirm-delete-card") {
+    const card = data.cards.find((item) => item.id === target.dataset.id); if (!card) return;
+    card.active = false; card.deleted = true; saveData(); render(); toast("카드를 안전하게 삭제 처리했습니다."); return;
+  }
+  if (action === "filter-card-collection") { collectionCardSetFilter = target.dataset.id; render(); return; }
   if (action === "new-observation") return openObservationModal();
   if (action === "edit-observation") return openObservationModal(target.dataset.id);
   if (action === "toggle-observation-quick") { target.classList.toggle("selected"); target.setAttribute("aria-pressed", String(target.classList.contains("selected"))); return; }
@@ -704,27 +1097,52 @@ app.addEventListener("click", (event) => {
     saveData(); render(); toast("템플릿을 삭제했습니다."); return;
   }
   if (action === "close-modal") { target.closest(".modal")?.remove(); return; }
-  if (action === "reset-demo") { if (confirm("모든 데모 데이터를 처음 상태로 되돌릴까요?")) { data = createDemoData(); saveData(); render(); toast("데모 데이터를 초기화했습니다."); } }
+  if (action === "reset-demo") { if (confirm("모든 데모 데이터를 처음 상태로 되돌릴까요?")) { data = createDemoData(); teacherCardSetId = data.activeCardSetIds[0]; collectionCardSetFilter = "all"; saveData(); render(); toast("데모 데이터를 초기화했습니다."); } }
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.dataset.action === "toggle-ranking-visibility") { data.rankingVisibility[event.target.dataset.ranking] = event.target.checked; saveData(); render(); return; }
   if (event.target.id === "assignment-filter") { assignmentFilter = event.target.value; render(); }
   if (event.target.id === "assignment-student-view") { assignmentStudentView = event.target.value; render(); }
   if (event.target.id === "observation-category") refreshObservationQuickSection(event.target.value, []);
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.closest("#draw-option-form") && event.target.name !== "price") {
+    const form = event.target.closest("#draw-option-form"); const values = Object.keys(DEFAULT_DRAW_RATES).map((key) => Number(form.elements[key].value) || 0); const total = values.reduce((sum, value) => sum + value, 0); const valid = values.every((value) => value >= 0 && value <= 100) && Math.abs(total - 100) < 0.001;
+    document.querySelector("#draw-rate-total").textContent = total; document.querySelector("#draw-rate-error").hidden = valid; document.querySelector("#draw-rate-save").disabled = !valid; return;
+  }
   if (event.target.id !== "observation-student-search") return;
   const keyword = event.target.value.trim().toLocaleLowerCase("ko-KR");
   document.querySelectorAll("[data-student-search]").forEach((item) => { item.hidden = keyword && !item.dataset.studentSearch.includes(keyword); });
 });
 
 document.addEventListener("keydown", (event) => {
+  const timetableInput = event.target.closest?.("#weekly-timetable-form .weekly-timetable-table input");
+  if (event.key === "Enter" && timetableInput) {
+    event.preventDefault();
+    const separator = timetableInput.name.lastIndexOf("-"); const dayKey = timetableInput.name.slice(0, separator); const periodIndex = Number(timetableInput.name.slice(separator + 1)); const nextIndex = periodIndex + (event.shiftKey ? -1 : 1);
+    const nextInput = timetableInput.form?.elements[`${dayKey}-${nextIndex}`]; if (nextInput instanceof HTMLElement) nextInput.focus();
+    return;
+  }
   if (event.key === "Escape") document.querySelector(".modal")?.remove();
 });
 
 app.addEventListener("submit", (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
+  if (form.id === "weekly-timetable-form") {
+    data.weeklyTimetable = Object.fromEntries(TIMETABLE_DAYS.map((day) => { const currentLength = Math.max(6, data.weeklyTimetable[day.key]?.length || 0); return [day.key, Array.from({ length: currentLength }, (_, index) => String(formData.get(`${day.key}-${index}`) || "").trim().slice(0, 40))]; }));
+    saveData(); render(); toast("기본 주간 시간표를 저장했습니다."); return;
+  }
+  if (form.id === "date-timetable-form") {
+    const length = Math.max(6, timetableForDate(form.dataset.date).periods.length); data.dateTimetableOverrides[form.dataset.date] = Array.from({ length }, (_, index) => String(formData.get(`period-${index}`) || "").trim().slice(0, 40));
+    saveData(); render(); toast("이 날짜의 시간표를 저장했습니다."); return;
+  }
+  if (form.id === "daily-note-form") {
+    if (event.submitter?.dataset.kind === "delete") delete data.dailyClassNotes[form.dataset.date];
+    else { const text = String(formData.get("text") || "").trim().slice(0, 2000); if (text) data.dailyClassNotes[form.dataset.date] = { text, updatedAt: new Date().toISOString() }; else delete data.dailyClassNotes[form.dataset.date]; }
+    saveData(); render(); toast(event.submitter?.dataset.kind === "delete" ? "주요 사항을 삭제했습니다." : "주요 사항을 저장했습니다."); return;
+  }
   if (form.id === "observation-form") {
     const studentId = formData.get("studentId"); const date = formData.get("date"); const category = formData.get("category"); const content = formData.get("content").trim(); const quickItems = selectedObservationQuickItems();
     if (!studentById(studentId) || !date || !OBSERVATION_CATEGORIES.includes(category) || !content) return;
@@ -747,12 +1165,45 @@ app.addEventListener("submit", (event) => {
     observationFilters = { studentId: formData.get("studentId"), category: formData.get("category"), keyword: formData.get("keyword").trim() };
     render();
   }
-  if (form.id === "point-form") {
-    const student = studentById(form.dataset.id); const rawAmount = Number(formData.get("amount")); const amount = form.dataset.kind === "subtract" ? -rawAmount : rawAmount; const reason = formData.get("reason").trim();
-    if (!Number.isFinite(rawAmount) || rawAmount <= 0 || !reason) return;
-    const previousPoints = student.points;
-    student.points = Math.max(0, student.points + amount); const actualAmount = student.points - previousPoints;
-    student.pointHistory.push({ id: crypto.randomUUID(), amount: actualAmount, reason, date: new Date().toLocaleDateString("ko-KR") }); saveData(); render(); toast("포인트 내역을 저장했습니다.");
+  if (form.id === "point-bulk-form") {
+    const rawAmount = Number(formData.get("amount")); if (!Number.isInteger(rawAmount) || rawAmount < 1) return;
+    applyTeacherPointChange(event.submitter?.dataset.kind === "subtract" ? -rawAmount : rawAmount);
+  }
+  if (form.id === "draw-option-form") {
+    const name = formData.get("name").trim(); const price = Number(formData.get("price")); const rates = Object.fromEntries(Object.keys(DEFAULT_DRAW_RATES).map((key) => [key, Number(formData.get(key))])); const values = Object.values(rates); const total = values.reduce((sum, value) => sum + value, 0);
+    if (!name || !Number.isInteger(price) || price < 0) return;
+    if (!values.every((value) => Number.isFinite(value) && value >= 0 && value <= 100) || Math.abs(total - 100) >= 0.001) { toast("등급별 확률의 합계가 100%가 되어야 합니다."); return; }
+    const existing = data.drawOptions.find((option) => option.id === form.dataset.id);
+    if (existing) Object.assign(existing, { name: name.slice(0, 40), price, rates });
+    else data.drawOptions.push({ id: crypto.randomUUID(), name: name.slice(0, 40), price, rates, active: true, deleted: false });
+    saveData(); render(); toast(existing ? "뽑기 옵션을 수정했습니다." : "새 뽑기 옵션을 추가했습니다.");
+  }
+  if (form.id === "upgrade-settings-form") {
+    const settings = Object.fromEntries(CARD_UPGRADE_STEPS.map((step) => [step.key, Number(formData.get(step.key))]));
+    if (!Object.values(settings).every((value) => Number.isInteger(value) && value >= 2)) { toast("업그레이드 필요 카드 수는 2장 이상이어야 합니다."); return; }
+    data.cardUpgradeSettings = settings; saveData(); render(); toast("카드 업그레이드 설정을 저장했습니다.");
+  }
+  if (form.id === "card-ability-settings-form") {
+    const settings = Object.fromEntries(CARD_RARITIES.map((rarity) => { const key = CARD_RATE_KEYS[rarity]; const dailyCap = Number(formData.get(`${key}-dailyCap`)); const abilities = Object.fromEntries(CARD_ABILITIES.map((ability) => { const percent = Number(formData.get(`${key}-${ability.id}`)); return [ability.id, { assignmentPercent: ability.id === "responsibility" ? 0 : percent, rolePercent: ability.id === "academic" ? 0 : percent }]; })); return [rarity, { dailyCap, abilities }]; }));
+    const valid = Object.values(settings).every((setting) => Number.isInteger(setting.dailyCap) && setting.dailyCap >= 0 && Object.values(setting.abilities).every((ability) => [ability.assignmentPercent, ability.rolePercent].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)));
+    if (!valid) { toast("보너스는 0~100%, 하루 최대 포인트는 0 이상의 정수로 입력해 주세요."); return; }
+    data.cardAbilitySettings = settings; saveData(); render(); toast("특수능력 설정을 저장했습니다.");
+  }
+  if (form.id === "card-form") {
+    const cardSetId = formData.get("cardSetId"); const name = formData.get("name").trim(); const era = formData.get("era").trim(); const achievement = formData.get("achievement").trim();
+    if (!cardSetById(cardSetId) || !name || !era || !achievement) return;
+    const existing = data.cards.find((card) => card.id === form.dataset.id);
+    if (existing) Object.assign(existing, { cardSetId, name, era, achievement });
+    else data.cards.push({ id: crypto.randomUUID(), cardSetId, name, era, achievement, order: sortedCards(true, cardSetId).reduce((max, card) => Math.max(max, card.order), -1) + 1, active: true, deleted: false });
+    teacherCardSetId = cardSetId;
+    saveData(); render(); toast(existing ? "카드를 수정했습니다." : "새 카드를 추가했습니다.");
+  }
+  if (form.id === "card-set-form") {
+    const name = formData.get("name").trim(); const description = formData.get("description").trim(); if (!name) return;
+    const existing = cardSetById(form.dataset.id);
+    if (existing) Object.assign(existing, { name: name.slice(0, 50), description: description.slice(0, 200) });
+    else { const id = crypto.randomUUID(); data.cardSets.push({ id, name: name.slice(0, 50), description: description.slice(0, 200), createdAt: new Date().toISOString(), active: true, deleted: false }); teacherCardSetId = id; }
+    saveData(); render(); toast(existing ? "카드셋을 수정했습니다." : "새 카드셋을 만들었습니다.");
   }
   if (form.id === "template-save-form") {
     const name = formData.get("name").trim(); if (!name) return;
