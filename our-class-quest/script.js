@@ -36,6 +36,13 @@ const ASSIGNMENT_STATUS_LABELS = { missing: "미제출", review: "확인 대기"
 const SUBJECTS = ["국어", "수학", "사회", "과학", "영어", "기타"];
 const STUDENT_NAMES = ["학생01", "학생02", "학생03", "학생04", "학생05"];
 const OBSERVATION_CATEGORIES = ["수업", "생활", "관계", "성장", "기타"];
+const DEFAULT_OBSERVATION_QUICK_ITEMS = {
+  수업: ["발표", "수업 참여", "집중", "질문", "협력", "과제 수행"],
+  생활: ["정리정돈", "규칙 준수", "준비물", "책임감", "자기관리"],
+  관계: ["배려", "협력", "갈등", "도움", "의사소통"],
+  성장: ["자신감", "도전", "꾸준함", "개선", "자기주도"],
+  기타: ["기타"]
+};
 
 function createDemoData() {
   const students = STUDENT_NAMES.map((name, index) => ({
@@ -57,7 +64,8 @@ function createDemoData() {
       assignmentState: "active", completed: false, completedAt: null,
       statuses: STUDENT_NAMES.map((_, studentIndex) => studentIndex < 3 - assignmentIndex ? "submitted" : "missing")
     })),
-    observations: []
+    observations: [],
+    observationQuickItems: structuredClone(DEFAULT_OBSERVATION_QUICK_ITEMS)
   };
 }
 
@@ -98,9 +106,14 @@ function loadData() {
       date: observation.date || todayString(),
       category: OBSERVATION_CATEGORIES.includes(observation.category) ? observation.category : "기타",
       content: observation.content || "",
+      quickItems: Array.isArray(observation.quickItems) ? observation.quickItems.filter((item) => typeof item === "string") : [],
       createdAt: observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`,
       updatedAt: observation.updatedAt || observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`
     }));
+    const savedQuickItems = saved.observationQuickItems && typeof saved.observationQuickItems === "object" ? saved.observationQuickItems : {};
+    saved.observationQuickItems = Object.fromEntries(OBSERVATION_CATEGORIES.map((category) => [category,
+      Array.isArray(savedQuickItems[category]) ? [...new Set(savedQuickItems[category].filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 30)))] : [...DEFAULT_OBSERVATION_QUICK_ITEMS[category]]
+    ]));
     return saved;
   }
   catch { return createDemoData(); }
@@ -111,7 +124,7 @@ let session = { mode: "welcome", studentId: null, view: "home" };
 let editingTemplateId = null;
 let assignmentFilter = "all";
 let assignmentStudentView = "";
-let observationFilters = { studentId: "", category: "", startDate: "", endDate: "", keyword: "" };
+let observationFilters = { studentId: "", category: "", keyword: "" };
 const assignmentSelections = {};
 let toastTimer;
 const app = document.querySelector("#app");
@@ -303,22 +316,17 @@ function teacherAssignments() {
 }
 
 function teacherObservations() {
-  const keyword = observationFilters.keyword.toLocaleLowerCase("ko-KR");
-  const records = data.observations.filter((item) => {
-    const student = studentById(item.studentId);
-    return (!observationFilters.studentId || item.studentId === observationFilters.studentId)
-      && (!observationFilters.category || item.category === observationFilters.category)
-      && (!observationFilters.startDate || item.date >= observationFilters.startDate)
-      && (!observationFilters.endDate || item.date <= observationFilters.endDate)
-      && (!keyword || `${student?.name || ""} ${item.category} ${item.content}`.toLocaleLowerCase("ko-KR").includes(keyword));
-  }).sort((first, second) => (second.date || "").localeCompare(first.date || "") || (second.createdAt || "").localeCompare(first.createdAt || ""));
-  const selectedStudent = studentById(observationFilters.studentId);
-  const summary = selectedStudent ? OBSERVATION_CATEGORIES.map((category) => ({ category, count: data.observations.filter((item) => item.studentId === selectedStudent.id && item.category === category).length })) : [];
+  const selectedStudent = studentById(observationFilters.studentId); const keyword = observationFilters.keyword.toLocaleLowerCase("ko-KR");
+  const records = data.observations.filter((item) => (!observationFilters.studentId || item.studentId === observationFilters.studentId)
+    && (!observationFilters.category || item.category === observationFilters.category)
+    && (!keyword || `${item.content} ${(item.quickItems || []).join(" ")}`.toLocaleLowerCase("ko-KR").includes(keyword)))
+    .sort((first, second) => (second.date || "").localeCompare(first.date || "") || (second.createdAt || "").localeCompare(first.createdAt || ""));
   const recordRows = records.map((item) => {
     const student = studentById(item.studentId);
-    return `<article class="observation-record"><div class="observation-record-head"><div><time datetime="${item.date}">${item.date}</time><strong>${escapeHtml(student?.name || "삭제된 학생")}</strong><span class="pill observation-${OBSERVATION_CATEGORIES.indexOf(item.category)}">${escapeHtml(item.category)}</span></div><div class="list-actions"><button class="button secondary compact" data-action="edit-observation" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-observation" data-id="${item.id}">삭제</button></div></div><p>${escapeHtml(item.content)}</p></article>`;
+    const quickTags = (item.quickItems || []).map((quickItem) => `<span class="observation-quick-tag">${escapeHtml(quickItem)}</span>`).join("");
+    return `<article class="observation-record"><div class="observation-record-head"><div><time datetime="${item.date}">${item.date}</time><strong>${escapeHtml(student?.name || "삭제된 학생")}</strong><span class="pill observation-${OBSERVATION_CATEGORIES.indexOf(item.category)}">${escapeHtml(item.category)}</span></div><div class="list-actions"><button class="button secondary compact" data-action="edit-observation" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-observation" data-id="${item.id}">삭제</button></div></div>${quickTags ? `<div class="observation-quick-tags">${quickTags}</div>` : ""}<p>${escapeHtml(item.content)}</p></article>`;
   }).join("");
-  return `<div class="section-heading observation-page-heading"><div><h1 class="page-heading">관찰 기록</h1><p class="page-description">선생님만 확인할 수 있는 기록입니다.</p></div><button class="button success" data-action="new-observation">+ 새 관찰 기록</button></div><form id="observation-filter-form" class="card observation-filters"><label>학생<select name="studentId"><option value="">전체 학생</option>${data.students.map((student) => `<option value="${student.id}" ${observationFilters.studentId === student.id ? "selected" : ""}>${escapeHtml(student.name)}</option>`).join("")}</select></label><label>분류<select name="category"><option value="">전체 분류</option>${OBSERVATION_CATEGORIES.map((category) => `<option ${observationFilters.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></label><label>시작일<input name="startDate" type="date" value="${observationFilters.startDate}"></label><label>종료일<input name="endDate" type="date" value="${observationFilters.endDate}"></label><label class="observation-keyword">키워드<input name="keyword" value="${escapeHtml(observationFilters.keyword)}" placeholder="발표, 친구, 협력 등"></label><div class="button-row"><button class="button" type="submit">검색</button><button class="button secondary" type="button" data-action="clear-observation-filters">초기화</button></div></form>${selectedStudent ? `<section class="card observation-summary"><h2>${escapeHtml(selectedStudent.name)}</h2><button data-action="filter-observation-category" data-category="" class="summary-count ${!observationFilters.category ? "active" : ""}">전체 기록 <strong>${data.observations.filter((item) => item.studentId === selectedStudent.id).length}건</strong></button>${summary.map((item) => `<button data-action="filter-observation-category" data-category="${item.category}" class="summary-count ${observationFilters.category === item.category ? "active" : ""}">${item.category} <strong>${item.count}</strong></button>`).join("")}</section>` : ""}<section class="management-section"><div class="section-heading"><h2>${selectedStudent ? `${escapeHtml(selectedStudent.name)} 관찰 기록` : "전체 최근 기록"}</h2><span class="muted">${records.length}건</span></div>${recordRows ? `<div class="observation-list">${recordRows}</div>` : `<div class="empty">조건에 맞는 관찰 기록이 없습니다.</div>`}</section>`;
+  return `<div class="section-heading observation-page-heading"><div><h1 class="page-heading">관찰 기록</h1><p class="page-description">선생님만 확인할 수 있는 기록입니다.</p></div><button class="button success" data-action="new-observation">+ 새 관찰 기록</button></div><form id="observation-search-form" class="card observation-search"><label>학생<select name="studentId"><option value="">전체 학생</option>${data.students.map((student) => `<option value="${student.id}" ${observationFilters.studentId === student.id ? "selected" : ""}>${escapeHtml(student.name)}</option>`).join("")}</select></label><label>분류<select name="category"><option value="">전체 분류</option>${OBSERVATION_CATEGORIES.map((category) => `<option ${observationFilters.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></label><label class="observation-search-keyword">키워드<input name="keyword" value="${escapeHtml(observationFilters.keyword)}" placeholder="내용 또는 세부 항목 검색"></label><div class="button-row"><button class="button" type="submit">검색</button><button class="button secondary" type="button" data-action="reset-observation-search">조건 초기화</button></div></form><section class="management-section"><div class="section-heading"><h2>${selectedStudent ? `${escapeHtml(selectedStudent.name)} 관찰 기록` : "전체 관찰 기록"}</h2><span class="muted">${records.length}건</span></div>${recordRows ? `<div class="observation-list">${recordRows}</div>` : `<div class="empty">조건에 맞는 관찰 기록이 없습니다.</div>`}</section>`;
 }
 
 function teacherPoints() {
@@ -419,12 +427,26 @@ function openPointModal(studentId, kind) {
   app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="point-form" class="modal-card form" data-id="${studentId}" data-kind="${kind}"><h2>${student.name} · 포인트 ${subtract ? "차감" : "지급"}</h2><label>포인트<input name="amount" type="number" min="1" value="10" required></label><label>간단한 사유<input name="reason" required placeholder="예: 친구 도와주기"></label><div class="button-row"><button class="button ${subtract ? "danger" : "success"}" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
 
+function observationQuickSectionHtml(category, selected = [], managing = false) {
+  const items = data.observationQuickItems[category] || [];
+  return `<div class="observation-quick-heading"><strong>빠른 선택 항목</strong><button class="mini-text-button" type="button" data-action="toggle-observation-quick-manage">${managing ? "관리 닫기" : "항목 관리"}</button></div><div class="observation-quick-picker">${items.map((item) => `<button class="observation-quick-chip ${selected.includes(item) ? "selected" : ""}" type="button" data-action="toggle-observation-quick" data-value="${escapeHtml(item)}" aria-pressed="${selected.includes(item)}">${escapeHtml(item)}</button>`).join("") || `<span class="muted">등록된 항목이 없습니다.</span>`}</div><div class="observation-quick-add"><input id="observation-quick-new" maxlength="30" placeholder="새 항목"><button type="button" data-action="add-observation-quick">+ 추가</button></div><div class="observation-quick-manage" ${managing ? "" : "hidden"}>${items.map((item, index) => `<div><input data-quick-edit-index="${index}" maxlength="30" value="${escapeHtml(item)}"><button type="button" data-action="save-observation-quick" data-index="${index}">저장</button><button type="button" data-action="delete-observation-quick" data-index="${index}">삭제</button></div>`).join("")}</div>`;
+}
+
+function selectedObservationQuickItems() {
+  return [...document.querySelectorAll('[data-action="toggle-observation-quick"].selected')].map((item) => item.dataset.value);
+}
+
+function refreshObservationQuickSection(category, selected = selectedObservationQuickItems(), managing = false) {
+  const section = document.querySelector("#observation-quick-section");
+  if (section) section.innerHTML = observationQuickSectionHtml(category, selected, managing);
+}
+
 function openObservationModal(observationId = "", presets = {}) {
   const observation = data.observations.find((item) => item.id === observationId);
   const selectedStudentId = observation?.studentId || presets.studentId || observationFilters.studentId || data.students[0]?.id || "";
   const selectedDate = observation?.date || presets.date || todayString();
-  const selectedCategory = observation?.category || presets.category || observationFilters.category || "수업";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="observation-form" class="modal-card form observation-modal-card" data-id="${observationId}"><h2>${observation ? "관찰 기록 수정" : "새 관찰 기록"}</h2><label>학생 검색<input id="observation-student-search" type="search" placeholder="이름 또는 번호 입력 (예: 학생12)" autocomplete="off"></label><fieldset class="observation-student-picker"><legend>학생 선택</legend>${data.students.map((student, index) => `<label data-student-search="${escapeHtml(`${student.name} ${student.number || index + 1}`.toLocaleLowerCase("ko-KR"))}"><input type="radio" name="studentId" value="${student.id}" ${student.id === selectedStudentId ? "checked" : ""} required><span>${escapeHtml(student.name)}</span></label>`).join("")}</fieldset><label>날짜<input name="date" type="date" value="${selectedDate}" required></label><label>분류<select name="category">${OBSERVATION_CATEGORIES.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${category}</option>`).join("")}</select></label><label>내용<textarea name="content" maxlength="1000" required placeholder="관찰한 내용을 구체적으로 적어 주세요.">${observation ? escapeHtml(observation.content) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${observation ? "" : `<button class="button" type="submit" data-continue="true">저장 후 계속 기록</button>`}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  const selectedCategory = observation?.category || presets.category || "수업";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="observation-form" class="modal-card form observation-modal-card" data-id="${observationId}"><h2>${observation ? "관찰 기록 수정" : "새 관찰 기록"}</h2><label>학생 검색<input id="observation-student-search" type="search" placeholder="이름 또는 번호 입력 (예: 학생12)" autocomplete="off"></label><fieldset class="observation-student-picker"><legend>학생 선택</legend>${data.students.map((student, index) => `<label data-student-search="${escapeHtml(`${student.name} ${student.number || index + 1}`.toLocaleLowerCase("ko-KR"))}"><input type="radio" name="studentId" value="${student.id}" ${student.id === selectedStudentId ? "checked" : ""} required><span>${escapeHtml(student.name)}</span></label>`).join("")}</fieldset><label>날짜<input name="date" type="date" value="${selectedDate}" required></label><label>분류<select id="observation-category" name="category">${OBSERVATION_CATEGORIES.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${category}</option>`).join("")}</select></label><section id="observation-quick-section" class="observation-quick-section">${observationQuickSectionHtml(selectedCategory, observation?.quickItems || [])}</section><label>내용<textarea name="content" maxlength="1000" required placeholder="빠른 항목을 참고해 관찰 내용을 자유롭게 적어 주세요.">${observation ? escapeHtml(observation.content) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${observation ? "" : `<button class="button" type="submit" data-continue="true">저장 후 계속 기록</button>`}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
   document.querySelector("#observation-student-search")?.focus();
 }
 
@@ -616,13 +638,36 @@ app.addEventListener("click", (event) => {
   if (action === "open-points") return openPointModal(target.dataset.id, target.dataset.kind);
   if (action === "new-observation") return openObservationModal();
   if (action === "edit-observation") return openObservationModal(target.dataset.id);
+  if (action === "toggle-observation-quick") { target.classList.toggle("selected"); target.setAttribute("aria-pressed", String(target.classList.contains("selected"))); return; }
+  if (action === "toggle-observation-quick-manage") {
+    const panel = document.querySelector(".observation-quick-manage"); if (!panel) return;
+    panel.hidden = !panel.hidden; target.textContent = panel.hidden ? "항목 관리" : "관리 닫기"; return;
+  }
+  if (action === "add-observation-quick") {
+    const category = document.querySelector("#observation-category")?.value; if (!category) return;
+    const name = document.querySelector("#observation-quick-new")?.value.trim().slice(0, 30); if (!name) return;
+    if (data.observationQuickItems[category].includes(name)) { alert("이미 같은 항목이 있습니다."); return; }
+    data.observationQuickItems[category].push(name); saveData(); refreshObservationQuickSection(category, selectedObservationQuickItems()); toast("빠른 선택 항목을 추가했습니다."); return;
+  }
+  if (action === "save-observation-quick") {
+    const category = document.querySelector("#observation-category")?.value; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const previous = items[index]; if (!previous) return;
+    const name = document.querySelector(`[data-quick-edit-index="${index}"]`)?.value.trim().slice(0, 30); if (!name || (name !== previous && items.includes(name))) return;
+    const selected = selectedObservationQuickItems().map((item) => item === previous ? name : item); items[index] = name; saveData(); refreshObservationQuickSection(category, selected, true); toast("빠른 선택 항목을 수정했습니다."); return;
+  }
+  if (action === "delete-observation-quick") {
+    const category = document.querySelector("#observation-category")?.value; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const name = items[index]; if (!name) return;
+    app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>빠른 선택 항목 삭제</h2><p><strong>‘${escapeHtml(name)}’</strong> 항목을 삭제할까요?</p><p class="muted">이미 저장된 관찰 기록의 태그는 유지됩니다.</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-observation-quick" data-category="${escapeHtml(category)}" data-index="${index}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`); return;
+  }
+  if (action === "confirm-delete-observation-quick") {
+    const category = target.dataset.category; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const name = items[index]; if (!name) return;
+    items.splice(index, 1); target.closest(".modal")?.remove(); saveData(); refreshObservationQuickSection(category, selectedObservationQuickItems().filter((item) => item !== name), true); toast("빠른 선택 항목을 삭제했습니다."); return;
+  }
   if (action === "ask-delete-observation") return openDeleteObservationModal(target.dataset.id);
   if (action === "confirm-delete-observation") {
     data.observations = data.observations.filter((observation) => observation.id !== target.dataset.id);
     saveData(); render(); toast("관찰 기록을 삭제했습니다."); return;
   }
-  if (action === "clear-observation-filters") { observationFilters = { studentId: "", category: "", startDate: "", endDate: "", keyword: "" }; render(); return; }
-  if (action === "filter-observation-category") { observationFilters.category = target.dataset.category; render(); return; }
+  if (action === "reset-observation-search") { observationFilters = { studentId: "", category: "", keyword: "" }; render(); return; }
   if (action === "add-role") return openRoleModal(target.dataset.scope, target.dataset.template || "");
   if (action === "edit-role") return openRoleModal(target.dataset.scope, target.dataset.template || "", target.dataset.id);
   if (action === "move-role") {
@@ -665,6 +710,7 @@ app.addEventListener("click", (event) => {
 app.addEventListener("change", (event) => {
   if (event.target.id === "assignment-filter") { assignmentFilter = event.target.value; render(); }
   if (event.target.id === "assignment-student-view") { assignmentStudentView = event.target.value; render(); }
+  if (event.target.id === "observation-category") refreshObservationQuickSection(event.target.value, []);
 });
 
 app.addEventListener("input", (event) => {
@@ -680,17 +726,25 @@ document.addEventListener("keydown", (event) => {
 app.addEventListener("submit", (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
   if (form.id === "observation-form") {
-    const studentId = formData.get("studentId"); const date = formData.get("date"); const category = formData.get("category"); const content = formData.get("content").trim();
+    const studentId = formData.get("studentId"); const date = formData.get("date"); const category = formData.get("category"); const content = formData.get("content").trim(); const quickItems = selectedObservationQuickItems();
     if (!studentById(studentId) || !date || !OBSERVATION_CATEGORIES.includes(category) || !content) return;
     const now = new Date().toISOString(); const existing = data.observations.find((item) => item.id === form.dataset.id);
-    if (existing) Object.assign(existing, { studentId, date, category, content, updatedAt: now });
-    else data.observations.push({ id: crypto.randomUUID(), studentId, date, category, content, createdAt: now, updatedAt: now });
+    if (existing) Object.assign(existing, { studentId, date, category, content, quickItems, updatedAt: now });
+    else data.observations.push({ id: crypto.randomUUID(), studentId, date, category, content, quickItems, createdAt: now, updatedAt: now });
     saveData();
-    if (!existing && event.submitter?.dataset.continue === "true") { form.elements.content.value = ""; form.elements.content.focus(); toast("저장했습니다. 다음 기록을 이어서 작성하세요."); return; }
+    if (!existing && event.submitter?.dataset.continue === "true") {
+      form.querySelectorAll('[name="studentId"]').forEach((input) => { input.checked = false; });
+      form.querySelector("#observation-student-search").value = "";
+      form.querySelectorAll("[data-student-search]").forEach((item) => { item.hidden = false; });
+      form.querySelector('[name="content"]').value = "";
+      form.querySelector("#observation-student-search").focus();
+      toast("저장했습니다. 다음 학생을 선택해 계속 기록하세요."); return;
+    }
+    observationFilters = { studentId, category: "", keyword: "" };
     render(); toast(existing ? "관찰 기록을 수정했습니다." : "관찰 기록을 저장했습니다.");
   }
-  if (form.id === "observation-filter-form") {
-    observationFilters = { studentId: formData.get("studentId"), category: formData.get("category"), startDate: formData.get("startDate"), endDate: formData.get("endDate"), keyword: formData.get("keyword").trim() };
+  if (form.id === "observation-search-form") {
+    observationFilters = { studentId: formData.get("studentId"), category: formData.get("category"), keyword: formData.get("keyword").trim() };
     render();
   }
   if (form.id === "point-form") {
