@@ -35,6 +35,7 @@ const ASSIGNMENT_STATUSES = ["missing", "review", "submitted"];
 const ASSIGNMENT_STATUS_LABELS = { missing: "미제출", review: "확인 대기", submitted: "제출 완료" };
 const SUBJECTS = ["국어", "수학", "사회", "과학", "영어", "기타"];
 const STUDENT_NAMES = ["학생01", "학생02", "학생03", "학생04", "학생05"];
+const OBSERVATION_CATEGORIES = ["수업", "생활", "관계", "성장", "기타"];
 
 function createDemoData() {
   const students = STUDENT_NAMES.map((name, index) => ({
@@ -52,6 +53,7 @@ function createDemoData() {
     assignments: ASSIGNMENTS.map((assignment, assignmentIndex) => ({
       id: `a${assignmentIndex + 1}`, title: assignment.title, subject: assignment.subject, description: assignment.description,
       createdAt: dateWithOffset(-assignmentIndex), dueDate: dateWithOffset(assignment.dueOffset), important: assignmentIndex === 0,
+      points: 0, pointAwards: {},
       assignmentState: "active", completed: false, completedAt: null,
       statuses: STUDENT_NAMES.map((_, studentIndex) => studentIndex < 3 - assignmentIndex ? "submitted" : "missing")
     })),
@@ -69,7 +71,7 @@ function loadData() {
       saved.roleTemplates = [{ id: crypto.randomUUID(), name: "기본 1인1역", roles: structuredClone(DEFAULT_ROLES) }];
     }
     saved.roleTemplates = saved.roleTemplates.map((template) => ({ ...template, roles: template.roles.map((role) => ({ ...role, description: role.description || "" })) }));
-    saved.assignments = (saved.assignments || []).map((assignment, index) => {
+    saved.assignments = (Array.isArray(saved.assignments) ? saved.assignments : []).map((assignment, index) => {
       const assignmentState = ["active", "completed"].includes(assignment.assignmentState) ? assignment.assignmentState : assignment.completed ? "completed" : "active";
       const migrated = {
         ...assignment,
@@ -78,6 +80,8 @@ function loadData() {
         createdAt: assignment.createdAt || "",
         dueDate: assignment.dueDate || "",
         important: Boolean(assignment.important),
+        points: Number.isInteger(Number(assignment.points)) && Number(assignment.points) >= 0 ? Number(assignment.points) : 0,
+        pointAwards: assignment.pointAwards && typeof assignment.pointAwards === "object" && !Array.isArray(assignment.pointAwards) ? assignment.pointAwards : {},
         assignmentState,
         completed: assignmentState === "completed",
         completedAt: assignmentState === "completed" ? (assignment.completedAt || assignment.dueDate || null) : null,
@@ -88,6 +92,15 @@ function loadData() {
       refreshAssignmentCompletion(migrated);
       return migrated;
     });
+    saved.observations = (Array.isArray(saved.observations) ? saved.observations : []).map((observation) => ({
+      id: observation.id || crypto.randomUUID(),
+      studentId: observation.studentId || "",
+      date: observation.date || todayString(),
+      category: OBSERVATION_CATEGORIES.includes(observation.category) ? observation.category : "기타",
+      content: observation.content || "",
+      createdAt: observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`,
+      updatedAt: observation.updatedAt || observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`
+    }));
     return saved;
   }
   catch { return createDemoData(); }
@@ -98,6 +111,7 @@ let session = { mode: "welcome", studentId: null, view: "home" };
 let editingTemplateId = null;
 let assignmentFilter = "all";
 let assignmentStudentView = "";
+let observationFilters = { studentId: "", category: "", startDate: "", endDate: "", keyword: "" };
 const assignmentSelections = {};
 let toastTimer;
 const app = document.querySelector("#app");
@@ -157,7 +171,7 @@ function studentAssignmentCard(assignment, studentIndex, closed = false) {
     : status === "review"
       ? `<button class="button secondary assignment-request-button" disabled>⏳ 선생님 확인 대기</button>`
       : `<span class="pill success assignment-finished-label">✓ 제출 완료</span>`;
-  return `<article class="card student-assignment-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}</div><h3>${escapeHtml(assignment.title)}</h3>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}<div class="assignment-meta"><span>📅 ${formatDueDate(assignment.dueDate)}</span><span class="pill ${assignmentStatusClass(status)}">${ASSIGNMENT_STATUS_LABELS[status]}</span></div>${statusControl}</article>`;
+  return `<article class="card student-assignment-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">완료 시 +${assignment.points}P</span>` : ""}</div></div><h3>${escapeHtml(assignment.title)}</h3>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}<div class="assignment-meta"><span>📅 ${formatDueDate(assignment.dueDate)}</span><span class="pill ${assignmentStatusClass(status)}">${ASSIGNMENT_STATUS_LABELS[status]}</span></div>${statusControl}</article>`;
 }
 
 function studentHome() {
@@ -207,10 +221,23 @@ function studentRanking() {
 function completedCount(studentId) { return data.roleApplications.filter((item) => item.studentId === studentId && item.status === "completed").length; }
 function pointHistoryRow(item) { return `<div class="list-row"><div class="list-main"><strong>${escapeHtml(item.reason)}</strong><small class="muted">${item.date}</small></div><strong class="${item.amount >= 0 ? "points" : ""}">${item.amount >= 0 ? "+" : ""}${item.amount}P</strong></div>`; }
 
+function todayIssuedPoints() {
+  const today = todayString();
+  const dateKey = (value) => {
+    const parts = String(value || "").match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    return parts ? `${parts[1]}-${parts[2].padStart(2, "0")}-${parts[3].padStart(2, "0")}` : "";
+  };
+  return data.students.reduce((total, student) => total + (Array.isArray(student.pointHistory) ? student.pointHistory : []).reduce((studentTotal, item) => {
+    const isToday = dateKey(item.date) === today;
+    const isStudentSpending = item.amount < 0 && String(item.reason || "").includes("카드 뽑기");
+    return studentTotal + (isToday && !isStudentSpending ? Number(item.amount) || 0 : 0);
+  }, 0), 0);
+}
+
 function teacherDashboard() {
   const active = data.roleApplications.filter((item) => item.status !== "cancelled");
   const completed = active.filter((item) => item.status === "completed");
-  return `<h1 class="page-heading">선생님 대시보드</h1><p class="page-description">오늘 우리 반의 활동을 한눈에 확인하세요.</p><div class="grid four"><article class="card"><span class="muted">학생 수</span><strong class="big-number">${data.students.length}명</strong></article><article class="card"><span class="muted">오늘 역할 신청</span><strong class="big-number">${active.length}건</strong></article><article class="card"><span class="muted">오늘 완료 역할</span><strong class="big-number">${completed.length}건</strong></article><article class="card"><span class="muted">오늘 지급 포인트</span><strong class="big-number">${completed.reduce((sum, item) => sum + (item.awardedPoints ?? roleById(item.roleId)?.points ?? 0), 0)}P</strong></article></div><h2 class="section-title">최근 역할 신청</h2>${teacherRoleList(active.slice(-5).reverse())}`;
+  return `<h1 class="page-heading">선생님 대시보드</h1><p class="page-description">오늘 우리 반의 활동을 한눈에 확인하세요.</p><div class="grid four"><article class="card"><span class="muted">학생 수</span><strong class="big-number">${data.students.length}명</strong></article><article class="card"><span class="muted">오늘 역할 신청</span><strong class="big-number">${active.length}건</strong></article><article class="card"><span class="muted">오늘 완료 역할</span><strong class="big-number">${completed.length}건</strong></article><article class="card"><span class="muted">오늘 지급 포인트</span><strong class="big-number">${todayIssuedPoints()}P</strong></article></div><h2 class="section-title">최근 역할 신청</h2>${teacherRoleList(active.slice(-5).reverse())}`;
 }
 
 function teacherStudents() {
@@ -258,7 +285,7 @@ function teacherAssignmentCard(assignment) {
     ? `<button class="button secondary compact" data-action="ask-reopen-assignment" data-id="${assignment.id}">다시 열기</button>`
     : `<button class="button gold compact" data-action="ask-complete-assignment" data-id="${assignment.id}">과제 완료</button>`;
   const completedLabel = assignment.assignmentState === "completed" ? `<span class="pill success">과제 완료일 ${formatCompletedAt(assignment.completedAt)}</span>` : "";
-  return `<article class="card assignment-manage-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}<span class="pill">제출 기한 ${formatDueDate(assignment.dueDate)}</span>${completedLabel}</div><h2>${escapeHtml(assignment.title)}</h2>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}</div><div class="list-actions">${stateAction}<button class="button secondary compact" data-action="edit-assignment" data-id="${assignment.id}">수정</button><button class="button danger compact" data-action="ask-delete-assignment" data-id="${assignment.id}">삭제</button></div></div><div class="assignment-counts"><span class="count-submitted">제출 완료 <strong>${submittedCount}명</strong></span><span class="count-review">확인 대기 <strong>${reviewCount}명</strong></span><span class="count-missing">미제출 <strong>${missingCount}명</strong></span></div><div class="assignment-student-list">${data.students.map((student, studentIndex) => { const status = assignment.statuses[studentIndex]; const reviewActions = status === "review" ? `<div class="review-actions"><button class="button success compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="submitted">제출 확인</button><button class="button danger compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="missing">반려</button></div>` : ""; return `<div class="assignment-student-row ${status === "review" ? "needs-review" : ""}"><label class="student-check"><input type="checkbox" data-action="select-assignment-student" data-assignment="${assignment.id}" data-student="${studentIndex}" ${selected.has(studentIndex) ? "checked" : ""}><span>${student.name}</span></label><div class="student-status-actions"><button class="status-button ${assignmentStatusClass(status)}" data-action="cycle-assignment-status" data-assignment="${assignment.id}" data-student="${studentIndex}">${ASSIGNMENT_STATUS_LABELS[status]}</button>${reviewActions}</div></div>`; }).join("")}</div><div class="button-row assignment-bulk-actions"><button class="button success compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="selected" ${selected.size ? "" : "disabled"}>선택 학생 제출 처리</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="all">전체 제출</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="missing" data-scope="all">전체 미제출</button></div></article>`;
+  return `<article class="card assignment-manage-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">${assignment.points}P</span>` : ""}<span class="pill">제출 기한 ${formatDueDate(assignment.dueDate)}</span>${completedLabel}</div><h2>${escapeHtml(assignment.title)}</h2>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}</div><div class="list-actions">${stateAction}<button class="button secondary compact" data-action="edit-assignment" data-id="${assignment.id}">수정</button><button class="button danger compact" data-action="ask-delete-assignment" data-id="${assignment.id}">삭제</button></div></div><div class="assignment-counts"><span class="count-submitted">제출 완료 <strong>${submittedCount}명</strong></span><span class="count-review">확인 대기 <strong>${reviewCount}명</strong></span><span class="count-missing">미제출 <strong>${missingCount}명</strong></span></div><div class="assignment-student-list">${data.students.map((student, studentIndex) => { const status = assignment.statuses[studentIndex]; const reviewActions = status === "review" ? `<div class="review-actions"><button class="button success compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="submitted">제출 확인</button><button class="button danger compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="missing">반려</button></div>` : ""; return `<div class="assignment-student-row ${status === "review" ? "needs-review" : ""}"><label class="student-check"><input type="checkbox" data-action="select-assignment-student" data-assignment="${assignment.id}" data-student="${studentIndex}" ${selected.has(studentIndex) ? "checked" : ""}><span>${student.name}</span></label><div class="student-status-actions"><button class="status-button ${assignmentStatusClass(status)}" data-action="cycle-assignment-status" data-assignment="${assignment.id}" data-student="${studentIndex}">${ASSIGNMENT_STATUS_LABELS[status]}</button>${reviewActions}</div></div>`; }).join("")}</div><div class="button-row assignment-bulk-actions"><button class="button success compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="selected" ${selected.size ? "" : "disabled"}>선택 학생 제출 처리</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="all">전체 제출</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="missing" data-scope="all">전체 미제출</button></div></article>`;
 }
 
 function teacherStudentAssignmentView(studentId) {
@@ -276,7 +303,22 @@ function teacherAssignments() {
 }
 
 function teacherObservations() {
-  return `<h1 class="page-heading">관찰 기록</h1><p class="page-description">이 내용은 선생님 화면에서만 볼 수 있습니다.</p><div class="grid"><form id="observation-form" class="card form"><label>학생<select name="studentId">${data.students.map((student) => `<option value="${student.id}">${student.name}</option>`).join("")}</select></label><label>날짜<input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></label><label>분류<select name="category">${["수업","생활","관계","성장","기타"].map((item) => `<option>${item}</option>`).join("")}</select></label><label>기록 내용<textarea name="content" required placeholder="관찰한 내용을 간단히 적어 주세요."></textarea></label><button class="button success" type="submit">관찰 기록 저장</button></form><div><h2>저장된 기록</h2>${data.observations.length ? `<div class="list">${data.observations.slice().reverse().map((item) => `<article class="list-row"><div class="list-main"><strong>${studentById(item.studentId).name} · ${escapeHtml(item.category)}</strong><small class="muted">${item.date}</small><p>${escapeHtml(item.content)}</p></div></article>`).join("")}</div>` : `<div class="empty">아직 저장된 기록이 없습니다.</div>`}</div></div>`;
+  const keyword = observationFilters.keyword.toLocaleLowerCase("ko-KR");
+  const records = data.observations.filter((item) => {
+    const student = studentById(item.studentId);
+    return (!observationFilters.studentId || item.studentId === observationFilters.studentId)
+      && (!observationFilters.category || item.category === observationFilters.category)
+      && (!observationFilters.startDate || item.date >= observationFilters.startDate)
+      && (!observationFilters.endDate || item.date <= observationFilters.endDate)
+      && (!keyword || `${student?.name || ""} ${item.category} ${item.content}`.toLocaleLowerCase("ko-KR").includes(keyword));
+  }).sort((first, second) => (second.date || "").localeCompare(first.date || "") || (second.createdAt || "").localeCompare(first.createdAt || ""));
+  const selectedStudent = studentById(observationFilters.studentId);
+  const summary = selectedStudent ? OBSERVATION_CATEGORIES.map((category) => ({ category, count: data.observations.filter((item) => item.studentId === selectedStudent.id && item.category === category).length })) : [];
+  const recordRows = records.map((item) => {
+    const student = studentById(item.studentId);
+    return `<article class="observation-record"><div class="observation-record-head"><div><time datetime="${item.date}">${item.date}</time><strong>${escapeHtml(student?.name || "삭제된 학생")}</strong><span class="pill observation-${OBSERVATION_CATEGORIES.indexOf(item.category)}">${escapeHtml(item.category)}</span></div><div class="list-actions"><button class="button secondary compact" data-action="edit-observation" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-observation" data-id="${item.id}">삭제</button></div></div><p>${escapeHtml(item.content)}</p></article>`;
+  }).join("");
+  return `<div class="section-heading observation-page-heading"><div><h1 class="page-heading">관찰 기록</h1><p class="page-description">선생님만 확인할 수 있는 기록입니다.</p></div><button class="button success" data-action="new-observation">+ 새 관찰 기록</button></div><form id="observation-filter-form" class="card observation-filters"><label>학생<select name="studentId"><option value="">전체 학생</option>${data.students.map((student) => `<option value="${student.id}" ${observationFilters.studentId === student.id ? "selected" : ""}>${escapeHtml(student.name)}</option>`).join("")}</select></label><label>분류<select name="category"><option value="">전체 분류</option>${OBSERVATION_CATEGORIES.map((category) => `<option ${observationFilters.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></label><label>시작일<input name="startDate" type="date" value="${observationFilters.startDate}"></label><label>종료일<input name="endDate" type="date" value="${observationFilters.endDate}"></label><label class="observation-keyword">키워드<input name="keyword" value="${escapeHtml(observationFilters.keyword)}" placeholder="발표, 친구, 협력 등"></label><div class="button-row"><button class="button" type="submit">검색</button><button class="button secondary" type="button" data-action="clear-observation-filters">초기화</button></div></form>${selectedStudent ? `<section class="card observation-summary"><h2>${escapeHtml(selectedStudent.name)}</h2><button data-action="filter-observation-category" data-category="" class="summary-count ${!observationFilters.category ? "active" : ""}">전체 기록 <strong>${data.observations.filter((item) => item.studentId === selectedStudent.id).length}건</strong></button>${summary.map((item) => `<button data-action="filter-observation-category" data-category="${item.category}" class="summary-count ${observationFilters.category === item.category ? "active" : ""}">${item.category} <strong>${item.count}</strong></button>`).join("")}</section>` : ""}<section class="management-section"><div class="section-heading"><h2>${selectedStudent ? `${escapeHtml(selectedStudent.name)} 관찰 기록` : "전체 최근 기록"}</h2><span class="muted">${records.length}건</span></div>${recordRows ? `<div class="observation-list">${recordRows}</div>` : `<div class="empty">조건에 맞는 관찰 기록이 없습니다.</div>`}</section>`;
 }
 
 function teacherPoints() {
@@ -377,11 +419,63 @@ function openPointModal(studentId, kind) {
   app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="point-form" class="modal-card form" data-id="${studentId}" data-kind="${kind}"><h2>${student.name} · 포인트 ${subtract ? "차감" : "지급"}</h2><label>포인트<input name="amount" type="number" min="1" value="10" required></label><label>간단한 사유<input name="reason" required placeholder="예: 친구 도와주기"></label><div class="button-row"><button class="button ${subtract ? "danger" : "success"}" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
 
+function openObservationModal(observationId = "", presets = {}) {
+  const observation = data.observations.find((item) => item.id === observationId);
+  const selectedStudentId = observation?.studentId || presets.studentId || observationFilters.studentId || data.students[0]?.id || "";
+  const selectedDate = observation?.date || presets.date || todayString();
+  const selectedCategory = observation?.category || presets.category || observationFilters.category || "수업";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="observation-form" class="modal-card form observation-modal-card" data-id="${observationId}"><h2>${observation ? "관찰 기록 수정" : "새 관찰 기록"}</h2><label>학생 검색<input id="observation-student-search" type="search" placeholder="이름 또는 번호 입력 (예: 학생12)" autocomplete="off"></label><fieldset class="observation-student-picker"><legend>학생 선택</legend>${data.students.map((student, index) => `<label data-student-search="${escapeHtml(`${student.name} ${student.number || index + 1}`.toLocaleLowerCase("ko-KR"))}"><input type="radio" name="studentId" value="${student.id}" ${student.id === selectedStudentId ? "checked" : ""} required><span>${escapeHtml(student.name)}</span></label>`).join("")}</fieldset><label>날짜<input name="date" type="date" value="${selectedDate}" required></label><label>분류<select name="category">${OBSERVATION_CATEGORIES.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${category}</option>`).join("")}</select></label><label>내용<textarea name="content" maxlength="1000" required placeholder="관찰한 내용을 구체적으로 적어 주세요.">${observation ? escapeHtml(observation.content) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${observation ? "" : `<button class="button" type="submit" data-continue="true">저장 후 계속 기록</button>`}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  document.querySelector("#observation-student-search")?.focus();
+}
+
+function openDeleteObservationModal(observationId) {
+  const observation = data.observations.find((item) => item.id === observationId); if (!observation) return;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>관찰 기록 삭제</h2><p>이 관찰 기록을 삭제하시겠습니까?</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-observation" data-id="${observation.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
+}
+
 function openAssignmentModal(assignmentId = "") {
   const assignment = data.assignments.find((item) => item.id === assignmentId);
   const presetSubject = assignment && SUBJECTS.includes(assignment.subject) ? assignment.subject : "기타";
   const customSubject = assignment && !SUBJECTS.includes(assignment.subject) ? assignment.subject : "";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="assignment-form" class="modal-card form" data-id="${assignmentId}"><h2>${assignment ? "과제 수정" : "새 과제 만들기"}</h2><label>과제 제목<input name="title" maxlength="80" required value="${assignment ? escapeHtml(assignment.title) : ""}" placeholder="예: 수학 익힘책 30쪽"></label><label>과목<select name="subjectPreset">${SUBJECTS.map((subject) => `<option ${presetSubject === subject ? "selected" : ""}>${subject}</option>`).join("")}</select></label><label>과목 직접 입력 (선택)<input name="subjectCustom" maxlength="30" value="${escapeHtml(customSubject)}" placeholder="예: 미술"></label><label>과제 설명 (선택)<textarea name="description" maxlength="300" placeholder="과제 내용을 간단히 적어 주세요.">${assignment ? escapeHtml(assignment.description) : ""}</textarea></label><label>제출 기한<input name="dueDate" type="date" required value="${assignment?.dueDate || todayString()}"></label><label class="check-label"><input name="important" type="checkbox" ${assignment?.important ? "checked" : ""}> 중요 과제로 표시</label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="assignment-form" class="modal-card form" data-id="${assignmentId}"><h2>${assignment ? "과제 수정" : "새 과제 만들기"}</h2><label>과제 제목<input name="title" maxlength="80" required value="${assignment ? escapeHtml(assignment.title) : ""}" placeholder="예: 수학 익힘책 30쪽"></label><label>과목<select name="subjectPreset">${SUBJECTS.map((subject) => `<option ${presetSubject === subject ? "selected" : ""}>${subject}</option>`).join("")}</select></label><label>과목 직접 입력 (선택)<input name="subjectCustom" maxlength="30" value="${escapeHtml(customSubject)}" placeholder="예: 미술"></label><label>과제 설명 (선택)<textarea name="description" maxlength="300" placeholder="과제 내용을 간단히 적어 주세요.">${assignment ? escapeHtml(assignment.description) : ""}</textarea></label><label>제출 기한<input name="dueDate" type="date" required value="${assignment?.dueDate || todayString()}"></label><label class="check-label"><input name="important" type="checkbox" ${assignment?.important ? "checked" : ""}><span>중요 과제로 표시</span></label><label class="assignment-point-field">완료 시 지급 포인트<span class="point-input-row"><input name="points" type="number" min="0" step="1" required value="${assignment?.points ?? 0}"><span>P</span></span></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+
+function assignmentAward(assignment, studentId) {
+  return assignment.pointAwards?.[studentId] || { awarded: false, amount: 0 };
+}
+
+function changeAssignmentStudentStatus(assignment, studentIndex, nextStatus) {
+  const student = data.students[studentIndex]; if (!student || !ASSIGNMENT_STATUSES.includes(nextStatus)) return false;
+  const previousStatus = assignment.statuses[studentIndex]; if (previousStatus === nextStatus) return true;
+  if (!assignment.pointAwards || typeof assignment.pointAwards !== "object") assignment.pointAwards = {};
+  const award = assignmentAward(assignment, student.id);
+  if (previousStatus === "submitted" && nextStatus !== "submitted" && award.awarded && award.amount > 0) {
+    if (student.points < award.amount) {
+      alert(`${student.name}의 현재 포인트가 ${student.points}P라서 ${award.amount}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
+      return false;
+    }
+    student.points -= award.amount;
+    student.pointHistory.push({ id: crypto.randomUUID(), amount: -award.amount, reason: `${assignment.title} 제출 완료 취소`, date: new Date().toLocaleDateString("ko-KR") });
+    assignment.pointAwards[student.id] = { ...award, awarded: false, revokedAt: new Date().toISOString() };
+  }
+  assignment.statuses[studentIndex] = nextStatus;
+  if (nextStatus === "submitted" && !assignmentAward(assignment, student.id).awarded) {
+    const amount = assignment.points;
+    if (amount > 0) {
+      student.points += amount;
+      student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: `${assignment.title} 제출 완료`, date: new Date().toLocaleDateString("ko-KR") });
+    }
+    assignment.pointAwards[student.id] = { awarded: true, amount, awardedAt: new Date().toISOString(), revokedAt: null };
+  }
+  refreshAssignmentCompletion(assignment);
+  return true;
+}
+
+function openCancelAssignmentSubmissionModal(assignmentId, studentIndex, nextStatus) {
+  const assignment = data.assignments.find((item) => item.id === assignmentId); const student = data.students[studentIndex];
+  if (!assignment || !student || assignment.statuses[studentIndex] !== "submitted") return;
+  const award = assignmentAward(assignment, student.id); const recovery = award.awarded && award.amount > 0 ? `<br>이 과제로 지급된 ${award.amount}P도 함께 회수됩니다.` : "";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>제출 완료 취소</h2><p class="confirm-message"><strong>${escapeHtml(student.name)}</strong>의 제출 완료를 취소하시겠습니까?${recovery}</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-cancel-assignment-submission" data-id="${assignment.id}" data-student="${studentIndex}" data-status="${nextStatus}">확인</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
 }
 
 function openAssignmentRequestModal(assignmentId) {
@@ -432,8 +526,12 @@ function reopenAssignment(assignmentId) {
 function applyBulkAssignmentStatus(assignmentId, status, scope) {
   const assignment = data.assignments.find((item) => item.id === assignmentId); if (!assignment) return;
   const targets = scope === "selected" ? [...selectedStudentsForAssignment(assignmentId)] : data.students.map((_, index) => index);
-  targets.forEach((studentIndex) => { assignment.statuses[studentIndex] = status; });
-  refreshAssignmentCompletion(assignment);
+  const recoveries = targets.map((studentIndex) => ({ studentIndex, student: data.students[studentIndex], award: assignmentAward(assignment, data.students[studentIndex]?.id) }))
+    .filter((item) => assignment.statuses[item.studentIndex] === "submitted" && status !== "submitted" && item.award.awarded && item.award.amount > 0);
+  const insufficient = recoveries.find((item) => item.student.points < item.award.amount);
+  if (insufficient) { alert(`${insufficient.student.name}의 현재 포인트가 부족해 제출 완료를 취소할 수 없습니다.`); return; }
+  if (recoveries.length && !confirm(`${recoveries.length}명의 제출 완료를 취소하면 지급된 과제 포인트도 함께 회수됩니다.\n계속하시겠습니까?`)) return;
+  targets.forEach((studentIndex) => { changeAssignmentStudentStatus(assignment, studentIndex, status); });
   if (scope === "selected") selectedStudentsForAssignment(assignmentId).clear();
   saveData(); render(); toast(`${targets.length}명의 상태를 ${ASSIGNMENT_STATUS_LABELS[status]}로 변경했습니다.`);
 }
@@ -484,12 +582,21 @@ app.addEventListener("click", (event) => {
   if (action === "cycle-assignment-status") {
     const assignment = data.assignments.find((item) => item.id === target.dataset.assignment); if (!assignment) return;
     const studentIndex = Number(target.dataset.student); const currentIndex = ASSIGNMENT_STATUSES.indexOf(assignment.statuses[studentIndex]);
-    assignment.statuses[studentIndex] = ASSIGNMENT_STATUSES[(currentIndex + 1) % ASSIGNMENT_STATUSES.length]; refreshAssignmentCompletion(assignment); saveData(); render(); return;
+    const nextStatus = ASSIGNMENT_STATUSES[(currentIndex + 1) % ASSIGNMENT_STATUSES.length];
+    if (assignment.statuses[studentIndex] === "submitted") return openCancelAssignmentSubmissionModal(assignment.id, studentIndex, nextStatus);
+    if (changeAssignmentStudentStatus(assignment, studentIndex, nextStatus)) { saveData(); render(); }
+    return;
   }
   if (action === "review-assignment") {
     const assignment = data.assignments.find((item) => item.id === target.dataset.assignment); if (!assignment) return;
     const studentIndex = Number(target.dataset.student); if (assignment.statuses[studentIndex] !== "review") return;
-    assignment.statuses[studentIndex] = target.dataset.status; refreshAssignmentCompletion(assignment); saveData(); render(); toast(target.dataset.status === "submitted" ? "제출을 확인했습니다." : "제출 요청을 반려했습니다."); return;
+    if (changeAssignmentStudentStatus(assignment, studentIndex, target.dataset.status)) { saveData(); render(); toast(target.dataset.status === "submitted" ? "제출을 확인하고 과제 포인트를 지급했습니다." : "제출 요청을 반려했습니다."); }
+    return;
+  }
+  if (action === "confirm-cancel-assignment-submission") {
+    const assignment = data.assignments.find((item) => item.id === target.dataset.id); const studentIndex = Number(target.dataset.student); if (!assignment) return;
+    if (changeAssignmentStudentStatus(assignment, studentIndex, target.dataset.status)) { saveData(); render(); toast("제출 완료를 취소하고 지급 포인트를 회수했습니다."); }
+    return;
   }
   if (action === "select-assignment-student") {
     const selected = selectedStudentsForAssignment(target.dataset.assignment); const studentIndex = Number(target.dataset.student);
@@ -507,6 +614,15 @@ app.addEventListener("click", (event) => {
     saveData(); render(); toast("과제와 제출 기록을 삭제했습니다."); return;
   }
   if (action === "open-points") return openPointModal(target.dataset.id, target.dataset.kind);
+  if (action === "new-observation") return openObservationModal();
+  if (action === "edit-observation") return openObservationModal(target.dataset.id);
+  if (action === "ask-delete-observation") return openDeleteObservationModal(target.dataset.id);
+  if (action === "confirm-delete-observation") {
+    data.observations = data.observations.filter((observation) => observation.id !== target.dataset.id);
+    saveData(); render(); toast("관찰 기록을 삭제했습니다."); return;
+  }
+  if (action === "clear-observation-filters") { observationFilters = { studentId: "", category: "", startDate: "", endDate: "", keyword: "" }; render(); return; }
+  if (action === "filter-observation-category") { observationFilters.category = target.dataset.category; render(); return; }
   if (action === "add-role") return openRoleModal(target.dataset.scope, target.dataset.template || "");
   if (action === "edit-role") return openRoleModal(target.dataset.scope, target.dataset.template || "", target.dataset.id);
   if (action === "move-role") {
@@ -551,6 +667,12 @@ app.addEventListener("change", (event) => {
   if (event.target.id === "assignment-student-view") { assignmentStudentView = event.target.value; render(); }
 });
 
+app.addEventListener("input", (event) => {
+  if (event.target.id !== "observation-student-search") return;
+  const keyword = event.target.value.trim().toLocaleLowerCase("ko-KR");
+  document.querySelectorAll("[data-student-search]").forEach((item) => { item.hidden = keyword && !item.dataset.studentSearch.includes(keyword); });
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") document.querySelector(".modal")?.remove();
 });
@@ -558,7 +680,18 @@ document.addEventListener("keydown", (event) => {
 app.addEventListener("submit", (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
   if (form.id === "observation-form") {
-    data.observations.push({ id: crypto.randomUUID(), studentId: formData.get("studentId"), date: formData.get("date"), category: formData.get("category"), content: formData.get("content") }); saveData(); render(); toast("관찰 기록을 저장했습니다.");
+    const studentId = formData.get("studentId"); const date = formData.get("date"); const category = formData.get("category"); const content = formData.get("content").trim();
+    if (!studentById(studentId) || !date || !OBSERVATION_CATEGORIES.includes(category) || !content) return;
+    const now = new Date().toISOString(); const existing = data.observations.find((item) => item.id === form.dataset.id);
+    if (existing) Object.assign(existing, { studentId, date, category, content, updatedAt: now });
+    else data.observations.push({ id: crypto.randomUUID(), studentId, date, category, content, createdAt: now, updatedAt: now });
+    saveData();
+    if (!existing && event.submitter?.dataset.continue === "true") { form.elements.content.value = ""; form.elements.content.focus(); toast("저장했습니다. 다음 기록을 이어서 작성하세요."); return; }
+    render(); toast(existing ? "관찰 기록을 수정했습니다." : "관찰 기록을 저장했습니다.");
+  }
+  if (form.id === "observation-filter-form") {
+    observationFilters = { studentId: formData.get("studentId"), category: formData.get("category"), startDate: formData.get("startDate"), endDate: formData.get("endDate"), keyword: formData.get("keyword").trim() };
+    render();
   }
   if (form.id === "point-form") {
     const student = studentById(form.dataset.id); const rawAmount = Number(formData.get("amount")); const amount = form.dataset.kind === "subtract" ? -rawAmount : rawAmount; const reason = formData.get("reason").trim();
@@ -583,10 +716,11 @@ app.addEventListener("submit", (event) => {
   if (form.id === "assignment-form") {
     const title = formData.get("title").trim(); const customSubject = formData.get("subjectCustom").trim();
     const subject = customSubject || formData.get("subjectPreset"); const description = formData.get("description").trim(); const dueDate = formData.get("dueDate");
-    if (!title || !subject || !dueDate) return;
+    const points = Number(formData.get("points"));
+    if (!title || !subject || !dueDate || !Number.isInteger(points) || points < 0) return;
     const existing = data.assignments.find((assignment) => assignment.id === form.dataset.id);
-    if (existing) { Object.assign(existing, { title, subject, description, dueDate, important: formData.has("important") }); refreshAssignmentCompletion(existing); }
-    else { const newAssignment = { id: crypto.randomUUID(), title, subject, description, createdAt: new Date().toISOString(), dueDate, important: formData.has("important"), assignmentState: "active", completed: false, completedAt: null, statuses: data.students.map(() => "missing") }; refreshAssignmentCompletion(newAssignment); data.assignments.push(newAssignment); }
+    if (existing) { Object.assign(existing, { title, subject, description, dueDate, important: formData.has("important"), points }); refreshAssignmentCompletion(existing); }
+    else { const newAssignment = { id: crypto.randomUUID(), title, subject, description, createdAt: new Date().toISOString(), dueDate, important: formData.has("important"), points, pointAwards: {}, assignmentState: "active", completed: false, completedAt: null, statuses: data.students.map(() => "missing") }; refreshAssignmentCompletion(newAssignment); data.assignments.push(newAssignment); }
     saveData(); render(); toast(existing ? "과제를 수정했습니다." : "새 과제를 만들었습니다.");
   }
 });
