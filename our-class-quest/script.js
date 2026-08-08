@@ -27,6 +27,15 @@ const CARD_ABILITIES = [
   { id: "balance", name: "균형의 힘", icon: "⭐", description: "과제·1인1역", weight: 1 }
 ];
 const STORAGE_KEY = "ourClassQuestDemoV1";
+const DEFAULT_CLASS_FEATURES = { groups: true, roles: true, assignments: true, points: true, cards: true, rankings: true };
+const CLASS_FEATURES = [
+  { key: "groups", label: "모둠활동", description: "모둠 구성, 점수와 공동 미션" },
+  { key: "roles", label: "1인1역", description: "역할 신청과 완료 보상" },
+  { key: "assignments", label: "과제", description: "과제와 학생별 제출 현황" },
+  { key: "points", label: "포인트", description: "학생 포인트 지급과 차감" },
+  { key: "cards", label: "카드", description: "위인 카드 뽑기와 도감" },
+  { key: "rankings", label: "랭킹", description: "활동별 학급 순위" }
+];
 const RANKING_TYPES = [
   { id: "activity", title: "획득 포인트", icon: "◆", unit: "P" },
   { id: "roles", title: "1인1역 활동", icon: "✓", unit: "회" },
@@ -39,6 +48,11 @@ const TIMETABLE_DAYS = [
   { key: "friday", label: "금요일", day: 5 }
 ];
 const EMPTY_TIMETABLE = () => Array.from({ length: 6 }, () => "");
+const DEFAULT_CLASS_MISSIONS = [
+  { target: 500, reward: "우리 반 영화 보기" }, { target: 1000, reward: "간식 파티" },
+  { target: 1500, reward: "자유 놀이 시간" }, { target: 2000, reward: "특별 활동" }
+];
+const DEFAULT_GROUPS = () => Array.from({ length: 4 }, (_, index) => ({ id: `group-${index + 1}`, name: `${index + 1}모둠`, score: 0, active: true, order: index }));
 
 const FIGURES = [
   { id: "sejong", name: "세종대왕", rarity: "전설", era: "조선", achievement: "훈민정음을 창제해 우리 글을 널리 펼쳤어요." },
@@ -89,15 +103,21 @@ function normalizeDrawRates(source = {}, fallback = DEFAULT_DRAW_RATES) {
 
 function createDemoData() {
   const students = STUDENT_NAMES.map((name, index) => ({
-    id: `s${index + 1}`, name, points: [75, 45, 95, 30, 60][index], cards: index === 0 ? { hongdo: { 일반: { academic: 1, responsibility: 1, balance: 0 } }, saimdang: { 희귀: { academic: 1, responsibility: 0, balance: 0 } } } : {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [],
+    id: `s${index + 1}`, number: index + 1, name, loginId: `student${String(index + 1).padStart(2, "0")}`, active: true, points: [75, 45, 95, 30, 60][index], cards: index === 0 ? { hongdo: { 일반: { academic: 1, responsibility: 1, balance: 0 } }, saimdang: { 희귀: { academic: 1, responsibility: 0, balance: 0 } } } : {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [],
     pointHistory: [{ id: crypto.randomUUID(), amount: [20, 10, 25, 5, 15][index], reason: "이번 주 역할 참여", date: new Date().toLocaleDateString("ko-KR") }]
   }));
   return {
     students,
+    classSettings: { appName: "우리반 퀘스트", className: "우리 반", teacherName: "선생님", features: { ...DEFAULT_CLASS_FEATURES } },
     roleApplications: [
       { id: crypto.randomUUID(), studentId: "s2", roleId: "board", status: "waiting" },
       { id: crypto.randomUUID(), studentId: "s3", roleId: "lunch", status: "completed" }
     ],
+    dailyRoleApplicationLimit: 1,
+    groups: DEFAULT_GROUPS(),
+    groupAssignments: {},
+    groupScoreTransactions: [],
+    classMissions: DEFAULT_CLASS_MISSIONS.map((mission) => ({ id: crypto.randomUUID(), ...mission, confirmed: false, confirmedAt: null })),
     currentRoles: structuredClone(DEFAULT_ROLES),
     roleTemplates: [{ id: crypto.randomUUID(), name: "기본 1인1역", roles: structuredClone(DEFAULT_ROLES) }],
     assignments: ASSIGNMENTS.map((assignment, assignmentIndex) => ({
@@ -171,7 +191,8 @@ function loadData() {
         dailyCap: Number.isInteger(dailyCap) && dailyCap >= 0 ? dailyCap : DEFAULT_CARD_ABILITY_SETTINGS[rarity].dailyCap, abilities
       }];
     }));
-    saved.students = (Array.isArray(saved.students) ? saved.students : []).map((student) => {
+    const usedLoginIds = new Set();
+    saved.students = (Array.isArray(saved.students) ? saved.students : []).map((student, studentIndex) => {
       const legacyCards = Array.isArray(student.cards) ? student.cards.reduce((counts, card) => {
         const id = typeof card === "string" ? card : card?.id; if (!id) return counts;
         const rarity = typeof card === "object" && CARD_RARITIES.includes(card?.rarity) ? card.rarity : (legacyRarityByCardId[id] || "일반");
@@ -193,8 +214,12 @@ function loadData() {
       const representativeAbilityId = representedAbilities[representative?.abilityId] > 0 ? representative.abilityId : fallbackAbility;
       const representativeCard = representative && CARD_RARITIES.includes(representative.rarity) && representativeAbilityId
         ? { cardId: representative.cardId, rarity: representative.rarity, abilityId: representativeAbilityId } : null;
-      return { ...student, cards, representativeCard, cardUpgradeHistory: Array.isArray(student.cardUpgradeHistory) ? student.cardUpgradeHistory : [], cardAcquisitionHistory: Array.isArray(student.cardAcquisitionHistory) ? student.cardAcquisitionHistory : [], pointHistory: Array.isArray(student.pointHistory) ? student.pointHistory : [] };
+      let loginId = String(student.loginId || `student${String(studentIndex + 1).padStart(2, "0")}`).trim();
+      if (!loginId || usedLoginIds.has(loginId.toLocaleLowerCase("en-US"))) { let suffix = studentIndex + 1; do { loginId = `student${String(suffix).padStart(2, "0")}`; suffix += 1; } while (usedLoginIds.has(loginId.toLocaleLowerCase("en-US"))); }
+      usedLoginIds.add(loginId.toLocaleLowerCase("en-US"));
+      return { ...student, number: Number.isInteger(Number(student.number)) && Number(student.number) > 0 ? Number(student.number) : studentIndex + 1, loginId, active: student.active !== false, cards, representativeCard, cardUpgradeHistory: Array.isArray(student.cardUpgradeHistory) ? student.cardUpgradeHistory : [], cardAcquisitionHistory: Array.isArray(student.cardAcquisitionHistory) ? student.cardAcquisitionHistory : [], pointHistory: Array.isArray(student.pointHistory) ? student.pointHistory : [] };
     });
+    saved.classSettings = { appName: String(saved.classSettings?.appName || "우리반 퀘스트").slice(0, 50), className: String(saved.classSettings?.className || "우리 반").slice(0, 50), teacherName: String(saved.classSettings?.teacherName || "선생님").slice(0, 30), features: Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, saved.classSettings?.features?.[key] !== false])) };
     if (!Array.isArray(saved.currentRoles)) saved.currentRoles = structuredClone(DEFAULT_ROLES);
     saved.currentRoles = saved.currentRoles.map((role) => ({ ...role, description: role.description || "" }));
     if (!Array.isArray(saved.roleTemplates)) {
@@ -216,8 +241,8 @@ function loadData() {
         completed: assignmentState === "completed",
         completedAt: assignmentState === "completed" ? (assignment.completedAt || assignment.dueDate || null) : null,
         statuses: Array.isArray(assignment.statuses)
-          ? dataLengthArray(assignment.statuses, "missing")
-          : dataLengthArray((assignment.submitted || []).map((submitted) => submitted ? "submitted" : "missing"), "missing")
+          ? dataLengthArray(assignment.statuses, "missing", saved.students.length)
+          : dataLengthArray((assignment.submitted || []).map((submitted) => submitted ? "submitted" : "missing"), "missing", saved.students.length)
       };
       refreshAssignmentCompletion(migrated);
       return migrated;
@@ -240,6 +265,14 @@ function loadData() {
     saved.weeklyTimetable = Object.fromEntries(TIMETABLE_DAYS.map((day) => [day.key, Array.from({ length: Math.max(6, Array.isArray(saved.weeklyTimetable?.[day.key]) ? saved.weeklyTimetable[day.key].length : 0) }, (_, index) => String(saved.weeklyTimetable?.[day.key]?.[index] || "").slice(0, 40))]));
     saved.dateTimetableOverrides = saved.dateTimetableOverrides && typeof saved.dateTimetableOverrides === "object" && !Array.isArray(saved.dateTimetableOverrides) ? Object.fromEntries(Object.entries(saved.dateTimetableOverrides).filter(([date, periods]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(periods)).map(([date, periods]) => [date, periods.map((period) => String(period || "").slice(0, 40))])) : {};
     saved.dailyClassNotes = saved.dailyClassNotes && typeof saved.dailyClassNotes === "object" && !Array.isArray(saved.dailyClassNotes) ? Object.fromEntries(Object.entries(saved.dailyClassNotes).filter(([date]) => /^\d{4}-\d{2}-\d{2}$/.test(date)).map(([date, note]) => [date, { text: String(typeof note === "string" ? note : note?.text || "").slice(0, 2000), updatedAt: typeof note === "object" ? note.updatedAt || "" : "" }])) : {};
+    const savedRoleLimit = Number(saved.dailyRoleApplicationLimit); saved.dailyRoleApplicationLimit = Number.isInteger(savedRoleLimit) && savedRoleLimit >= 1 && savedRoleLimit <= 5 ? savedRoleLimit : 1;
+    const savedGroups = Array.isArray(saved.groups) ? saved.groups : DEFAULT_GROUPS();
+    saved.groups = savedGroups.map((group, index) => ({ id: String(group.id || crypto.randomUUID()), name: String(group.name || `${index + 1}모둠`).slice(0, 30), score: Math.max(0, Number.isInteger(Number(group.score)) ? Number(group.score) : 0), active: group.active !== false, order: Number.isInteger(Number(group.order)) ? Number(group.order) : index }));
+    if (saved.groups.filter((group) => group.active).length < 2) DEFAULT_GROUPS().slice(0, 2).forEach((fallback) => { if (!saved.groups.some((group) => group.id === fallback.id)) saved.groups.push(fallback); else saved.groups.find((group) => group.id === fallback.id).active = true; });
+    const activeGroupIds = new Set(saved.groups.filter((group) => group.active).map((group) => group.id)); const studentIds = new Set(saved.students.map((student) => student.id));
+    saved.groupAssignments = saved.groupAssignments && typeof saved.groupAssignments === "object" && !Array.isArray(saved.groupAssignments) ? Object.fromEntries(Object.entries(saved.groupAssignments).filter(([studentId, groupId]) => studentIds.has(studentId) && activeGroupIds.has(groupId))) : {};
+    saved.groupScoreTransactions = (Array.isArray(saved.groupScoreTransactions) ? saved.groupScoreTransactions : []).map((item) => ({ id: item.id || crypto.randomUUID(), groupId: String(item.groupId || ""), groupName: String(item.groupName || "모둠"), amount: Number(item.amount) || 0, scoreAfter: Math.max(0, Number(item.scoreAfter) || 0), createdAt: item.createdAt || new Date().toISOString(), type: item.type || "manual" }));
+    saved.classMissions = (Array.isArray(saved.classMissions) ? saved.classMissions : DEFAULT_CLASS_MISSIONS).map((mission) => ({ id: mission.id || crypto.randomUUID(), target: Math.max(1, Number(mission.target) || 1), reward: String(mission.reward || "공동 활동").slice(0, 100), confirmed: Boolean(mission.confirmed), confirmedAt: mission.confirmedAt || null }));
     return saved;
   }
   catch { return createDemoData(); }
@@ -251,11 +284,28 @@ let teacherCardSetId = data.activeCardSetIds[0] || data.cardSets.find((cardSet) 
 let collectionCardSetFilter = "all";
 let editingTemplateId = null;
 let assignmentFilter = "all";
+let assignmentSubjectFilter = "";
+let assignmentSearch = "";
+let expandedAssignmentId = "";
+const assignmentStudentStatusFilters = {};
+let completedAssignmentFilters = { search: "", subject: "", from: "", to: "" };
 let assignmentStudentView = "";
+let showAllCompletedAssignments = false;
+let showAllStudentCompletedAssignments = false;
+let studentAssignmentFilter = "todo";
+let showAllStudentPoints = false;
 let observationFilters = { studentId: "", category: "", keyword: "" };
+let classStudentSearch = "";
 let rankingPeriod = "week";
 let dashboardSelectedDate = todayString();
 let dashboardMonth = dashboardSelectedDate.slice(0, 7);
+let studentManagementSearch = "";
+let studentDetailId = "";
+const studentDetailAssignmentFilters = {};
+let showAllGroupTransactions = false;
+let selectedGroupId = "";
+let selectedGroupAssignmentStudentIds = new Set();
+let pendingGroupNames = {};
 const assignmentSelections = {};
 const selectedPointStudentIds = new Set();
 let toastTimer;
@@ -263,10 +313,11 @@ const app = document.querySelector("#app");
 
 function todayString() { return new Date().toLocaleDateString("sv-SE"); }
 function dateWithOffset(offset) { const date = new Date(); date.setDate(date.getDate() + offset); return date.toLocaleDateString("sv-SE"); }
-function dataLengthArray(values, fallback) { return STUDENT_NAMES.map((_, index) => ASSIGNMENT_STATUSES.includes(values[index]) ? values[index] : fallback); }
+function dataLengthArray(values, fallback, length = STUDENT_NAMES.length) { return Array.from({ length }, (_, index) => ASSIGNMENT_STATUSES.includes(values[index]) ? values[index] : fallback); }
 
 function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 function studentById(id) { return data.students.find((student) => student.id === id); }
+function activeStudents() { return data.students.filter((student) => student.active !== false).sort((first, second) => studentNumber(first) - studentNumber(second) || first.name.localeCompare(second.name, "ko")); }
 function roleById(id) { return data.currentRoles.find((role) => role.id === id); }
 function currentStudent() { return studentById(session.studentId); }
 function cardInventory(student, cardId) { return student.cards[cardId] || {}; }
@@ -309,18 +360,39 @@ function toast(message) { const element = document.querySelector("#toast"); elem
 saveData();
 
 function renderWelcome(showStudents = false) {
-  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>우리반 퀘스트</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생으로 체험하기</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button></div>${showStudents ? `<div class="student-picker" aria-label="체험할 학생 선택">${data.students.map((student) => `<button class="student-pick" data-action="enter-student" data-id="${student.id}">${student.name}</button>`).join("")}</div>` : ""}</section></main>`;
+  document.title = data.classSettings.appName;
+  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생으로 체험하기</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button></div>${showStudents ? `<div class="student-picker" aria-label="체험할 학생 선택">${activeStudents().map((student) => `<button class="student-pick" data-action="enter-student" data-id="${student.id}">${student.name}</button>`).join("")}</div>` : ""}</section></main>`;
 }
 
-const STUDENT_NAV = [["home", "⌂", "홈"], ["roles", "✓", "오늘의 역할"], ["draw", "★", "카드 뽑기"], ["collection", "▦", "위인 도감"], ["ranking", "♛", "랭킹"]];
-const TEACHER_NAV = [["dashboard", "⌂", "대시보드"], ["students", "♙", "학생 관리"], ["roles", "✓", "1인1역"], ["assignments", "▣", "과제"], ["observations", "✎", "관찰 기록"], ["points", "◆", "포인트"], ["cards", "★", "카드 관리"], ["ranking", "♛", "랭킹"]];
+const STUDENT_NAV = [["home", "⌂", "홈"], ["roles", "✓", "오늘의 역할"], ["assignments", "▣", "과제"], ["points", "◆", "포인트"], ["draw", "★", "카드 뽑기"], ["collection", "▦", "위인 도감"], ["ranking", "♛", "랭킹"]];
+const TEACHER_NAV = [["dashboard", "⌂", "대시보드"], ["students", "♙", "학생 관리"], ["groups", "◉", "모둠활동"], ["roles", "✓", "1인1역"], ["assignments", "▣", "과제"], ["observations", "✎", "관찰 기록"], ["points", "◆", "포인트"], ["cards", "★", "카드 관리"], ["ranking", "♛", "랭킹"], ["class-settings", "⚙", "학급 설정"]];
 
 function navHtml(items) { return items.map(([id, icon, label]) => `<button class="nav-button ${session.view === id ? "active" : ""}" data-action="navigate" data-view="${id}"><span>${icon}</span>${label}</button>`).join(""); }
+function featureEnabled(key) { return data.classSettings.features?.[key] !== false; }
+function teacherNavItems() {
+  const featureByView = { groups: "groups", roles: "roles", assignments: "assignments", points: "points", cards: "cards", ranking: "rankings" };
+  return TEACHER_NAV.filter(([view]) => !featureByView[view] || featureEnabled(featureByView[view]));
+}
+function studentNavItems() {
+  const featureByView = { roles: "roles", assignments: "assignments", points: "points", draw: "cards", collection: "cards", ranking: "rankings" };
+  return STUDENT_NAV.filter(([view]) => !featureByView[view] || featureEnabled(featureByView[view]));
+}
+function todayRoleApplicationsForStudent(studentId) {
+  const today = todayString();
+  return data.roleApplications.filter((application) => { if (application.studentId !== studentId || application.status === "cancelled") return false; const dates = [localDateKey(application.appliedAt), localDateKey(application.completedAt)].filter(Boolean); return dates.length ? dates.includes(today) : true; });
+}
 function shell(content, teacher = false) {
   const student = currentStudent();
-  const top = teacher ? `<span>선생님 데모</span>` : `<span>${student.name}</span>`;
-  const summary = teacher ? "" : `<section class="summary-strip"><div class="summary-item">현재 포인트<strong>${student.points}P</strong></div><div class="summary-item">오늘 역할<strong>${data.roleApplications.filter((item) => item.studentId === student.id && item.status !== "cancelled").length}개</strong></div><div class="summary-item">보유 카드<strong>${cardCount(student)}장</strong></div></section>`;
-  return `<div class="app-shell ${teacher ? "teacher-shell" : "student-shell"}"><header class="topbar"><div class="brand"><span class="brand-icon">⚔</span>우리반 퀘스트</div><div class="user-area">${top}<button class="ghost-button" data-action="logout">처음으로</button></div></header>${summary}<div class="layout"><nav class="side-nav">${navHtml(teacher ? TEACHER_NAV : STUDENT_NAV)}</nav><main class="content">${content}</main></div></div>`;
+  document.title = data.classSettings.appName;
+  const top = teacher ? `<span>${escapeHtml(data.classSettings.className)} · ${escapeHtml(data.classSettings.teacherName)}</span>` : `<span>${escapeHtml(data.classSettings.className)} · ${escapeHtml(student.name)}</span>`;
+  const studentSummaryItems = teacher ? [] : [
+    `<div class="summary-item class-summary-item">학급<strong>${escapeHtml(data.classSettings.className)}</strong></div>`,
+    featureEnabled("points") ? `<div class="summary-item">현재 포인트<strong>${student.points}P</strong></div>` : "",
+    featureEnabled("roles") ? `<div class="summary-item">오늘 역할<strong>${todayRoleApplicationsForStudent(student.id).length}개</strong></div>` : "",
+    featureEnabled("cards") ? `<div class="summary-item">보유 카드<strong>${cardCount(student)}장</strong></div>` : ""
+  ].filter(Boolean);
+  const summary = teacher ? "" : `<section class="summary-strip" style="--summary-count:${studentSummaryItems.length}">${studentSummaryItems.join("")}</section>`;
+  return `<div class="app-shell ${teacher ? "teacher-shell" : "student-shell"}"><header class="topbar"><div class="brand"><span class="brand-icon">⚔</span>${escapeHtml(data.classSettings.appName)}</div><div class="user-area">${top}<button class="ghost-button" data-action="logout">처음으로</button></div></header>${summary}<div class="layout"><nav class="side-nav">${navHtml(teacher ? teacherNavItems() : studentNavItems())}</nav><main class="content">${content}</main></div></div>`;
 }
 
 function assignmentStatusClass(status) { return { submitted: "success", review: "waiting", missing: "danger" }[status] || "danger"; }
@@ -348,25 +420,57 @@ function studentAssignmentCard(assignment, studentIndex, closed = false) {
     : status === "missing"
     ? `<button class="button assignment-request-button" data-action="open-assignment-request" data-id="${assignment.id}">🙋 제출했어요!</button>`
     : status === "review"
-      ? `<button class="button secondary assignment-request-button" disabled>⏳ 선생님 확인 대기</button>`
+      ? `<div class="assignment-review-state"><strong>⏳ 확인 대기 중</strong><small>선생님이 확인하고 있어요.</small></div>`
       : `<span class="pill success assignment-finished-label">✓ 제출 완료</span>`;
-  return `<article class="card student-assignment-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">완료 시 +${assignment.points}P</span>` : ""}</div></div><h3>${escapeHtml(assignment.title)}</h3>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}<div class="assignment-meta"><span>📅 ${formatDueDate(assignment.dueDate)}</span><span class="pill ${assignmentStatusClass(status)}">${ASSIGNMENT_STATUS_LABELS[status]}</span></div>${statusControl}</article>`;
+  return `<article class="card student-assignment-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">완료 시 +${assignment.points}P</span>` : ""}</div></div><h3>${escapeHtml(assignment.title)}</h3>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}<div class="assignment-meta"><span>📅 ${formatDueDate(assignment.dueDate)}</span></div>${statusControl}</article>`;
 }
 
-function studentHome() {
+function studentHomeLegacy() {
   const student = currentStudent(); const studentIndex = data.students.findIndex((item) => item.id === student.id);
   const recent = student.pointHistory.slice(-4).reverse();
   const activeAssignments = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment));
   const completedAssignments = data.assignments.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
+  const shownCompletedAssignments = showAllStudentCompletedAssignments ? completedAssignments : completedAssignments.slice(0, 5);
   const representative = representativeCardInfo(student);
   const representativeHtml = representative ? `<section class="representative-card-summary"><div><small>나의 대표 카드</small><h2>${escapeHtml(representative.card.name)} <span class="pill rarity-${rarityClass(representative.rarity)}">${representative.rarity}</span></h2></div><div><strong>특수능력</strong><p>${abilitySummary(representative.rarity, representative.abilityId)}</p><small>오늘 카드 보너스 ${todayCardBonus(student)} / ${representative.setting.dailyCap}P</small></div></section>` : `<section class="representative-card-summary empty-representative"><div><small>나의 대표 카드</small><h2>아직 장착한 카드가 없어요.</h2><p>위인 도감에서 보유 카드를 대표 카드로 장착해 보세요.</p></div></section>`;
-  return `<section class="hero"><h2>오늘도 우리 반을 위해<br>퀘스트를 완료해 보세요! ✨</h2><p>작은 도움이 모여 멋진 교실을 만들어요.</p></section>${representativeHtml}<h2 class="section-title">오늘의 과제</h2>${activeAssignments.length ? `<div class="grid">${activeAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}${completedAssignments.length ? `<details class="completed-assignments"><summary>지난 과제 ${completedAssignments.length}개 보기</summary><div class="grid">${completedAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex, true)).join("")}</div></details>` : ""}<h2 class="section-title">최근 포인트 내역</h2>${recent.length ? `<div class="list">${recent.map((item) => pointHistoryRow(item)).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}`;
+  return `<section class="hero"><h2>오늘도 우리 반을 위해<br>퀘스트를 완료해 보세요! ✨</h2><p>작은 도움이 모여 멋진 교실을 만들어요.</p></section>${representativeHtml}<h2 class="section-title">오늘의 과제</h2>${activeAssignments.length ? `<div class="grid">${activeAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}${completedAssignments.length ? `<details class="completed-assignments"><summary>지난 과제 ${completedAssignments.length}개 · ${showAllStudentCompletedAssignments ? "전체" : `최근 ${Math.min(5, completedAssignments.length)}개`} 보기</summary><div class="grid">${shownCompletedAssignments.map((assignment) => studentAssignmentCard(assignment, studentIndex, true)).join("")}</div>${completedAssignments.length > 5 ? `<button class="button secondary record-view-all" data-action="toggle-student-completed-assignments">${showAllStudentCompletedAssignments ? "최근 5개만 보기" : "전체 보기"}</button>` : ""}</details>` : ""}<h2 class="section-title">최근 포인트 내역</h2>${recent.length ? `<div class="list">${recent.map((item) => pointHistoryRow(item)).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}`;
+}
+
+function studentAssignmentSort(studentIndex) {
+  const order = { missing: 0, review: 1, submitted: 2 };
+  return (first, second) => (order[first.statuses[studentIndex] || "missing"] - order[second.statuses[studentIndex] || "missing"]) || String(first.dueDate || "9999-12-31").localeCompare(String(second.dueDate || "9999-12-31")) || String(second.createdAt || "").localeCompare(String(first.createdAt || ""));
+}
+function studentHome() {
+  const student = currentStudent(); const studentIndex = data.students.findIndex((item) => item.id === student.id);
+  const assignments = featureEnabled("assignments") ? data.assignments.filter((assignment) => !isAssignmentCompleted(assignment)).sort(studentAssignmentSort(studentIndex)) : [];
+  const roleApplications = featureEnabled("roles") ? todayRoleApplicationsForStudent(student.id) : [];
+  const roleSummary = featureEnabled("roles") ? `<article class="card student-home-role"><div><span class="subject-badge">오늘의 역할</span><h3>${roleApplications.length ? `${roleApplications.length}개 참여 중` : "아직 신청한 역할이 없어요"}</h3><p class="muted">${roleApplications.length ? roleApplications.map((application) => escapeHtml(roleById(application.roleId)?.name || "역할")).join(" · ") : "역할을 골라 우리 반을 함께 도와주세요."}</p></div><button class="button secondary compact" data-action="navigate" data-view="roles">역할 보기</button></article>` : "";
+  const assignmentSection = featureEnabled("assignments") ? `<div class="section-heading student-task-heading"><div><h2 class="section-title">진행 중 과제</h2><p class="muted">미제출 과제와 가까운 마감일을 먼저 보여 줍니다.</p></div><button class="button secondary compact" data-action="navigate" data-view="assignments">과제 전체 보기</button></div>${assignments.length ? `<div class="grid student-home-assignment-grid">${assignments.map((assignment) => studentAssignmentCard(assignment, studentIndex)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}` : "";
+  const recentPoints = featureEnabled("points") ? student.pointHistory.slice(-5).reverse() : [];
+  const pointSection = featureEnabled("points") ? `<div class="section-heading student-state-heading"><div><h2 class="section-title">나의 현재 상태</h2><p class="muted">현재 ${student.points}P · 최근 포인트 내역</p></div><button class="button secondary compact" data-action="navigate" data-view="points">포인트 전체 보기</button></div>${recentPoints.length ? `<div class="list student-home-points">${recentPoints.map(pointHistoryRow).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}` : "";
+  const representative = featureEnabled("cards") ? representativeCardInfo(student) : null;
+  const representativeHtml = !featureEnabled("cards") ? "" : representative ? `<section class="representative-card-summary student-home-representative"><div><small>나의 대표 카드</small><h2>${escapeHtml(representative.card.name)} <span class="pill rarity-${rarityClass(representative.rarity)}">${representative.rarity}</span></h2></div><div><strong>특수능력</strong><p>${abilitySummary(representative.rarity, representative.abilityId)}</p><small>오늘 카드 보너스 ${todayCardBonus(student)} / ${representative.setting.dailyCap}P</small></div></section>` : `<section class="representative-card-summary empty-representative student-home-representative"><div><small>나의 대표 카드</small><h2>아직 장착한 카드가 없어요.</h2><p>위인 도감에서 보유 카드를 대표 카드로 장착해 보세요.</p></div></section>`;
+  return `<section class="hero student-home-hero"><h2>오늘도 우리 반을 함께 빛내요! ✨</h2><p>해야 할 일을 하나씩 확인해 보세요.</p></section><section class="student-today-tasks"><h1 class="student-home-section-title">오늘 해야 할 일</h1>${roleSummary}${assignmentSection}</section>${pointSection}${representativeHtml}`;
+}
+
+function studentAssignments() {
+  const student = currentStudent(); const studentIndex = data.students.findIndex((item) => item.id === student.id); const sorter = studentAssignmentSort(studentIndex);
+  const matching = data.assignments.filter((assignment) => { const status = assignment.statuses[studentIndex] || "missing"; if (studentAssignmentFilter === "todo") return status === "missing" && !isAssignmentCompleted(assignment); if (studentAssignmentFilter === "review") return status === "review" && !isAssignmentCompleted(assignment); return status === "submitted"; }).sort((first, second) => studentAssignmentFilter === "done" ? sortCompletedAssignments(first, second) : sorter(first, second));
+  const shown = studentAssignmentFilter === "done" && !showAllStudentCompletedAssignments ? matching.slice(0, 5) : matching;
+  const filters = [["todo", "해야 할 과제"], ["review", "확인 대기"], ["done", "완료"]].map(([value, label]) => `<button class="button compact ${studentAssignmentFilter === value ? "active" : "secondary"}" data-action="set-student-assignment-filter" data-filter="${value}">${label}</button>`).join("");
+  const emptyLabel = { todo: "해야 할 과제가 없습니다.", review: "확인 대기 중인 과제가 없습니다.", done: "완료한 과제가 없습니다." }[studentAssignmentFilter];
+  return `<div class="section-heading"><div><h1 class="page-heading">과제</h1><p class="page-description">나의 과제 상태만 확인할 수 있습니다.</p></div></div><div class="student-assignment-page-filters">${filters}</div>${shown.length ? `<div class="grid student-assignment-page-grid">${shown.map((assignment) => studentAssignmentCard(assignment, studentIndex, isAssignmentCompleted(assignment))).join("")}</div>` : `<div class="empty">${emptyLabel}</div>`}${studentAssignmentFilter === "done" && matching.length > 5 ? `<button class="button secondary record-view-all" data-action="toggle-student-completed-assignments">${showAllStudentCompletedAssignments ? "최근 5개만 보기" : `전체 ${matching.length}개 보기`}</button>` : ""}`;
+}
+
+function studentPoints() {
+  const student = currentStudent(); const history = [...(student.pointHistory || [])].reverse(); const shown = showAllStudentPoints ? history : history.slice(0, 5);
+  return `<div class="section-heading"><div><h1 class="page-heading">포인트</h1><p class="page-description">나의 포인트와 변동 내역만 확인할 수 있습니다.</p></div></div><section class="card student-point-balance"><span>현재 보유 포인트</span><strong>${student.points}P</strong></section><section class="student-point-history"><div class="section-heading"><h2>최근 포인트 내역</h2><span class="muted">${showAllStudentPoints ? `전체 ${history.length}건` : `최근 ${Math.min(5, history.length)}건`}</span></div>${shown.length ? `<div class="list">${shown.map(pointHistoryRow).join("")}</div>` : `<div class="empty">포인트 내역이 없습니다.</div>`}${history.length > 5 ? `<button class="button secondary record-view-all" data-action="toggle-student-point-history">${showAllStudentPoints ? "최근 5건만 보기" : "전체 보기"}</button>` : ""}</section>`;
 }
 
 function studentRoles() {
   const student = currentStudent();
-  const ownActive = data.roleApplications.filter((item) => item.studentId === student.id && item.status !== "cancelled");
-  return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 2개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><div class="grid">${data.currentRoles.map((role) => {
+  const ownActive = todayRoleApplicationsForStudent(student.id); const limit = data.dailyRoleApplicationLimit;
+  return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 ${limit}개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><section class="card role-application-limit-status"><span>오늘 신청</span><strong>${ownActive.length} / ${limit}개</strong>${ownActive.length >= limit ? `<small>오늘 신청 가능한 1인1역을 모두 신청했습니다.</small>` : `<small>${limit - ownActive.length}개 더 신청할 수 있어요.</small>`}</section><div class="grid">${data.currentRoles.map((role) => {
     const applications = data.roleApplications.filter((item) => item.roleId === role.id && item.status !== "cancelled");
     const mine = applications.find((item) => item.studentId === student.id);
     const full = applications.length >= role.capacity;
@@ -374,7 +478,7 @@ function studentRoles() {
       ? `<button class="button secondary" type="button" disabled>완료</button>`
       : mine?.status === "waiting"
         ? `<button class="button danger" type="button" data-action="open-student-cancel" data-id="${mine.id}">신청 취소</button>`
-        : `<button class="button" type="button" data-action="apply-role" data-id="${role.id}" ${full || ownActive.length >= 2 ? "disabled" : ""}>${full ? "모집 완료" : ownActive.length >= 2 ? "오늘 신청 완료" : "신청하기"}</button>`;
+        : `<button class="button" type="button" data-action="apply-role" data-id="${role.id}" ${full || ownActive.length >= limit ? "disabled" : ""}>${full ? "모집 완료" : ownActive.length >= limit ? "오늘 신청 완료" : "신청하기"}</button>`;
     return `<article class="card quest-card"><div class="quest-top"><h3>${escapeHtml(role.name)}</h3><span class="points">+${role.points}P</span></div>${role.description ? `<p class="role-description">${escapeHtml(role.description)}</p>` : ""}<div><span class="pill">모집 ${applications.length} / ${role.capacity}명</span></div><div class="progress"><span style="width:${Math.min(100, applications.length / role.capacity * 100)}%"></span></div><div class="applicants">현재 신청: ${applications.length ? applications.map((item) => studentById(item.studentId).name).join(", ") : "아직 없음"}</div>${actionButton}</article>`;
   }).join("")}</div>`;
 }
@@ -389,7 +493,7 @@ function studentDraw() {
 
 function rarityClass(rarity) { return { 일반: "common", 희귀: "rare", 영웅: "hero", 전설: "legend", 고대: "ancient" }[rarity]; }
 function sortedCards(includeDeleted = false, cardSetId = "") { return data.cards.filter((card) => (includeDeleted || !card.deleted) && (!cardSetId || card.cardSetId === cardSetId)).sort((first, second) => first.order - second.order); }
-function studentCollection() {
+function studentCollectionLegacy() {
   const student = currentStudent();
   const availableSets = [...data.cardSets].filter((cardSet) => !cardSet.deleted || sortedCards(true, cardSet.id).some((card) => cardInventoryCount(student, card.id) > 0));
   const orderedSets = availableSets.sort((first, second) => Number(data.activeCardSetIds.includes(second.id)) - Number(data.activeCardSetIds.includes(first.id)) || new Date(first.createdAt) - new Date(second.createdAt));
@@ -411,6 +515,23 @@ function studentCollection() {
   return `<h1 class="page-heading">위인 도감</h1><p class="page-description">한 인물의 등급과 특수능력별 보유 수량을 확인하세요.</p><div class="collection-bonus-summary"><strong>현재 대표 카드</strong><span>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity} · ${representative.ability?.name}` : "없음"}</span><span>오늘 카드 보너스 <b>${todayCardBonus(student)} / ${bonusCap}P</b></span></div><div class="collection-filters">${filterButtons}</div>${sections || `<div class="empty">표시할 카드가 없습니다.</div>`}`;
 }
 
+function collectionCardButton(card, rarity, student) {
+  const quantity = rarityInventoryCount(student, card.id, rarity);
+  return `<button class="collection-album-card rarity-${rarityClass(rarity)}" data-action="open-collection-card" data-card-id="${card.id}" data-rarity="${rarity}" aria-label="${escapeHtml(card.name)} ${rarity} 카드 상세 보기"><span class="collection-card-visual">★</span><strong>${escapeHtml(card.name)}</strong><span class="pill rarity-${rarityClass(rarity)}">${rarity}</span><small>보유 ${quantity}</small></button>`;
+}
+function studentCollection() {
+  const student = currentStudent();
+  const availableSets = [...data.cardSets].filter((cardSet) => !cardSet.deleted || sortedCards(true, cardSet.id).some((card) => cardInventoryCount(student, card.id) > 0));
+  const orderedSets = availableSets.sort((first, second) => Number(data.activeCardSetIds.includes(second.id)) - Number(data.activeCardSetIds.includes(first.id)) || new Date(first.createdAt) - new Date(second.createdAt));
+  if (collectionCardSetFilter !== "all" && !orderedSets.some((cardSet) => cardSet.id === collectionCardSetFilter)) collectionCardSetFilter = "all";
+  const shownSetIds = new Set((collectionCardSetFilter === "all" ? orderedSets : orderedSets.filter((cardSet) => cardSet.id === collectionCardSetFilter)).map((cardSet) => cardSet.id));
+  const cards = sortedCards(true).filter((card) => shownSetIds.has(card.cardSetId) && (!card.deleted || cardInventoryCount(student, card.id) > 0));
+  const filterButtons = `<button class="collection-filter ${collectionCardSetFilter === "all" ? "selected" : ""}" data-action="filter-card-collection" data-id="all">전체</button>${orderedSets.map((cardSet) => `<button class="collection-filter ${collectionCardSetFilter === cardSet.id ? "selected" : ""}" data-action="filter-card-collection" data-id="${cardSet.id}">${escapeHtml(cardSet.name)}</button>`).join("")}`;
+  const raritySections = [...CARD_RARITIES].reverse().map((rarity) => { const owned = cards.filter((card) => rarityInventoryCount(student, card.id, rarity) > 0); const total = cards.filter((card) => !card.deleted).length; return `<section class="collection-rarity-section"><div class="section-heading"><div><h2><span class="pill rarity-${rarityClass(rarity)}">${rarity}</span> 카드</h2><p class="muted">${owned.length} / ${total} 수집</p></div></div>${owned.length ? `<div class="collection-album-grid">${owned.map((card) => collectionCardButton(card, rarity, student)).join("")}</div>` : `<div class="empty collection-rarity-empty">아직 획득한 ${rarity} 카드가 없습니다.</div>`}</section>`; }).join("");
+  const representative = representativeCardInfo(student); const bonusCap = representative?.setting.dailyCap || 0;
+  return `<h1 class="page-heading">위인 도감</h1><p class="page-description">획득한 카드를 등급별로 모아 보고, 눌러서 앞면과 능력을 확인하세요.</p><div class="collection-bonus-summary"><strong>현재 대표 카드</strong><span>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity} · ${representative.ability?.name}` : "없음"}</span><span>오늘 카드 보너스 <b>${todayCardBonus(student)} / ${bonusCap}P</b></span></div><div class="collection-filters">${filterButtons}</div>${raritySections}`;
+}
+
 function studentRanking() {
   const visibleRankings = RANKING_TYPES.filter((ranking) => data.rankingVisibility[ranking.id]);
   return `<div class="section-heading"><div><h1 class="page-heading">우리 반 활동 랭킹</h1><p class="page-description">여러 활동에서 서로의 성장을 응원해 주세요!</p></div>${rankingPeriodButtons()}</div>${visibleRankings.length ? `<div class="ranking-grid">${visibleRankings.map((ranking) => studentRankingCard(ranking)).join("")}</div>` : `<div class="empty">선생님이 공개한 랭킹이 아직 없어요.</div>`}`;
@@ -424,7 +545,7 @@ function roleRankingValue(student) { return data.roleApplications.filter((applic
 function assignmentRankingValue(student) { const index = data.students.findIndex((item) => item.id === student.id); return data.assignments.filter((assignment) => assignment.statuses[index] === "submitted" && (rankingPeriod === "all" || dateInRankingPeriod(assignment.pointAwards?.[student.id]?.awardedAt))).length; }
 function collectionRankingValue(student) { const owned = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) owned.add(`${cardId}|${rarity}`); })); if (rankingPeriod === "all") return owned.size; const weekly = new Set((student.cardAcquisitionHistory || []).filter((item) => dateInRankingPeriod(item.createdAt)).map((item) => `${item.cardId}|${item.rarity}`)); return [...owned].filter((key) => weekly.has(key)).length; }
 function rankingValue(type, student) { return type === "activity" ? activityPointValue(student) : type === "roles" ? roleRankingValue(student) : type === "assignments" ? assignmentRankingValue(student) : collectionRankingValue(student); }
-function rankedStudents(type) { const sorted = data.students.map((student) => ({ student, value: rankingValue(type, student) })).sort((first, second) => second.value - first.value || first.student.name.localeCompare(second.student.name, "ko")); let previousValue; let previousRank = 0; return sorted.map((item, index) => { const rank = item.value === previousValue ? previousRank : index + 1; previousValue = item.value; previousRank = rank; return { ...item, rank }; }); }
+function rankedStudents(type) { const sorted = activeStudents().map((student) => ({ student, value: rankingValue(type, student) })).sort((first, second) => second.value - first.value || first.student.name.localeCompare(second.student.name, "ko")); let previousValue; let previousRank = 0; return sorted.map((item, index) => { const rank = item.value === previousValue ? previousRank : index + 1; previousValue = item.value; previousRank = rank; return { ...item, rank }; }); }
 function rankingPeriodButtons() { return `<div class="ranking-period"><button class="button ${rankingPeriod === "week" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="week">이번 주</button><button class="button ${rankingPeriod === "all" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="all">전체</button></div>`; }
 function rankingRow(item, unit, mine = false) { return `<div class="ranking-row ${mine ? "mine" : ""}"><strong>${item.rank}위</strong><span>${escapeHtml(item.student.name)}</span><b>${item.value}${unit}</b></div>`; }
 function studentRankingCard(ranking) { const rows = rankedStudents(ranking.id); const top = rows.slice(0, 5); const mine = rows.find((item) => item.student.id === session.studentId); return `<article class="card ranking-card"><div class="ranking-card-title"><span>${ranking.icon}</span><h2>${ranking.title}</h2></div><div class="ranking-list">${top.map((item) => rankingRow(item, ranking.unit, item.student.id === session.studentId)).join("")}</div>${mine && !top.some((item) => item.student.id === mine.student.id) ? `<div class="my-ranking"><small>내 순위</small>${rankingRow(mine, ranking.unit, true)}</div>` : ""}</article>`; }
@@ -460,14 +581,44 @@ function periodInputs(periods, prefix = "period") { const length = Math.max(6, p
 function openWeeklyTimetableModal() { const periodCount = Math.max(6, ...TIMETABLE_DAYS.map((day) => data.weeklyTimetable[day.key]?.length || 0)); const header = TIMETABLE_DAYS.map((day) => `<th scope="col">${day.label}</th>`).join(""); const rows = Array.from({ length: periodCount }, (_, periodIndex) => `<tr><th scope="row">${periodIndex + 1}교시</th>${TIMETABLE_DAYS.map((day) => `<td><input name="${day.key}-${periodIndex}" maxlength="40" value="${escapeHtml(data.weeklyTimetable[day.key]?.[periodIndex] || "")}" placeholder="과목 또는 활동" aria-label="${day.label} ${periodIndex + 1}교시"></td>`).join("")}</tr>`).join(""); app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="weekly-timetable-form" class="modal-card form timetable-modal"><div class="section-heading"><div><h2>기본 주간 시간표 설정</h2><p class="muted">각 칸에 과목이나 활동을 입력하세요. 빈 교시는 그대로 두어도 됩니다.</p></div></div><div class="weekly-timetable-table-wrap"><table class="weekly-timetable-table"><thead><tr><th scope="col">교시</th>${header}</tr></thead><tbody>${rows}</tbody></table></div><div class="button-row timetable-modal-actions"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
 function openDateTimetableModal() { const periods = timetableForDate(dashboardSelectedDate).periods; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="date-timetable-form" class="modal-card form" data-date="${dashboardSelectedDate}"><h2>${selectedDateTitle(dashboardSelectedDate)} 시간표 수정</h2><p class="muted">이 날짜에만 적용되며 기본 시간표는 바뀌지 않습니다.</p><div class="timetable-input-grid">${periodInputs(periods)}</div><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
 function openDailyNoteModal() { const note = data.dailyClassNotes?.[dashboardSelectedDate]?.text || ""; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="daily-note-form" class="modal-card form" data-date="${dashboardSelectedDate}"><h2>${selectedDateTitle(dashboardSelectedDate)} 주요 사항</h2><label>여러 줄로 자유롭게 입력하세요<textarea name="text" maxlength="2000" rows="8" placeholder="예: 2교시 소방훈련\n수학 단원평가">${escapeHtml(note)}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${note ? `<button class="button danger" type="submit" data-kind="delete">내용 삭제</button>` : ""}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+
+function nextStudentLoginId(number) {
+  const base = `student${String(number).padStart(2, "0")}`; if (!data.students.some((student) => student.loginId?.toLocaleLowerCase("en-US") === base.toLocaleLowerCase("en-US"))) return base;
+  let suffix = 2; while (data.students.some((student) => student.loginId?.toLocaleLowerCase("en-US") === `${base}-${suffix}`.toLocaleLowerCase("en-US"))) suffix += 1; return `${base}-${suffix}`;
+}
+function openClassStudentModal(studentId = "") {
+  const student = studentById(studentId); const suggestedNumber = activeStudents().reduce((max, item) => Math.max(max, studentNumber(item)), 0) + 1;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="class-student-form" class="modal-card form" data-id="${studentId}"><h2>${student ? "학생 정보 수정" : "학생 추가"}</h2><label>번호<input name="number" type="number" min="1" max="99" step="1" value="${student ? studentNumber(student) : suggestedNumber}" required></label><label>이름<input name="name" maxlength="30" value="${escapeHtml(student?.name || "")}" required></label><label>로그인 ID<input name="loginId" maxlength="40" pattern="[A-Za-z0-9._-]+" value="${escapeHtml(student?.loginId || nextStudentLoginId(suggestedNumber))}" required><small>영문, 숫자, 점(.), 밑줄(_), 하이픈(-)을 사용할 수 있습니다.</small></label><p class="muted">학생 ID는 변경되지 않아 기존 과제·포인트·카드 기록이 계속 연결됩니다.</p><div class="button-row"><button class="button success" type="submit">${student ? "저장" : "추가"}</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+function openBulkStudentsModal() {
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="bulk-students-form" class="modal-card form bulk-students-modal"><h2>학생 일괄 등록</h2><p class="muted">한 줄에 <strong>번호,이름</strong> 형식으로 입력하세요. 기존 학생은 바뀌지 않고 새 학생만 추가됩니다.</p><label>학생 목록<textarea name="students" rows="12" required placeholder="1,김민수\n2,이서연\n3,박지훈"></textarea></label><div class="button-row"><button class="button success" type="submit">내용 확인</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+function addStudentRecord(number, name, loginId) {
+  const student = { id: crypto.randomUUID(), number, name, loginId, active: true, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] };
+  data.students.push(student); data.assignments.forEach((assignment) => assignment.statuses.push("missing")); return student;
+}
 function dashboardCalendar() {
   const [year, month] = dashboardMonth.split("-").map(Number); const firstDay = new Date(year, month - 1, 1).getDay(); const lastDate = new Date(year, month, 0).getDate(); const cells = Array.from({ length: firstDay }, () => `<div class="calendar-day blank"></div>`);
   for (let day = 1; day <= lastDate; day += 1) { const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`; const activity = calendarActivity(dateKey); const markers = [activity.assignments ? `<span>과제 ${activity.assignments}</span>` : "", activity.roles ? `<span>역할 ${activity.roles}</span>` : "", activity.observations ? `<span>관찰 ${activity.observations}</span>` : "", activity.note ? `<span>주요 사항</span>` : ""].join(""); cells.push(`<button class="calendar-day ${dateKey === dashboardSelectedDate ? "selected" : ""} ${dateKey === todayString() ? "today" : ""}" data-action="select-dashboard-date" data-date="${dateKey}"><strong>${day}</strong><small>${markers}</small></button>`); }
   return `<section class="dashboard-calendar card"><div class="calendar-heading"><button class="icon-button" data-action="move-dashboard-month" data-direction="prev" aria-label="이전 달">‹</button><h2>${year}년 ${month}월</h2><button class="icon-button" data-action="move-dashboard-month" data-direction="next" aria-label="다음 달">›</button><button class="button secondary compact" data-action="dashboard-today">오늘</button></div><div class="calendar-weekdays">${["일", "월", "화", "수", "목", "금", "토"].map((dayName) => `<span>${dayName}</span>`).join("")}</div><div class="calendar-grid">${cells.join("")}</div></section><h2 class="dashboard-date-heading">${selectedDateTitle(dashboardSelectedDate)}</h2>${dashboardClassPlan()}`;
 }
 function selectedDateTitle(dateKey) { const [year, month, day] = dateKey.split("-").map(Number); const date = new Date(year, month - 1, day); return `${year}년 ${month}월 ${day}일 ${["일", "월", "화", "수", "목", "금", "토"][date.getDay()]}요일`; }
-function dashboardAssignmentList(assignments) { if (!assignments.length) return `<div class="empty">관련 과제가 없습니다.</div>`; return `<div class="dashboard-detail-list">${assignments.map((assignment) => { const counts = assignmentStatusCounts(assignment); return `<article><div><span class="subject-badge">${escapeHtml(assignment.subject)}</span><strong>${escapeHtml(assignment.title)}</strong></div><small>마감 ${assignment.dueDate || "날짜 없음"} · 제출 ${counts.submitted}명 · 확인 대기 ${counts.review}명 · 미제출 ${counts.missing}명</small><span class="pill ${isAssignmentCompleted(assignment) ? "success" : "waiting"}">${isAssignmentCompleted(assignment) ? "과제 완료" : "진행 중"}</span></article>`; }).join("")}</div>`; }
-function dashboardRoleList(roles) { if (!roles.length) return `<div class="empty">해당 날짜의 역할 기록이 없습니다.</div>`; return `<div class="dashboard-detail-list">${roles.map((application) => { const role = roleById(application.roleId); const student = studentById(application.studentId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span>${escapeHtml(student?.name || "학생 정보 없음")}</span></div><span class="pill ${application.status === "completed" ? "success" : "waiting"}">${application.status === "completed" ? "완료" : "수행 대기"}</span><b>${application.status === "completed" ? (application.awardedPoints ?? role?.points ?? 0) : (role?.points ?? 0)}P</b></article>`; }).join("")}</div>`; }
+function dashboardAssignmentList(assignments) {
+  if (!assignments.length) return `<div class="empty">관련 과제가 없습니다.</div>`;
+  const active = assignments.filter((assignment) => !isAssignmentCompleted(assignment));
+  const completed = assignments.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
+  const shown = [...active, ...completed.slice(0, 5)];
+  const rows = shown.map((assignment) => { const counts = assignmentStatusCounts(assignment); return `<article><div><span class="subject-badge">${escapeHtml(assignment.subject)}</span><strong>${escapeHtml(assignment.title)}</strong></div><small>마감 ${assignment.dueDate || "날짜 없음"} · 제출 ${counts.submitted}명 · 확인 대기 ${counts.review}명 · 미제출 ${counts.missing}명</small><span class="pill ${isAssignmentCompleted(assignment) ? "success" : "waiting"}">${isAssignmentCompleted(assignment) ? "과제 완료" : "진행 중"}</span></article>`; }).join("");
+  return `<div class="dashboard-detail-list">${rows}</div>${completed.length > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="assignments">전체 보기</button>` : ""}`;
+}
+function dashboardRoleList(roles) {
+  if (!roles.length) return `<div class="empty">해당 날짜의 역할 기록이 없습니다.</div>`;
+  const waiting = roles.filter((application) => application.status === "waiting");
+  const completed = roles.filter((application) => application.status === "completed").sort((first, second) => new Date(second.completedAt || 0) - new Date(first.completedAt || 0));
+  const shown = [...waiting, ...completed.slice(0, 5)];
+  const rows = shown.map((application) => { const role = roleById(application.roleId); const student = studentById(application.studentId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span>${escapeHtml(student?.name || "학생 정보 없음")}</span></div><span class="pill ${application.status === "completed" ? "success" : "waiting"}">${application.status === "completed" ? "완료" : "수행 대기"}</span><b>${application.status === "completed" ? (application.awardedPoints ?? role?.points ?? 0) : (role?.points ?? 0)}P</b></article>`; }).join("");
+  return `<div class="dashboard-detail-list">${rows}</div>${completed.length > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 보기</button>` : ""}`;
+}
 function teacherDashboard() {
   const assignments = assignmentsForDate(dashboardSelectedDate); const roles = rolesForDate(dashboardSelectedDate); const points = pointTransactionsForDate(dashboardSelectedDate); const observations = observationsForDate(dashboardSelectedDate); const submitted = data.assignments.reduce((sum, assignment) => sum + Object.values(assignment.pointAwards || {}).filter((award) => award.awarded && localDateKey(award.awardedAt) === dashboardSelectedDate).length, 0); const completedRoles = roles.filter((role) => role.status === "completed").length; const waitingRoles = roles.filter((role) => role.status === "waiting").length; const issued = points.filter((item) => pointCategory(item) !== "draw").reduce((sum, item) => sum + (Number(item.amount) || 0), 0); const pointTotals = points.reduce((totals, item) => { const key = pointCategory(item); totals[key] = (totals[key] || 0) + (Number(item.amount) || 0); return totals; }, {});
   const pointLabels = [["role", "1인1역"], ["assignment", "과제"], ["bonus", "카드 능력 보너스"], ["teacherGive", "교사 직접 지급"], ["teacherTake", "교사 직접 차감"], ["draw", "카드 뽑기 사용"]];
@@ -475,9 +626,64 @@ function teacherDashboard() {
   return `<div class="section-heading"><div><h1 class="page-heading">선생님 통합 대시보드</h1><p class="page-description">달력에서 날짜를 선택해 학급 활동을 확인하세요.</p></div></div>${dashboardCalendar()}<section class="dashboard-selected-date"><h2>${selectedDateTitle(dashboardSelectedDate)}</h2><div class="dashboard-summary-grid"><article><span>학생 수</span><strong>${data.students.length}명</strong></article><article><span>관련 과제</span><strong>${assignments.length}개</strong></article><article><span>과제 제출 완료</span><strong>${submitted}건</strong></article><article><span>1인1역 완료</span><strong>${completedRoles}건</strong></article><article><span>지급 포인트</span><strong>${issued}P</strong></article><article><span>관찰 기록</span><strong>${observations.length}건</strong></article></div><div class="dashboard-detail-grid"><section class="card dashboard-detail"><div class="section-heading"><h2>과제</h2></div>${dashboardAssignmentList(assignments)}</section><section class="card dashboard-detail"><div class="section-heading"><h2>1인1역</h2><span class="muted">완료 ${completedRoles}명 · 대기 ${waitingRoles}명</span></div>${dashboardRoleList(roles)}</section><section class="card dashboard-detail"><h2>포인트</h2><div class="point-source-summary">${pointLabels.map(([key, label]) => `<div><span>${label}</span><strong class="${(pointTotals[key] || 0) > 0 ? "points" : ""}">${(pointTotals[key] || 0) > 0 ? "+" : ""}${pointTotals[key] || 0}P</strong></div>`).join("")}</div>${points.length ? `<small class="muted">거래 ${points.length}건</small>` : `<div class="empty">포인트 거래가 없습니다.</div>`}</section><section class="card dashboard-detail"><div class="section-heading"><h2>관찰 기록</h2><span class="muted">최근 ${Math.min(5, observations.length)}건</span></div>${observationList}</section></div></section>`;
 }
 
-function teacherStudents() {
-  return `<h1 class="page-heading">학생 관리</h1><p class="page-description">가짜 학생 데이터로 화면 흐름을 확인하고 있습니다.</p><div class="list">${data.students.map((student) => `<div class="list-row"><div class="list-main"><strong>${student.name}</strong><small class="muted">역할 완료 ${completedCount(student.id)}회 · 카드 ${cardCount(student)}장</small></div><strong class="points">${student.points}P</strong></div>`).join("")}</div>`;
+function studentNumber(student) { return Number.isInteger(Number(student?.number)) && Number(student.number) > 0 ? Number(student.number) : data.students.findIndex((item) => item.id === student?.id) + 1; }
+function activeAssignmentSummary(student) { const index = data.students.findIndex((item) => item.id === student.id); const active = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment)); return { active, missing: active.filter((assignment) => assignment.statuses[index] === "missing").length, review: active.filter((assignment) => assignment.statuses[index] === "review").length, submitted: active.filter((assignment) => assignment.statuses[index] === "submitted").length }; }
+function todayRoleSummary(student) { const items = data.roleApplications.filter((application) => application.studentId === student.id && application.status !== "cancelled" && [localDateKey(application.appliedAt), localDateKey(application.completedAt)].includes(todayString())); return { items, completed: items.filter((item) => item.status === "completed").length, waiting: items.filter((item) => item.status === "waiting").length }; }
+function studentObservations(student) { return data.observations.filter((observation) => observation.studentId === student.id).sort((first, second) => String(second.date).localeCompare(String(first.date)) || new Date(second.createdAt) - new Date(first.createdAt)); }
+function compactDate(value) { const key = localDateKey(value); if (!key) return "날짜 없음"; const [, month, day] = key.split("-"); return `${Number(month)}/${Number(day)}`; }
+function studentRepresentativeLabel(student) { const representative = representativeCardInfo(student); return representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}<br><small>${representative.ability?.name || "특수능력 없음"}</small>` : "대표 카드 없음"; }
+function studentManagementCard(student) { const number = studentNumber(student); const assignments = activeAssignmentSummary(student); const roles = todayRoleSummary(student); const observations = studentObservations(student); const assignmentLabel = assignments.missing || assignments.review ? `미제출 ${assignments.missing} · 확인 대기 ${assignments.review}` : "모두 완료"; const roleLabel = roles.completed || roles.waiting ? `완료 ${roles.completed} · 대기 ${roles.waiting}` : "신청 없음"; return `<button class="student-overview-card" data-action="open-student-detail" data-id="${student.id}"><div class="student-overview-heading"><strong>${number}번 ${escapeHtml(student.name)}</strong><span>${student.points}P</span></div><dl><div><dt>과제</dt><dd>${assignmentLabel}</dd></div><div><dt>오늘 1인1역</dt><dd>${roleLabel}</dd></div><div><dt>학생 관찰 기록</dt><dd>${observations.length ? `${observations.length}건 · 최근 ${compactDate(observations[0].date)}` : "기록 없음"}</dd></div><div><dt>대표 카드</dt><dd>${studentRepresentativeLabel(student)}</dd></div></dl></button>`; }
+function isThisWeek(value) { if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = localDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= weekStart() && date <= new Date(); }
+function weeklyEarnedPoints(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (["1인1역", "과제"].includes(item.source) && isThisWeek(item.createdAt || item.date) ? Number(item.amount) || 0 : 0), 0); }
+function studentCollectedTypes(student) { const types = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) types.add(`${cardId}|${rarity}`); })); return types.size; }
+function studentDetailAssignments(student) {
+  const index = data.students.findIndex((item) => item.id === student.id); const filter = studentDetailAssignmentFilters[student.id] || "all";
+  const row = (assignment) => `<article><div><span class="subject-badge">${escapeHtml(assignment.subject)}</span><strong>${escapeHtml(assignment.title)}</strong></div><small>마감 ${assignment.dueDate || "날짜 없음"}</small><span class="pill ${assignmentStatusClass(assignment.statuses[index])}">${ASSIGNMENT_STATUS_LABELS[assignment.statuses[index]]}</span></article>`;
+  const active = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment)); const shown = active.filter((assignment) => filter === "all" || assignment.statuses[index] === filter); const past = data.assignments.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
+  const emptyLabels = { missing: "미제출 과제가 없습니다.", review: "확인 대기 중인 과제가 없습니다.", submitted: "제출 완료 과제가 없습니다.", all: "진행 중인 과제가 없습니다." };
+  return `<div class="student-detail-list">${shown.length ? shown.map(row).join("") : `<div class="empty">${emptyLabels[filter]}</div>`}</div>${filter === "all" && past.length ? `<div class="student-past-details"><strong>최근 완료 과제 ${Math.min(5, past.length)}건</strong><div class="student-detail-list">${past.slice(0, 5).map(row).join("")}</div></div>` : ""}`;
 }
+function roleWeekStart(value = new Date()) { const date = new Date(value); date.setHours(0, 0, 0, 0); const day = date.getDay(); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return date; }
+function shortLocalDate(date) { return `${date.getMonth() + 1}/${date.getDate()}`; }
+function studentRoleFourWeekStats(student) {
+  const completed = data.roleApplications.filter((application) => application.studentId === student.id && application.status === "completed");
+  const currentStart = roleWeekStart();
+  const weeks = Array.from({ length: 4 }, (_, index) => { const start = new Date(currentStart); start.setDate(start.getDate() - (3 - index) * 7); const end = new Date(start); end.setDate(end.getDate() + 6); const count = completed.filter((application) => { const key = localDateKey(application.completedAt); if (!key) return false; const completedDate = new Date(`${key}T00:00:00`); return completedDate >= start && completedDate <= end; }).length; return { label: index === 3 ? "이번 주" : index === 2 ? "지난 주" : `${3 - index}주 전`, range: `${shortLocalDate(start)}~${shortLocalDate(end)}`, count }; });
+  return { weeks, thisWeek: weeks[3].count, recentFourWeeks: weeks.reduce((sum, week) => sum + week.count, 0), total: completed.length, completed };
+}
+function studentRoleHistory(student, completed) {
+  const recent = [...completed].sort((first, second) => new Date(second.completedAt || 0) - new Date(first.completedAt || 0)).slice(0, 5);
+  if (!recent.length) return `<div class="empty">완료된 1인1역 기록이 없습니다.</div>`;
+  return `<div class="student-detail-list">${recent.map((application) => { const role = roleById(application.roleId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span class="pill success">완료</span></div><small>${compactDate(application.completedAt)} · 기본 ${application.awardedBasePoints ?? role?.points ?? 0}P</small></article>`; }).join("")}</div>`;
+}
+function studentRoleTrend(student) {
+  const stats = studentRoleFourWeekStats(student); const max = Math.max(1, ...stats.weeks.map((week) => week.count));
+  const chart = stats.recentFourWeeks ? `<div class="role-week-chart">${stats.weeks.map((week, index) => `<div class="role-week-row ${index === 3 ? "current" : ""}"><strong>${week.label}</strong><div class="role-week-track"><span style="width:${week.count ? Math.max(8, Math.round((week.count / max) * 100)) : 0}%"></span></div><b>${week.count}회</b><small>${week.range}</small></div>`).join("")}</div>` : `<div class="empty">최근 4주 역할 수행 기록이 없습니다.</div>`;
+  return `<div class="role-trend-summary"><div><span>이번 주</span><strong>${stats.thisWeek}회</strong></div><div><span>최근 4주</span><strong>${stats.recentFourWeeks}회</strong></div><div><span>전체 완료</span><strong>${stats.total}회</strong></div></div><h3 class="student-detail-subheading">최근 4주 역할 수행</h3>${chart}<div class="section-heading role-history-heading"><h3>최근 완료 기록</h3><span class="muted">최대 5개</span></div>${studentRoleHistory(student, stats.completed)}`;
+}
+function studentDetailObservations(student) { const observations = studentObservations(student); return observations.length ? `<div class="student-detail-list">${observations.slice(0, 5).map((observation) => `<article><div><strong>${observation.date}</strong><span class="pill">${escapeHtml(observation.category)}</span></div>${observation.quickItems?.length ? `<small>${observation.quickItems.map((item) => `#${escapeHtml(item)}`).join(" ")}</small>` : ""}<p>${escapeHtml(observation.content)}</p></article>`).join("")}</div>` : `<div class="empty">학생 관찰 기록이 없습니다.</div>`; }
+function studentDetailPoints(student) { const history = (student.pointHistory || []).slice(-5).reverse(); return `<div class="student-current-points"><span>현재 포인트</span><strong>${student.points}P</strong></div>${history.length ? `<div class="student-detail-list">${history.map((item) => `<article class="student-point-row"><div><strong>${escapeHtml(item.source || item.reason)}</strong><small>${compactDate(item.createdAt || item.date)}</small></div><b class="${item.amount > 0 ? "points" : ""}">${item.amount > 0 ? "+" : ""}${item.amount}P</b></article>`).join("")}</div>` : `<div class="empty">포인트 거래 기록이 없습니다.</div>`}`; }
+function studentRecordSection(title, summary, content, action = "") { return `<details class="card student-detail-section record-section" open><summary><span>${title}</span><small>${summary}</small></summary><div class="record-section-content">${content}${action}</div></details>`; }
+function teacherStudentDetail(student) {
+  const assignments = activeAssignmentSummary(student); const observations = studentObservations(student); const roleStats = studentRoleFourWeekStats(student); const representative = representativeCardInfo(student); const pointCount = (student.pointHistory || []).length; const assignmentFilter = studentDetailAssignmentFilters[student.id] || "all";
+  const assignmentButtons = [["all", "전체", assignments.active.length], ["missing", "미제출", assignments.missing], ["review", "확인 대기", assignments.review], ["submitted", "제출 완료", assignments.submitted]].map(([value, label, count]) => `<button class="student-assignment-filter ${assignmentFilter === value ? "active" : ""}" data-action="filter-student-detail-assignments" data-id="${student.id}" data-status="${value}">${label} ${count}</button>`).join("");
+  const cardsSummary = `<p><strong>대표 카드:</strong> ${studentRepresentativeLabel(student)}</p><p><strong>수집 카드 종류:</strong> ${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장</p>`;
+  return `<div class="student-detail-page"><div class="section-heading"><div><button class="button secondary compact" data-action="close-student-detail">← 학생 목록</button><h1 class="page-heading">${studentNumber(student)}번 ${escapeHtml(student.name)}</h1><p class="page-description">학생 한 명을 중심으로 현재 상태와 최근 기록을 확인합니다.</p></div></div><section class="student-profile-summary card"><div><span>현재 포인트</span><strong>${student.points}P</strong></div><div><span>대표 카드</span><strong>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}` : "없음"}</strong><small>${representative?.ability?.name || ""}</small></div><div><span>수집 카드 종류</span><strong>${studentCollectedTypes(student)}종</strong></div></section><div class="student-recent-summary"><article class="student-assignment-summary"><span>진행 중 과제</span><div class="student-assignment-filters">${assignmentButtons}</div></article><article><span>이번 주 1인1역</span><strong>완료 ${roleStats.thisWeek}회</strong></article><article><span>이번 주 획득 포인트</span><strong>${weeklyEarnedPoints(student)}P</strong></article><article><span>학생 관찰 기록</span><strong>총 ${observations.length}건</strong></article></div><div class="student-detail-grid">${studentRecordSection("과제", `${assignments.active.length}개 중 ${assignmentFilter === "all" ? "전체" : ASSIGNMENT_STATUS_LABELS[assignmentFilter]} 보기`, studentDetailAssignments(student), `<button class="button secondary compact record-view-all" data-action="view-student-assignments" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("1인1역", `이번 주 완료 ${roleStats.thisWeek}회 · 최근 4주 ${roleStats.recentFourWeeks}회`, studentRoleTrend(student), roleStats.total > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 기록 보기</button>` : "")}${studentRecordSection("학생 관찰 기록", `총 ${observations.length}건 · 최근 최대 5건`, studentDetailObservations(student), `<button class="button secondary compact record-view-all" data-action="manage-student-observations" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("포인트", `현재 ${student.points}P · 최근 ${Math.min(5, pointCount)}건`, studentDetailPoints(student), `<button class="button secondary compact record-view-all" data-action="navigate" data-view="points">전체 보기</button>`)}${studentRecordSection("카드", `${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장`, cardsSummary, `<button class="button secondary compact record-view-all" data-action="navigate" data-view="cards">전체 보기</button>`)}</div></div>`;
+}
+function teacherStudents() { const selected = studentById(studentDetailId); if (selected && selected.active !== false) return teacherStudentDetail(selected); const keyword = studentManagementSearch.trim().toLocaleLowerCase("ko-KR"); const students = activeStudents().filter((student) => !keyword || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || String(studentNumber(student)).includes(keyword)); return `<div class="section-heading"><div><h1 class="page-heading">학생 관리</h1><p class="page-description">전체 학생의 객관적인 현재 상태를 한눈에 확인하세요.</p></div></div><div class="student-management-search"><input id="student-management-search" value="${escapeHtml(studentManagementSearch)}" placeholder="학생 이름 또는 번호 검색" aria-label="학생 이름 또는 번호 검색"><button class="button secondary compact" data-action="reset-student-management-search">초기화</button><span id="student-management-count">${students.length}명</span></div><div class="student-overview-grid">${students.map(studentManagementCard).join("") || `<div class="empty">검색 결과가 없습니다.</div>`}</div>`; }
+
+function teacherClassSettingsBase() {
+  const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR");
+  const students = activeStudents().filter((student) => !keyword || String(studentNumber(student)).includes(keyword) || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || student.loginId.toLocaleLowerCase("en-US").includes(keyword));
+  const rows = students.map((student) => `<tr data-class-student-id="${student.id}"><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions"><button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button danger compact" data-action="ask-delete-class-student" data-id="${student.id}">삭제</button></div></td></tr>`).join("");
+  return `<div class="section-heading"><div><h1 class="page-heading">학급 설정</h1><p class="page-description">우리 반 기본 정보와 모든 기능에서 함께 사용하는 학생 명단을 관리합니다.</p></div></div><section class="card class-settings-card"><h2>학급 정보</h2><form id="class-info-form" class="class-info-form"><label>프로그램 이름<input name="appName" maxlength="50" value="${escapeHtml(data.classSettings.appName)}" required placeholder="예: 우리반 퀘스트"></label><label>학급 이름<input name="className" maxlength="50" value="${escapeHtml(data.classSettings.className)}" required placeholder="예: 5학년 2반"></label><label>선생님 표시 이름<input name="teacherName" maxlength="30" value="${escapeHtml(data.classSettings.teacherName)}" required placeholder="예: 윤석훈"></label><button class="button success" type="submit">저장</button></form></section><section class="card class-roster-card"><div class="section-heading"><div><h2>학생 명단 <span class="muted">총 ${activeStudents().length}명</span></h2><p class="muted">번호와 이름은 바꿀 수 있지만 학생 ID와 연결된 기존 기록은 그대로 유지됩니다.</p></div><div class="button-row"><button class="button secondary" data-action="open-bulk-students">학생 일괄 등록</button><button class="button success" data-action="new-class-student">+ 학생 추가</button></div></div><div class="class-student-search"><input id="class-student-search" type="search" value="${escapeHtml(classStudentSearch)}" placeholder="번호, 이름 또는 로그인 ID 검색"><span>${students.length}명 표시</span></div><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${rows || `<tr><td colspan="4"><div class="empty">검색 결과가 없습니다.</div></td></tr>`}</tbody></table></div><p class="class-login-note">학생 로그인과 비밀번호 관리는 Firebase 연결 후 사용할 수 있습니다. 현재는 비밀번호를 저장하지 않습니다.</p></section>`;
+}
+
+function classFeatureSettings() {
+  const items = CLASS_FEATURES.map((feature) => `<label class="class-feature-row"><span><strong>${feature.label}</strong><small>${feature.description}</small></span><span class="feature-toggle"><input type="checkbox" name="${feature.key}" ${featureEnabled(feature.key) ? "checked" : ""}><b>${featureEnabled(feature.key) ? "사용" : "사용 안 함"}</b></span></label>`).join("");
+  return `<section class="card class-feature-settings"><div class="section-heading"><div><h2>기능 사용 설정</h2><p class="muted">이 학급에서 사용할 기능만 선택하세요. 기능을 꺼도 기존 데이터는 삭제되지 않습니다.</p></div></div><form id="class-feature-form"><div class="class-feature-list">${items}</div><div class="button-row"><button class="button success" type="submit">기능 설정 저장</button></div></form><p class="class-core-features">대시보드 · 학생 관리 · 관찰 기록 · 학급 설정은 항상 사용할 수 있습니다.</p></section>`;
+}
+function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}`; }
 
 function teacherRoleList(items = data.roleApplications.filter((item) => item.status !== "cancelled")) {
   if (!items.length) return `<div class="empty">역할 신청이 아직 없습니다.</div>`;
@@ -496,13 +702,40 @@ function templateEditor() {
 }
 
 function teacherRoles() {
-  return `<h1 class="page-heading">1인1역 관리</h1><p class="page-description">오늘의 신청을 승인하고, 역할 구성과 템플릿을 관리할 수 있습니다.</p><section class="management-section"><div class="section-heading"><div><h2>오늘 신청 현황</h2><p class="muted">완료를 누르면 학생에게 포인트가 한 번만 지급됩니다.</p></div></div>${teacherRoleList()}</section><section class="card management-section"><div class="section-heading"><div><h2>오늘의 역할 수정</h2><p class="muted">여기에서 바꾼 내용은 오늘만 적용되고 저장된 템플릿은 바뀌지 않습니다.</p></div><button class="button success" data-action="add-role" data-scope="today">+ 오늘 역할 추가</button></div>${roleEditorList(data.currentRoles, "today")}</section><section class="card management-section"><h2>현재 역할을 새 템플릿으로 저장</h2><form id="template-save-form" class="inline-form"><input name="name" maxlength="40" required placeholder="예: 우리 반 기본 1인1역"><button class="button" type="submit">템플릿 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>역할 템플릿 관리</h2><p class="muted">저장된 템플릿은 브라우저를 다시 열어도 유지됩니다.</p></div></div><div class="template-grid">${data.roleTemplates.map((template) => `<article class="card template-card"><div><h3>${escapeHtml(template.name)}</h3><p class="muted">역할 ${template.roles.length}개</p></div><div class="button-row"><button class="button success" data-action="load-template" data-id="${template.id}">오늘의 역할로 불러오기</button><button class="button secondary" data-action="edit-template" data-id="${template.id}">템플릿 수정</button><button class="button secondary" data-action="rename-template" data-id="${template.id}">이름 변경</button><button class="button secondary" data-action="duplicate-template" data-id="${template.id}">복제</button><button class="button danger" data-action="delete-template" data-id="${template.id}">삭제</button></div></article>`).join("")}</div></section>${templateEditor()}`;
+  return `<h1 class="page-heading">1인1역 관리</h1><p class="page-description">오늘의 신청을 승인하고, 역할 구성과 템플릿을 관리할 수 있습니다.</p><section class="card role-limit-settings"><div><h2>하루 최대 신청 개수</h2><p class="muted">학생 한 명이 하루에 신청할 수 있는 최대 역할 수입니다. 기존 신청은 자동으로 취소되지 않습니다.</p></div><form id="role-limit-form" class="inline-form"><input name="limit" type="number" min="1" max="5" step="1" required value="${data.dailyRoleApplicationLimit}" aria-label="하루 최대 신청 개수"><span>개</span><button class="button" type="submit">저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>오늘 신청 현황</h2><p class="muted">완료를 누르면 학생에게 포인트가 한 번만 지급됩니다.</p></div></div>${teacherRoleList()}</section><section class="card management-section"><div class="section-heading"><div><h2>오늘의 역할 수정</h2><p class="muted">여기에서 바꾼 내용은 오늘만 적용되고 저장된 템플릿은 바뀌지 않습니다.</p></div><button class="button success" data-action="add-role" data-scope="today">+ 오늘 역할 추가</button></div>${roleEditorList(data.currentRoles, "today")}</section><section class="card management-section"><h2>현재 역할을 새 템플릿으로 저장</h2><form id="template-save-form" class="inline-form"><input name="name" maxlength="40" required placeholder="예: 우리 반 기본 1인1역"><button class="button" type="submit">템플릿 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>역할 템플릿 관리</h2><p class="muted">저장된 템플릿은 브라우저를 다시 열어도 유지됩니다.</p></div></div><div class="template-grid">${data.roleTemplates.map((template) => `<article class="card template-card"><div><h3>${escapeHtml(template.name)}</h3><p class="muted">역할 ${template.roles.length}개</p></div><div class="button-row"><button class="button success" data-action="load-template" data-id="${template.id}">오늘의 역할로 불러오기</button><button class="button secondary" data-action="edit-template" data-id="${template.id}">템플릿 수정</button><button class="button secondary" data-action="rename-template" data-id="${template.id}">이름 변경</button><button class="button secondary" data-action="duplicate-template" data-id="${template.id}">복제</button><button class="button danger" data-action="delete-template" data-id="${template.id}">삭제</button></div></article>`).join("")}</div></section>${templateEditor()}`;
 }
 
 function assignmentMatchesFilter(assignment) {
-  if (assignmentFilter === "today") return assignment.dueDate <= todayString();
-  if (assignmentFilter === "missing") return assignment.statuses.some((status) => status !== "submitted");
-  if (assignmentFilter === "submitted") return assignment.statuses.every((status) => status === "submitted");
+  if (isAssignmentCompleted(assignment)) return false;
+  const reviewCount = assignment.statuses.filter((status) => status === "review").length;
+  const weekStartKey = localDateKey(weekStart());
+  const weekEndDate = new Date(weekStart()); weekEndDate.setDate(weekEndDate.getDate() + 6);
+  const weekEndKey = localDateKey(weekEndDate);
+  if (assignmentFilter === "review" && reviewCount < 1) return false;
+  if (assignmentFilter === "missing" && !assignment.statuses.some((status) => status === "missing")) return false;
+  if (assignmentFilter === "today" && assignment.dueDate !== todayString()) return false;
+  if (assignmentFilter === "week" && (!assignment.dueDate || assignment.dueDate < weekStartKey || assignment.dueDate > weekEndKey)) return false;
+  if (assignmentFilter === "important" && !assignment.important) return false;
+  if (assignmentSubjectFilter && assignment.subject !== assignmentSubjectFilter) return false;
+  if (assignmentSearch && !assignment.title.toLocaleLowerCase("ko-KR").includes(assignmentSearch.toLocaleLowerCase("ko-KR"))) return false;
+  return true;
+}
+
+function activeAssignmentPriority(first, second) {
+  const firstReview = first.statuses.filter((status) => status === "review").length;
+  const secondReview = second.statuses.filter((status) => status === "review").length;
+  if (firstReview !== secondReview) return secondReview - firstReview;
+  const firstDue = first.dueDate || "9999-12-31"; const secondDue = second.dueDate || "9999-12-31";
+  return firstDue.localeCompare(secondDue) || String(second.createdAt || "").localeCompare(String(first.createdAt || ""));
+}
+
+function completedAssignmentMatches(assignment) {
+  if (!isAssignmentCompleted(assignment)) return false;
+  const completedKey = localDateKey(assignment.completedAt);
+  if (completedAssignmentFilters.search && !assignment.title.toLocaleLowerCase("ko-KR").includes(completedAssignmentFilters.search.toLocaleLowerCase("ko-KR"))) return false;
+  if (completedAssignmentFilters.subject && assignment.subject !== completedAssignmentFilters.subject) return false;
+  if (completedAssignmentFilters.from && (!completedKey || completedKey < completedAssignmentFilters.from)) return false;
+  if (completedAssignmentFilters.to && (!completedKey || completedKey > completedAssignmentFilters.to)) return false;
   return true;
 }
 
@@ -520,7 +753,12 @@ function teacherAssignmentCard(assignment) {
     ? `<button class="button secondary compact" data-action="ask-reopen-assignment" data-id="${assignment.id}">다시 열기</button>`
     : `<button class="button gold compact" data-action="ask-complete-assignment" data-id="${assignment.id}">과제 완료</button>`;
   const completedLabel = assignment.assignmentState === "completed" ? `<span class="pill success">과제 완료일 ${formatCompletedAt(assignment.completedAt)}</span>` : "";
-  return `<article class="card assignment-manage-card ${assignment.important ? "important" : ""}"><div class="assignment-card-top"><div><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">${assignment.points}P</span>` : ""}<span class="pill">제출 기한 ${formatDueDate(assignment.dueDate)}</span>${completedLabel}</div><h2>${escapeHtml(assignment.title)}</h2>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}</div><div class="list-actions">${stateAction}<button class="button secondary compact" data-action="edit-assignment" data-id="${assignment.id}">수정</button><button class="button danger compact" data-action="ask-delete-assignment" data-id="${assignment.id}">삭제</button></div></div><div class="assignment-counts"><span class="count-submitted">제출 완료 <strong>${submittedCount}명</strong></span><span class="count-review">확인 대기 <strong>${reviewCount}명</strong></span><span class="count-missing">미제출 <strong>${missingCount}명</strong></span></div><div class="assignment-student-list">${data.students.map((student, studentIndex) => { const status = assignment.statuses[studentIndex]; const reviewActions = status === "review" ? `<div class="review-actions"><button class="button success compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="submitted">제출 확인</button><button class="button danger compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="missing">반려</button></div>` : ""; return `<div class="assignment-student-row ${status === "review" ? "needs-review" : ""}"><label class="student-check"><input type="checkbox" data-action="select-assignment-student" data-assignment="${assignment.id}" data-student="${studentIndex}" ${selected.has(studentIndex) ? "checked" : ""}><span>${student.name}</span></label><div class="student-status-actions"><button class="status-button ${assignmentStatusClass(status)}" data-action="cycle-assignment-status" data-assignment="${assignment.id}" data-student="${studentIndex}">${ASSIGNMENT_STATUS_LABELS[status]}</button>${reviewActions}</div></div>`; }).join("")}</div><div class="button-row assignment-bulk-actions"><button class="button success compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="selected" ${selected.size ? "" : "disabled"}>선택 학생 제출 처리</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="all">전체 제출</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="missing" data-scope="all">전체 미제출</button></div></article>`;
+  const expanded = expandedAssignmentId === assignment.id;
+  const statusFilter = assignmentStudentStatusFilters[assignment.id] || "all";
+  const studentRows = data.students.map((student, studentIndex) => ({ student, studentIndex, status: assignment.statuses[studentIndex] })).filter((item) => statusFilter === "all" || item.status === statusFilter);
+  const statusFilters = [["all", "전체", data.students.length], ["review", "확인 대기", reviewCount], ["missing", "미제출", missingCount], ["submitted", "제출 완료", submittedCount]];
+  const studentDetails = `<div class="assignment-student-details"><div class="assignment-status-filters">${statusFilters.map(([value, label, count]) => `<button class="button compact ${statusFilter === value ? "active" : "secondary"}" data-action="filter-assignment-students" data-id="${assignment.id}" data-status="${value}">${label} ${count}</button>`).join("")}</div>${studentRows.length ? `<div class="assignment-student-list">${studentRows.map(({ student, studentIndex, status }) => { const reviewActions = status === "review" ? `<div class="review-actions"><button class="button success compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="submitted">제출 확인</button><button class="button danger compact" data-action="review-assignment" data-assignment="${assignment.id}" data-student="${studentIndex}" data-status="missing">반려</button></div>` : ""; return `<div class="assignment-student-row ${status === "review" ? "needs-review" : ""}"><label class="student-check"><input type="checkbox" data-action="select-assignment-student" data-assignment="${assignment.id}" data-student="${studentIndex}" ${selected.has(studentIndex) ? "checked" : ""}><span>${studentIndex + 1}. ${escapeHtml(student.name)}</span></label><div class="student-status-actions"><button class="status-button ${assignmentStatusClass(status)}" data-action="cycle-assignment-status" data-assignment="${assignment.id}" data-student="${studentIndex}">${ASSIGNMENT_STATUS_LABELS[status]}</button>${reviewActions}</div></div>`; }).join("")}</div>` : `<div class="empty">이 상태의 학생이 없습니다.</div>`}<div class="button-row assignment-bulk-actions"><button class="button success compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="selected" ${selected.size ? "" : "disabled"}>선택 학생 제출 처리</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="submitted" data-scope="all">전체 제출</button><button class="button secondary compact" data-action="ask-bulk-assignment" data-id="${assignment.id}" data-status="missing" data-scope="all">전체 미제출</button></div></div>`;
+  return `<article class="card assignment-manage-card ${assignment.important ? "important" : ""} ${reviewCount ? "has-review" : ""}"><div class="assignment-card-top"><div><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">완료 시 ${assignment.points}P</span>` : ""}<span class="pill ${assignment.dueDate === todayString() ? "waiting" : ""}">마감 ${formatDueDate(assignment.dueDate)}</span>${completedLabel}</div><h2>${escapeHtml(assignment.title)}</h2>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}</div></div><div class="assignment-counts"><button class="count-submitted" data-action="open-assignment-status" data-id="${assignment.id}" data-status="submitted">제출 완료 <strong>${submittedCount}명</strong></button><button class="count-review ${reviewCount ? "attention" : ""}" data-action="open-assignment-status" data-id="${assignment.id}" data-status="review">확인 대기 <strong>${reviewCount}명</strong></button><button class="count-missing" data-action="open-assignment-status" data-id="${assignment.id}" data-status="missing">미제출 <strong>${missingCount}명</strong></button></div><div class="assignment-card-actions"><button class="button secondary compact" data-action="toggle-assignment-details" data-id="${assignment.id}">${expanded ? "학생 현황 닫기" : "전체 학생 보기"}</button><button class="button secondary compact" data-action="edit-assignment" data-id="${assignment.id}">수정</button><button class="button secondary compact" data-action="duplicate-assignment" data-id="${assignment.id}">복제</button>${stateAction}<button class="button danger compact" data-action="ask-delete-assignment" data-id="${assignment.id}">삭제</button></div>${expanded ? studentDetails : ""}</article>`;
 }
 
 function teacherStudentAssignmentView(studentId) {
@@ -532,9 +770,20 @@ function teacherStudentAssignmentView(studentId) {
 }
 
 function teacherAssignments() {
-  const filtered = data.assignments.filter(assignmentMatchesFilter);
-  const active = filtered.filter((assignment) => !isAssignmentCompleted(assignment)); const completed = filtered.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
-  return `<div class="section-heading assignment-page-heading"><div><h1 class="page-heading">과제 관리</h1><p class="page-description">학생별 제출 상태를 빠르고 편하게 관리하세요.</p></div><button class="button success" data-action="new-assignment">+ 새 과제 만들기</button></div><section class="card assignment-toolbar"><label>과제 필터<select id="assignment-filter"><option value="all" ${assignmentFilter === "all" ? "selected" : ""}>전체</option><option value="today" ${assignmentFilter === "today" ? "selected" : ""}>오늘까지</option><option value="missing" ${assignmentFilter === "missing" ? "selected" : ""}>미제출 학생 있음</option><option value="submitted" ${assignmentFilter === "submitted" ? "selected" : ""}>제출 완료</option></select></label><label>학생별 보기<select id="assignment-student-view"><option value="">학생을 선택하세요</option>${data.students.map((student) => `<option value="${student.id}" ${assignmentStudentView === student.id ? "selected" : ""}>${student.name}</option>`).join("")}</select></label></section>${assignmentStudentView ? teacherStudentAssignmentView(assignmentStudentView) : `<section><h2 class="section-title">진행 중인 과제</h2>${active.length ? `<div class="assignment-manage-list">${active.map(teacherAssignmentCard).join("")}</div>` : `<div class="empty">조건에 맞는 진행 중 과제가 없습니다.</div>`}</section><details class="completed-assignments" open><summary>완료된 과제 ${completed.length}개</summary>${completed.length ? `<div class="assignment-manage-list">${completed.map(teacherAssignmentCard).join("")}</div>` : `<div class="empty">조건에 맞는 완료된 과제가 없습니다.</div>`}</details>`}`;
+  const allActive = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment));
+  const active = allActive.filter(assignmentMatchesFilter).sort(activeAssignmentPriority);
+  const allCompleted = data.assignments.filter(isAssignmentCompleted).sort(sortCompletedAssignments);
+  const completed = showAllCompletedAssignments ? allCompleted.filter(completedAssignmentMatches) : allCompleted;
+  const shownCompleted = showAllCompletedAssignments ? completed : completed.slice(0, 5);
+  const reviewAssignments = allActive.filter((assignment) => assignment.statuses.some((status) => status === "review")).length;
+  const todayDue = allActive.filter((assignment) => assignment.dueDate === todayString()).length;
+  const missingAssignments = allActive.filter((assignment) => assignment.statuses.some((status) => status === "missing")).length;
+  const subjects = [...new Set(data.assignments.map((assignment) => assignment.subject).filter(Boolean))].sort((first, second) => first.localeCompare(second, "ko-KR"));
+  const quickFilters = [["all", "전체"], ["review", "확인 필요"], ["today", "오늘 마감"], ["week", "이번 주"], ["important", "중요"]];
+  const summary = `<section class="assignment-overview-grid"><button data-action="set-assignment-filter" data-filter="review"><span>확인 필요한 과제</span><strong>${reviewAssignments}개</strong></button><button data-action="set-assignment-filter" data-filter="today"><span>오늘 마감</span><strong>${todayDue}개</strong></button><button data-action="set-assignment-filter" data-filter="missing"><span>미제출 학생이 있는 과제</span><strong>${missingAssignments}개</strong></button><button data-action="set-assignment-filter" data-filter="all"><span>진행 중 과제</span><strong>${allActive.length}개</strong></button></section>`;
+  const toolbar = `<section class="card assignment-toolbar"><div class="assignment-quick-filters" aria-label="빠른 과제 필터">${quickFilters.map(([value, label]) => `<button class="button compact ${assignmentFilter === value ? "active" : "secondary"}" data-action="set-assignment-filter" data-filter="${value}">${label}</button>`).join("")}</div><label>과목<select id="assignment-subject-filter"><option value="">전체 과목</option>${subjects.map((subject) => `<option value="${escapeHtml(subject)}" ${assignmentSubjectFilter === subject ? "selected" : ""}>${escapeHtml(subject)}</option>`).join("")}</select></label><label>과제 제목 검색<input id="assignment-search" value="${escapeHtml(assignmentSearch)}" placeholder="과제 제목을 입력하세요"></label><label>학생별 보기<select id="assignment-student-view"><option value="">학생을 선택하세요</option>${data.students.map((student) => `<option value="${student.id}" ${assignmentStudentView === student.id ? "selected" : ""}>${student.name}</option>`).join("")}</select></label><button class="button secondary compact assignment-filter-reset" data-action="reset-assignment-filters">조건 초기화</button></section>`;
+  const completedFilters = showAllCompletedAssignments ? `<section class="card completed-assignment-toolbar"><label>제목 검색<input id="completed-assignment-search" value="${escapeHtml(completedAssignmentFilters.search)}" placeholder="완료 과제 제목"></label><label>과목<select id="completed-assignment-subject"><option value="">전체 과목</option>${subjects.map((subject) => `<option value="${escapeHtml(subject)}" ${completedAssignmentFilters.subject === subject ? "selected" : ""}>${escapeHtml(subject)}</option>`).join("")}</select></label><label>완료일 시작<input id="completed-assignment-from" type="date" value="${completedAssignmentFilters.from}"></label><label>완료일 끝<input id="completed-assignment-to" type="date" value="${completedAssignmentFilters.to}"></label><button class="button secondary compact" data-action="reset-completed-assignment-filters">조건 초기화</button></section>` : "";
+  return `<div class="section-heading assignment-page-heading"><div><h1 class="page-heading">과제 관리</h1><p class="page-description">지금 확인하거나 처리해야 할 과제를 먼저 보여 줍니다.</p></div><button class="button success" data-action="new-assignment">+ 새 과제 만들기</button></div>${summary}${toolbar}${assignmentStudentView ? teacherStudentAssignmentView(assignmentStudentView) : `<section><div class="section-heading"><h2 class="section-title">진행 중인 과제</h2><span class="muted">${active.length}개 표시</span></div>${active.length ? `<div class="assignment-manage-list">${active.map(teacherAssignmentCard).join("")}</div>` : `<div class="empty">조건에 맞는 진행 중 과제가 없습니다.</div>`}</section><details class="completed-assignments" open><summary>완료된 과제 ${allCompleted.length}개 · ${showAllCompletedAssignments ? "전체 보기" : `최근 ${Math.min(5, allCompleted.length)}개`} 표시</summary>${completedFilters}${shownCompleted.length ? `<div class="assignment-manage-list">${shownCompleted.map(teacherAssignmentCard).join("")}</div>` : `<div class="empty">조건에 맞는 완료된 과제가 없습니다.</div>`}${allCompleted.length ? `<button class="button secondary record-view-all" data-action="toggle-all-completed-assignments">${showAllCompletedAssignments ? "최근 5개만 보기" : "완료 과제 전체 보기"}</button>` : ""}</details>`}`;
 }
 
 function teacherObservations() {
@@ -597,6 +846,40 @@ function teacherCardsV2() {
   return `<div class="section-heading card-page-heading"><div><h1 class="page-heading">카드 관리</h1><p class="page-description">전체 규칙을 정한 뒤 카드셋과 인물 카드를 관리하세요.</p></div></div><section class="management-section"><div class="section-heading"><div><h2>1. 뽑기 옵션·가격·등급 확률</h2></div><button class="button success" data-action="new-draw-option">+ 새 뽑기 옵션</button></div><div class="draw-option-manage-grid">${drawOptions}</div></section><section class="management-section"><h2>2. 카드 업그레이드 설정</h2><form id="upgrade-settings-form"><div class="upgrade-settings-grid">${upgradeInputs}</div><button class="button success" type="submit">업그레이드 설정 저장</button></form></section><section class="management-section"><h2>3. 특수능력 설정</h2><p class="muted">등급별 능력 보너스와 하루 최대 보너스를 설정하세요.</p><form id="card-ability-settings-form"><div class="special-ability-settings">${abilityInputs}</div><button class="button success" type="submit">특수능력 설정 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>4. 카드셋 관리</h2><span class="pill success">뽑기 사용 ${data.activeCardSetIds.length}개</span></div><button class="button success" data-action="new-card-set">+ 새 카드셋 만들기</button></div><div class="card-set-grid">${setRows}</div></section>${selectedSet ? `<section class="management-section"><div class="section-heading"><div><h2>5. ${escapeHtml(selectedSet.name)} 인물 카드</h2><p class="muted">각 인물은 5개 등급과 3개 특수능력을 가질 수 있습니다.</p></div><button class="button success" data-action="new-card" data-set-id="${selectedSet.id}">+ 새 인물 카드 추가</button></div><div class="teacher-card-grid">${personCards || `<div class="empty">이 카드셋에는 인물 카드가 없습니다.</div>`}</div></section>` : ""}<section class="card" style="margin-top:24px"><h2>데모 설정</h2><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
 }
 
+function activeGroups() { return data.groups.filter((group) => group.active).sort((first, second) => first.order - second.order); }
+function classGroupScore() { return activeGroups().reduce((sum, group) => sum + group.score, 0); }
+function groupMembers(groupId) { return activeStudents().filter((student) => data.groupAssignments[student.id] === groupId); }
+function sortedClassMissions() { return [...data.classMissions].sort((first, second) => first.target - second.target); }
+function groupById(groupId) { return data.groups.find((group) => group.id === groupId); }
+function groupStudentRow(student, currentGroupId = "") { return `<div class="group-student-row"><span>${studentNumber(student)}. ${escapeHtml(student.name)}</span><select data-action="assign-student-group" data-student="${student.id}" aria-label="${escapeHtml(student.name)} 모둠 이동"><option value="">미배정</option>${activeGroups().map((group) => `<option value="${group.id}" ${currentGroupId === group.id ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select></div>`; }
+function groupMissionSummary() {
+  const total = classGroupScore(); const missions = sortedClassMissions(); const current = missions.find((mission) => mission.target > total);
+  if (!missions.length) return `<section class="card class-mission-hero"><div class="class-mission-score"><span>우리 반 전체 점수</span><strong>${total}점</strong></div><div class="class-mission-current"><span>다음 공동 미션</span><h2>아직 등록된 공동 미션이 없습니다.</h2><p>[공동 미션 관리]에서 목표를 등록해 주세요.</p></div></section>`;
+  if (!current) return `<section class="card class-mission-hero completed"><div class="class-mission-score"><span>우리 반 전체 점수</span><strong>${total}점</strong></div><div class="class-mission-current"><span>공동 미션</span><h2>🎉 등록된 모든 목표를 달성했습니다!</h2></div></section>`;
+  const previousTarget = [...missions].filter((mission) => mission.target <= total).at(-1)?.target || 0; const range = Math.max(1, current.target - previousTarget); const progress = Math.min(100, Math.max(0, ((total - previousTarget) / range) * 100)); const next = missions.find((mission) => mission.target > current.target);
+  return `<section class="card class-mission-hero"><div class="class-mission-score"><span>우리 반 전체 점수</span><strong>${total}점</strong></div><div class="class-mission-current"><div class="class-mission-title"><span>다음 공동 미션</span><h2>${total} / ${current.target}점</h2></div><p><strong>${escapeHtml(current.reward)}</strong>까지 ${current.target - total}점!</p><div class="class-mission-progress"><span style="width:${progress}%"></span></div>${next ? `<small>다음 목표: ${next.target}점 · ${escapeHtml(next.reward)}</small>` : ""}</div></section>`;
+}
+function groupMainCard(group) { const members = groupMembers(group.id); const selected = selectedGroupId === group.id; return `<button class="group-main-card ${selected ? "selected" : ""}" data-action="select-group" data-id="${group.id}" aria-pressed="${selected}"><div><h3>${escapeHtml(group.name)}</h3>${selected ? `<span class="pill success">✓ 선택됨</span>` : ""}</div><strong>${group.score}</strong>${members.length ? `<span class="group-main-student-list">${members.map((student) => `<span class="group-main-student-chip"><b>${studentNumber(student)}</b>${escapeHtml(student.name)}</span>`).join("")}</span>` : `<p>배정된 학생이 없습니다.</p>`}</button>`; }
+function groupScorePanel() { const group = groupById(selectedGroupId); if (!group?.active) return `<section class="card selected-group-panel empty"><strong>선택한 모둠 점수</strong><span>아래에서 점수를 변경할 모둠을 선택하세요.</span></section>`; const quickAdds = [1, 5, 10, 20]; const quickTakes = [1, 5, 10, 20]; return `<section class="card selected-group-panel"><div class="selected-group-heading"><span>선택한 모둠</span><strong>${escapeHtml(group.name)} · 현재 ${group.score}점</strong></div><div class="selected-score-controls"><div class="score-button-row">${quickAdds.map((amount) => `<button class="button success compact" data-action="change-selected-group-score" data-amount="${amount}">+${amount}</button>`).join("")}${quickTakes.map((amount) => `<button class="button danger compact" data-action="change-selected-group-score" data-amount="-${amount}">-${amount}</button>`).join("")}</div><form id="selected-group-score-form" class="group-direct-score-form"><input name="amount" type="number" min="1" step="1" placeholder="직접 입력" required><button class="button success compact" type="submit" data-kind="add">추가</button><button class="button danger compact" type="submit" data-kind="subtract">차감</button></form></div></section>`; }
+function missionManagementCard(mission) { const reached = classGroupScore() >= mission.target; return `<article class="mission-manage-row ${mission.confirmed ? "confirmed" : ""}"><div><strong>${mission.confirmed ? "✅ " : ""}${mission.target}점</strong><span>${escapeHtml(mission.reward)}</span><small>${mission.confirmed ? `달성 확정 · ${compactDate(mission.confirmedAt)}` : reached ? "목표 점수 도달" : `${mission.target - classGroupScore()}점 남음`}</small></div><div class="list-actions">${reached && !mission.confirmed ? `<button class="button success compact" data-action="confirm-class-mission" data-id="${mission.id}">달성 확정</button>` : ""}<button class="button secondary compact" data-action="edit-class-mission" data-id="${mission.id}">수정</button><button class="button danger compact" data-action="ask-delete-class-mission" data-id="${mission.id}">삭제</button></div></article>`; }
+function groupTransactionRows() { const rows = [...data.groupScoreTransactions].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)); const shown = showAllGroupTransactions ? rows : rows.slice(0, 5); return rows.length ? `<div class="group-transaction-list">${shown.map((item) => `<article class="group-transaction-row"><span>${compactDate(item.createdAt)}</span><strong>${escapeHtml(item.groupName)}</strong><b class="${item.amount > 0 ? "positive" : "negative"}">${item.amount > 0 ? "+" : ""}${item.amount}</b><small>변경 후 ${item.scoreAfter}점</small></article>`).join("")}</div>${rows.length > 5 ? `<button class="button secondary compact record-view-all" data-action="toggle-group-transactions">${showAllGroupTransactions ? "최근 5개만 보기" : "전체 기록 보기"}</button>` : ""}` : `<div class="empty">모둠 점수 기록이 없습니다.</div>`; }
+function teacherGroups() {
+  const groups = activeGroups(); if (selectedGroupId && !groups.some((group) => group.id === selectedGroupId)) selectedGroupId = "";
+  return `<div class="section-heading group-page-heading"><div><h1 class="page-heading">모둠활동</h1><p class="page-description">각 모둠의 힘을 모아 우리 반 공동 목표를 달성해 보세요.</p></div><div class="button-row"><button class="button secondary compact" data-action="open-group-settings">모둠 설정</button><button class="button secondary compact" data-action="open-group-assignments">학생 배정</button><button class="button secondary compact" data-action="open-group-missions">공동 미션 관리</button></div></div>${groupMissionSummary()}${groupScorePanel()}<section class="management-section"><div class="section-heading"><div><h2>우리 반 모둠</h2><p class="muted">점수를 변경할 모둠 카드 하나를 선택하세요.</p></div></div><div class="group-main-grid">${groups.map(groupMainCard).join("")}</div></section>`;
+}
+function groupSettingNameFields(count) { return Array.from({ length: count }, (_, index) => `<label>${index + 1}모둠 이름<input name="groupName-${index}" data-group-name-index="${index}" maxlength="30" value="${escapeHtml(pendingGroupNames[index] || `${index + 1}모둠`)}" required></label>`).join(""); }
+function openGroupSettingsModal() { const groups = activeGroups(); const ordered = [...data.groups].sort((a, b) => a.order - b.order); pendingGroupNames = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [index, ordered[index]?.name || `${index + 1}모둠`])); app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="group-settings-form" class="modal-card form group-settings-modal"><h2>모둠 설정</h2><label>모둠 수<input id="group-settings-count" name="count" type="number" min="2" max="8" step="1" value="${groups.length}" required></label><div id="group-name-settings" class="group-name-settings">${groupSettingNameFields(groups.length)}</div><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+function groupAssignmentStudentChip(student) { const selected = selectedGroupAssignmentStudentIds.has(student.id); return `<button class="group-student-chip ${selected ? "selected" : ""}" data-action="toggle-group-assignment-student" data-id="${student.id}" aria-pressed="${selected}"><span>${studentNumber(student)}</span>${escapeHtml(student.name)}</button>`; }
+function openGroupAssignmentsModal(resetSelection = true) {
+  if (resetSelection) selectedGroupAssignmentStudentIds.clear();
+  const groups = activeGroups(); const unassigned = activeStudents().filter((student) => !data.groupAssignments[student.id]); const disabled = selectedGroupAssignmentStudentIds.size ? "" : "disabled";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card group-assignment-modal"><div class="section-heading"><div><h2>학생 배정</h2><p class="muted">학생을 여러 명 선택한 뒤 이동할 모둠을 눌러 주세요.</p></div></div><section class="group-assignment-toolbar"><strong id="group-assignment-selection-count">${selectedGroupAssignmentStudentIds.size}명 선택됨</strong><span>이동할 곳</span><div class="group-move-buttons">${groups.map((group) => `<button class="button secondary compact" data-action="move-selected-group-students" data-group-id="${group.id}" ${disabled}>${escapeHtml(group.name)}</button>`).join("")}<button class="button danger compact" data-action="move-selected-group-students" data-group-id="" ${disabled}>미배정</button></div><button class="button secondary compact" data-action="clear-group-assignment-selection" ${disabled}>선택 해제</button></section><section class="group-unassigned-panel"><h3>미배정 학생 <span>${unassigned.length}명</span></h3><div class="group-student-chip-list">${unassigned.map(groupAssignmentStudentChip).join("") || `<p class="compact-empty">미배정 학생이 없습니다.</p>`}</div></section><div class="group-assignment-board">${groups.map((group) => { const students = groupMembers(group.id); return `<section><h3>${escapeHtml(group.name)} <span>${students.length}명</span></h3><div class="group-student-chip-list">${students.map(groupAssignmentStudentChip).join("") || `<p class="compact-empty">학생 없음</p>`}</div></section>`; }).join("")}</div><div class="button-row"><button class="button secondary" data-action="close-modal">닫기</button></div></section></div>`);
+}
+function openGroupMissionsModal() { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card group-missions-modal"><div class="section-heading"><div><h2>공동 미션 관리</h2><p class="muted">목표 점수가 낮은 순서로 자동 정렬됩니다.</p></div><button class="button success" data-action="new-class-mission">+ 미션 추가</button></div><div class="mission-manage-list">${sortedClassMissions().map(missionManagementCard).join("") || `<div class="empty">등록된 공동 미션이 없습니다.</div>`}</div><div class="button-row"><button class="button secondary" data-action="close-modal">닫기</button></div></section></div>`); }
+function openClassMissionModal(missionId = "") { const mission = data.classMissions.find((item) => item.id === missionId); app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="class-mission-form" class="modal-card form" data-id="${missionId}"><h2>${mission ? "공동 미션 수정" : "새 공동 미션"}</h2><label>목표 점수<input name="target" type="number" min="1" step="1" required value="${mission?.target || 500}"></label><label>보상 또는 활동 내용<input name="reward" maxlength="100" required value="${escapeHtml(mission?.reward || "")}" placeholder="예: 우리 반 영화 보기"></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
+function openMissionReachedModal(missions) { if (!missions.length) return; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>🎉 공동 미션 목표 달성!</h2>${missions.map((mission) => `<p><strong>${mission.target}점</strong> · ${escapeHtml(mission.reward)}</p>`).join("")}<p class="muted">모둠활동 화면에서 달성 확정을 할 수 있습니다.</p><button class="button success" data-action="close-modal">확인</button></section></div>`); }
+function changeGroupScore(groupId, amount, type = "manual") { const group = groupById(groupId); if (!group?.active || !Number.isInteger(amount) || amount === 0) return; if (group.score + amount < 0) { toast(`${group.name}의 점수가 부족해 차감할 수 없습니다.`); return; } const beforeTotal = classGroupScore(); group.score += amount; data.groupScoreTransactions.push({ id: crypto.randomUUID(), groupId: group.id, groupName: group.name, amount, scoreAfter: group.score, createdAt: new Date().toISOString(), type }); const afterTotal = classGroupScore(); const reached = data.classMissions.filter((mission) => !mission.confirmed && beforeTotal < mission.target && afterTotal >= mission.target); saveData(); render(); toast(`${group.name}에 ${amount > 0 ? "+" : ""}${amount}점을 반영했습니다.`); openMissionReachedModal(reached); }
+
 function teacherRanking() {
   const visibility = RANKING_TYPES.map((ranking) => `<label class="ranking-visibility-option"><input type="checkbox" data-action="toggle-ranking-visibility" data-ranking="${ranking.id}" ${data.rankingVisibility[ranking.id] ? "checked" : ""}><span>${ranking.icon} ${ranking.title}</span></label>`).join("");
   const cards = RANKING_TYPES.map((ranking) => `<article class="card ranking-card teacher-ranking-card"><div class="ranking-card-title"><span>${ranking.icon}</span><h2>${ranking.title}</h2></div><div class="ranking-list">${rankedStudents(ranking.id).map((item) => rankingRow(item, ranking.unit)).join("")}</div></article>`).join("");
@@ -604,20 +887,22 @@ function teacherRanking() {
 }
 
 function renderStudent() {
-  const views = { home: studentHome, roles: studentRoles, draw: studentDraw, collection: studentCollection, ranking: studentRanking };
+  const views = { home: studentHome, roles: studentRoles, assignments: studentAssignments, points: studentPoints, draw: studentDraw, collection: studentCollection, ranking: studentRanking };
+  if (!studentNavItems().some(([view]) => view === session.view)) session.view = "home";
   app.innerHTML = shell((views[session.view] || studentHome)());
 }
 function renderTeacher() {
-  const views = { dashboard: teacherDashboard, students: teacherStudents, roles: teacherRoles, assignments: teacherAssignments, observations: teacherObservations, points: teacherPoints, cards: teacherCardsV2, ranking: teacherRanking };
+  const views = { dashboard: teacherDashboard, students: teacherStudents, groups: teacherGroups, roles: teacherRoles, assignments: teacherAssignments, observations: teacherObservations, points: teacherPoints, cards: teacherCardsV2, ranking: teacherRanking, "class-settings": teacherClassSettings };
+  if (!teacherNavItems().some(([view]) => view === session.view)) session.view = "class-settings";
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
 function render() { session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
 
 function applyRole(roleId) {
-  const active = data.roleApplications.filter((item) => item.studentId === session.studentId && item.status !== "cancelled");
+  const active = todayRoleApplicationsForStudent(session.studentId); const limit = data.dailyRoleApplicationLimit;
   const roleApplicants = data.roleApplications.filter((item) => item.roleId === roleId && item.status !== "cancelled");
   const role = roleById(roleId);
-  if (active.length >= 2) return toast("하루에 역할은 2개까지 신청할 수 있어요.");
+  if (active.length >= limit) return toast(`오늘 신청 가능한 1인1역을 모두 신청했습니다. (최대 ${limit}개)`);
   if (roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
   if (roleApplicants.some((item) => item.studentId === session.studentId)) return;
   data.roleApplications.push({ id: crypto.randomUUID(), studentId: session.studentId, roleId, status: "waiting", appliedAt: new Date().toISOString() }); saveData(); render(); toast("역할 신청이 완료됐어요!");
@@ -721,6 +1006,16 @@ function openCardUpgradeModal(cardId, rarity) {
   app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>카드 업그레이드</h2><p><strong>${escapeHtml(card.name)} ${rarity}</strong> 카드 중 사용할 재료를 정확히 ${required}장 선택해 주세요.</p><div class="upgrade-material-list">${materialRows}</div><p class="muted">결과 카드의 특수능력은 새로 무작위 결정됩니다.</p><div class="button-row"><button class="button success" type="button" data-action="confirm-card-upgrade" data-card-id="${card.id}" data-rarity="${rarity}">${step.to} 카드로 업그레이드</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
 }
 
+function openCollectionCardModal(cardId, rarity, abilityId = "", showBack = false) {
+  const student = currentStudent(); const card = data.cards.find((item) => item.id === cardId); if (!student || !card || !CARD_RARITIES.includes(rarity)) return;
+  const inventory = abilityInventory(student, card.id, rarity); const ownedAbilities = CARD_ABILITIES.filter((ability) => Number(inventory[ability.id]) > 0); const quantity = rarityInventoryCount(student, card.id, rarity); if (!quantity || !ownedAbilities.length) return;
+  const selectedAbility = ownedAbilities.find((ability) => ability.id === abilityId) || ownedAbilities[0]; const selectedCount = Number(inventory[selectedAbility.id]) || 0;
+  const representative = student.representativeCard; const equipped = representative?.cardId === card.id && representative?.rarity === rarity && representative?.abilityId === selectedAbility.id;
+  const abilityButtons = ownedAbilities.map((ability) => `<button class="collection-ability-chip ${ability.id === selectedAbility.id ? "selected" : ""}" data-action="select-collection-ability" data-card-id="${card.id}" data-rarity="${rarity}" data-ability-id="${ability.id}">${ability.icon} ${ability.name} ×${Number(inventory[ability.id]) || 0}</button>`).join("");
+  const step = upgradeStepFrom(rarity); const needed = upgradeRequired(rarity); const upgradeControl = step ? quantity >= needed ? `<button class="button secondary compact" data-action="ask-upgrade-card" data-card-id="${card.id}" data-rarity="${rarity}">⬆ ${step.to}로 업그레이드</button>` : `<span class="muted">업그레이드 ${quantity} / ${needed}장</span>` : `<span class="muted">최고 등급 카드</span>`;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card collection-card-modal"><div class="section-heading"><div><h2>카드 상세</h2><p class="muted">카드 또는 뒤집기 버튼을 눌러 앞·뒷면을 확인하세요.</p></div><button class="icon-button" data-action="close-modal" aria-label="카드 상세 닫기">×</button></div><div class="collection-detail-stage ${showBack ? "show-back" : ""}" data-action="flip-collection-card" role="button" tabindex="0" aria-label="카드 앞뒷면 전환"><article class="collection-detail-face collection-detail-front rarity-${rarityClass(rarity)}"><span class="collection-detail-emblem">★</span><span class="pill rarity-${rarityClass(rarity)}">${rarity}</span><h2>${escapeHtml(card.name)}</h2><small>${escapeHtml(card.era)}</small><p>${escapeHtml(card.achievement)}</p><strong>보유 ${quantity}장</strong>${equipped ? `<span class="representative-card-mark">대표 카드</span>` : ""}</article><article class="collection-detail-face collection-detail-back rarity-${rarityClass(rarity)}"><span class="pill rarity-${rarityClass(rarity)}">${rarity}</span><div class="collection-detail-ability-icon">${selectedAbility.icon}</div><h2>${selectedAbility.name}</h2><p>${abilitySummary(rarity, selectedAbility.id).split(" · ")[1]}</p><strong>이 능력 보유 ${selectedCount}장</strong>${equipped ? `<span class="representative-card-mark">대표 카드</span>` : ""}</article></div><div class="collection-modal-controls"><button class="button" data-action="flip-collection-card">${showBack ? "앞면 보기" : "뒤집기"}</button><div class="collection-ability-picker"><strong>보유 능력 선택</strong><div>${abilityButtons}</div></div><div class="button-row"><button class="button ${equipped ? "secondary" : "success"} compact" data-action="equip-representative-card" data-card-id="${card.id}" data-rarity="${rarity}" data-ability-id="${selectedAbility.id}" ${equipped ? "disabled" : ""}>${equipped ? "대표 카드 ✓" : "대표 카드로 설정"}</button>${upgradeControl}</div></div></section></div>`);
+}
+
 function openDeleteCardSetModal(cardSetId) {
   const cardSet = cardSetById(cardSetId); if (!cardSet || cardSet.deleted) return;
   const setCards = sortedCards(true, cardSet.id); const ownerCount = data.students.filter((student) => setCards.some((card) => cardInventoryCount(student, card.id) > 0)).length;
@@ -762,11 +1057,12 @@ function openDeleteObservationModal(observationId) {
   app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>관찰 기록 삭제</h2><p>이 관찰 기록을 삭제하시겠습니까?</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-observation" data-id="${observation.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
 }
 
-function openAssignmentModal(assignmentId = "") {
+function openAssignmentModal(assignmentId = "", duplicate = false) {
   const assignment = data.assignments.find((item) => item.id === assignmentId);
   const presetSubject = assignment && SUBJECTS.includes(assignment.subject) ? assignment.subject : "기타";
   const customSubject = assignment && !SUBJECTS.includes(assignment.subject) ? assignment.subject : "";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="assignment-form" class="modal-card form" data-id="${assignmentId}"><h2>${assignment ? "과제 수정" : "새 과제 만들기"}</h2><label>과제 제목<input name="title" maxlength="80" required value="${assignment ? escapeHtml(assignment.title) : ""}" placeholder="예: 수학 익힘책 30쪽"></label><label>과목<select name="subjectPreset">${SUBJECTS.map((subject) => `<option ${presetSubject === subject ? "selected" : ""}>${subject}</option>`).join("")}</select></label><label>과목 직접 입력 (선택)<input name="subjectCustom" maxlength="30" value="${escapeHtml(customSubject)}" placeholder="예: 미술"></label><label>과제 설명 (선택)<textarea name="description" maxlength="300" placeholder="과제 내용을 간단히 적어 주세요.">${assignment ? escapeHtml(assignment.description) : ""}</textarea></label><label>제출 기한<input name="dueDate" type="date" required value="${assignment?.dueDate || todayString()}"></label><label class="check-label"><input name="important" type="checkbox" ${assignment?.important ? "checked" : ""}><span>중요 과제로 표시</span></label><label class="assignment-point-field">완료 시 지급 포인트<span class="point-input-row"><input name="points" type="number" min="0" step="1" required value="${assignment?.points ?? 0}"><span>P</span></span></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  const title = duplicate && assignment ? `${assignment.title} 복사본` : assignment?.title || "";
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="assignment-form" class="modal-card form" data-id="${duplicate ? "" : assignmentId}" data-duplicate-from="${duplicate ? assignmentId : ""}"><h2>${duplicate ? "과제 복제" : assignment ? "과제 수정" : "새 과제 만들기"}</h2>${duplicate ? `<p class="muted">학생 제출 상태와 포인트 지급 기록은 복사하지 않습니다. 새 마감일을 확인해 주세요.</p>` : ""}<label>과제 제목<input name="title" maxlength="80" required value="${escapeHtml(title)}" placeholder="예: 수학 익힘책 30쪽"></label><label>과목<select name="subjectPreset">${SUBJECTS.map((subject) => `<option ${presetSubject === subject ? "selected" : ""}>${subject}</option>`).join("")}</select></label><label>과목 직접 입력 (선택)<input name="subjectCustom" maxlength="30" value="${escapeHtml(customSubject)}" placeholder="예: 미술"></label><label>과제 설명 (선택)<textarea name="description" maxlength="300" placeholder="과제 내용을 간단히 적어 주세요.">${assignment ? escapeHtml(assignment.description) : ""}</textarea></label><label>제출 기한<input name="dueDate" type="date" required value="${assignment?.dueDate || todayString()}"></label><label class="check-label"><input name="important" type="checkbox" ${assignment?.important ? "checked" : ""}><span>중요 과제로 표시</span></label><label class="assignment-point-field">완료 시 지급 포인트<span class="point-input-row"><input name="points" type="number" min="0" step="1" required value="${assignment?.points ?? 0}"><span>P</span></span></label><div class="button-row"><button class="button success" type="submit">${duplicate ? "새 과제로 만들기" : "저장"}</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
 
 function assignmentAward(assignment, studentId) {
@@ -891,10 +1187,47 @@ function loadTemplateForToday(templateId) {
 app.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
   if (action === "show-students") return renderWelcome(true);
-  if (action === "enter-student") { session = { mode: "student", studentId: target.dataset.id, view: "home" }; return render(); }
+  if (action === "enter-student") { studentAssignmentFilter = "todo"; showAllStudentCompletedAssignments = false; showAllStudentPoints = false; session = { mode: "student", studentId: target.dataset.id, view: "home" }; return render(); }
   if (action === "enter-teacher") { session = { mode: "teacher", studentId: null, view: "dashboard" }; return render(); }
   if (action === "logout") { session = { mode: "welcome", studentId: null, view: "home" }; return render(); }
   if (action === "navigate") { session.view = target.dataset.view; return render(); }
+  if (action === "new-class-student") return openClassStudentModal();
+  if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
+  if (action === "open-bulk-students") return openBulkStudentsModal();
+  if (action === "ask-delete-class-student") {
+    const student = studentById(target.dataset.id); if (!student || student.active === false) return;
+    app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>학생 삭제 확인</h2><p><strong>${escapeHtml(student.name)}</strong> 학생을 삭제하시겠습니까?</p><p>이 학생에게 연결된 과제, 1인1역, 포인트, 카드 등의 기록이 있을 수 있습니다.</p><p class="muted">기록 보호를 위해 완전히 지우지 않고 명단에서만 비활성화합니다.</p><div class="button-row"><button class="button danger" data-action="confirm-delete-class-student" data-id="${student.id}">삭제</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return;
+  }
+  if (action === "confirm-delete-class-student") {
+    const student = studentById(target.dataset.id); if (!student) return; student.active = false; delete data.groupAssignments[student.id]; selectedPointStudentIds.delete(student.id); target.closest(".modal")?.remove(); saveData(); render(); toast("학생을 명단에서 안전하게 비활성화했습니다."); return;
+  }
+  if (action === "open-group-settings") return openGroupSettingsModal();
+  if (action === "open-group-assignments") return openGroupAssignmentsModal();
+  if (action === "open-group-missions") return openGroupMissionsModal();
+  if (action === "toggle-group-assignment-student") { const studentId = target.dataset.id; if (!data.students.some((student) => student.id === studentId)) return; if (selectedGroupAssignmentStudentIds.has(studentId)) selectedGroupAssignmentStudentIds.delete(studentId); else selectedGroupAssignmentStudentIds.add(studentId); target.classList.toggle("selected", selectedGroupAssignmentStudentIds.has(studentId)); target.setAttribute("aria-pressed", String(selectedGroupAssignmentStudentIds.has(studentId))); const count = document.querySelector("#group-assignment-selection-count"); if (count) count.textContent = `${selectedGroupAssignmentStudentIds.size}명 선택됨`; document.querySelectorAll('[data-action="move-selected-group-students"], [data-action="clear-group-assignment-selection"]').forEach((button) => { button.disabled = selectedGroupAssignmentStudentIds.size === 0; }); return; }
+  if (action === "clear-group-assignment-selection") { selectedGroupAssignmentStudentIds.clear(); document.querySelectorAll('[data-action="toggle-group-assignment-student"]').forEach((button) => { button.classList.remove("selected"); button.setAttribute("aria-pressed", "false"); }); const count = document.querySelector("#group-assignment-selection-count"); if (count) count.textContent = "0명 선택됨"; document.querySelectorAll('[data-action="move-selected-group-students"], [data-action="clear-group-assignment-selection"]').forEach((button) => { button.disabled = true; }); return; }
+  if (action === "move-selected-group-students") { const groupId = target.dataset.groupId || ""; if (!selectedGroupAssignmentStudentIds.size) return toast("이동할 학생을 먼저 선택해 주세요."); if (groupId && !activeGroups().some((group) => group.id === groupId)) return; selectedGroupAssignmentStudentIds.forEach((studentId) => { if (groupId) data.groupAssignments[studentId] = groupId; else delete data.groupAssignments[studentId]; }); const movedCount = selectedGroupAssignmentStudentIds.size; selectedGroupAssignmentStudentIds.clear(); saveData(); render(); openGroupAssignmentsModal(false); toast(`${movedCount}명의 학생을 ${groupId ? groupById(groupId).name : "미배정"}으로 이동했습니다.`); return; }
+  if (action === "select-group") { selectedGroupId = target.dataset.id; return render(); }
+  if (action === "change-selected-group-score") { if (!selectedGroupId) return toast("점수를 변경할 모둠을 선택하세요."); return changeGroupScore(selectedGroupId, Number(target.dataset.amount)); }
+  if (action === "change-group-score") return changeGroupScore(target.dataset.id, Number(target.dataset.amount));
+  if (action === "toggle-group-transactions") { showAllGroupTransactions = !showAllGroupTransactions; return render(); }
+  if (action === "new-class-mission") return openClassMissionModal();
+  if (action === "edit-class-mission") return openClassMissionModal(target.dataset.id);
+  if (action === "ask-delete-class-mission") { const mission = data.classMissions.find((item) => item.id === target.dataset.id); if (!mission) return; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>공동 미션 삭제</h2><p><strong>${mission.target}점 · ${escapeHtml(mission.reward)}</strong></p><p>이 공동 미션을 삭제하시겠습니까?</p><div class="button-row"><button class="button danger" data-action="confirm-delete-class-mission" data-id="${mission.id}">삭제</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
+  if (action === "confirm-delete-class-mission") { data.classMissions = data.classMissions.filter((mission) => mission.id !== target.dataset.id); saveData(); render(); toast("공동 미션을 삭제했습니다."); return; }
+  if (action === "confirm-class-mission") { const mission = data.classMissions.find((item) => item.id === target.dataset.id); if (!mission || classGroupScore() < mission.target) return; mission.confirmed = true; mission.confirmedAt = new Date().toISOString(); saveData(); render(); toast(`${mission.target}점 공동 미션 달성을 확정했습니다!`); return; }
+  if (action === "ask-reset-group-scores") { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>모둠 점수 초기화</h2><p>모든 모둠의 현재 점수를 0점으로 초기화합니다.<br>기존 점수 기록은 유지됩니다.<br>계속하시겠습니까?</p><div class="button-row"><button class="button danger" data-action="confirm-reset-group-scores">초기화</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
+  if (action === "confirm-reset-group-scores") { activeGroups().forEach((group) => { if (!group.score) return; const amount = -group.score; group.score = 0; data.groupScoreTransactions.push({ id: crypto.randomUUID(), groupId: group.id, groupName: group.name, amount, scoreAfter: 0, createdAt: new Date().toISOString(), type: "reset" }); }); saveData(); render(); toast("모둠 점수를 0점으로 초기화했습니다. 기존 기록과 달성 미션은 유지됩니다."); return; }
+  if (action === "open-student-detail") { studentDetailId = target.dataset.id; return render(); }
+  if (action === "close-student-detail") { studentDetailId = ""; return render(); }
+  if (action === "filter-student-detail-assignments") { studentDetailAssignmentFilters[target.dataset.id] = target.dataset.status; return render(); }
+  if (action === "reset-student-management-search") { studentManagementSearch = ""; return render(); }
+  if (action === "manage-student-observations") { observationFilters.studentId = target.dataset.id; session.view = "observations"; return render(); }
+  if (action === "view-student-assignments") { assignmentStudentView = target.dataset.id; session.view = "assignments"; return render(); }
+  if (action === "set-student-assignment-filter") { studentAssignmentFilter = target.dataset.filter; showAllStudentCompletedAssignments = false; return render(); }
+  if (action === "toggle-all-completed-assignments") { showAllCompletedAssignments = !showAllCompletedAssignments; expandedAssignmentId = ""; return render(); }
+  if (action === "toggle-student-completed-assignments") { showAllStudentCompletedAssignments = !showAllStudentCompletedAssignments; return render(); }
+  if (action === "toggle-student-point-history") { showAllStudentPoints = !showAllStudentPoints; return render(); }
   if (action === "select-dashboard-date") { dashboardSelectedDate = target.dataset.date; return render(); }
   if (action === "move-dashboard-month") { const [year, month] = dashboardMonth.split("-").map(Number); const moved = new Date(year, month - 1 + (target.dataset.direction === "prev" ? -1 : 1), 1); dashboardMonth = `${moved.getFullYear()}-${String(moved.getMonth() + 1).padStart(2, "0")}`; return render(); }
   if (action === "dashboard-today") { dashboardSelectedDate = todayString(); dashboardMonth = dashboardSelectedDate.slice(0, 7); return render(); }
@@ -915,6 +1248,13 @@ app.addEventListener("click", (event) => {
   if (action === "confirm-assignment-request") return requestAssignmentReview(target.dataset.id);
   if (action === "new-assignment") return openAssignmentModal();
   if (action === "edit-assignment") return openAssignmentModal(target.dataset.id);
+  if (action === "duplicate-assignment") return openAssignmentModal(target.dataset.id, true);
+  if (action === "toggle-assignment-details") { const opening = expandedAssignmentId !== target.dataset.id; expandedAssignmentId = opening ? target.dataset.id : ""; if (opening) assignmentStudentStatusFilters[target.dataset.id] = "all"; return render(); }
+  if (action === "open-assignment-status") { expandedAssignmentId = target.dataset.id; assignmentStudentStatusFilters[target.dataset.id] = target.dataset.status; return render(); }
+  if (action === "filter-assignment-students") { expandedAssignmentId = target.dataset.id; assignmentStudentStatusFilters[target.dataset.id] = target.dataset.status; return render(); }
+  if (action === "set-assignment-filter") { assignmentFilter = target.dataset.filter; assignmentStudentView = ""; expandedAssignmentId = ""; return render(); }
+  if (action === "reset-assignment-filters") { assignmentFilter = "all"; assignmentSubjectFilter = ""; assignmentSearch = ""; assignmentStudentView = ""; expandedAssignmentId = ""; return render(); }
+  if (action === "reset-completed-assignment-filters") { completedAssignmentFilters = { search: "", subject: "", from: "", to: "" }; return render(); }
   if (action === "ask-complete-assignment") return openCompleteAssignmentModal(target.dataset.id);
   if (action === "confirm-complete-assignment") return completeAssignment(target.dataset.id);
   if (action === "ask-reopen-assignment") return openReopenAssignmentModal(target.dataset.id);
@@ -968,6 +1308,9 @@ app.addEventListener("click", (event) => {
   if (action === "toggle-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id && !item.deleted); if (!option) return; option.active = !option.active; saveData(); render(); toast(option.active ? "뽑기 옵션을 다시 사용합니다." : "뽑기 옵션을 사용 중지했습니다."); return; }
   if (action === "ask-delete-draw-option") return openDeleteDrawOptionModal(target.dataset.id);
   if (action === "confirm-delete-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id); if (!option) return; option.active = false; option.deleted = true; saveData(); render(); toast("뽑기 옵션을 삭제했습니다."); return; }
+  if (action === "open-collection-card") return openCollectionCardModal(target.dataset.cardId, target.dataset.rarity);
+  if (action === "flip-collection-card") { const modal = target.closest(".collection-card-modal"); const stage = modal?.querySelector(".collection-detail-stage"); if (!stage) return; stage.classList.toggle("show-back"); const button = modal.querySelector('.collection-modal-controls > [data-action="flip-collection-card"]'); if (button) button.textContent = stage.classList.contains("show-back") ? "앞면 보기" : "뒤집기"; return; }
+  if (action === "select-collection-ability") { target.closest(".modal")?.remove(); return openCollectionCardModal(target.dataset.cardId, target.dataset.rarity, target.dataset.abilityId, true); }
   if (action === "ask-upgrade-card") return openCardUpgradeModal(target.dataset.cardId, target.dataset.rarity);
   if (action === "equip-representative-card") {
     const student = currentStudent(); const card = data.cards.find((item) => item.id === target.dataset.cardId); const rarity = target.dataset.rarity; const abilityId = target.dataset.abilityId;
@@ -1101,13 +1444,25 @@ app.addEventListener("click", (event) => {
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.closest("#class-feature-form") && event.target.type === "checkbox") { const label = event.target.closest(".feature-toggle")?.querySelector("b"); if (label) label.textContent = event.target.checked ? "사용" : "사용 안 함"; return; }
+  if (event.target.dataset.action === "assign-student-group") { const studentId = event.target.dataset.student; const groupId = event.target.value; if (!data.students.some((student) => student.id === studentId) || (groupId && !activeGroups().some((group) => group.id === groupId))) return; if (groupId) data.groupAssignments[studentId] = groupId; else delete data.groupAssignments[studentId]; saveData(); render(); openGroupAssignmentsModal(); toast(groupId ? "학생을 모둠으로 이동했습니다." : "학생을 미배정으로 이동했습니다."); return; }
   if (event.target.dataset.action === "toggle-ranking-visibility") { data.rankingVisibility[event.target.dataset.ranking] = event.target.checked; saveData(); render(); return; }
-  if (event.target.id === "assignment-filter") { assignmentFilter = event.target.value; render(); }
+  if (event.target.id === "assignment-subject-filter") { assignmentSubjectFilter = event.target.value; render(); }
+  if (event.target.id === "assignment-search") { assignmentSearch = event.target.value; render(); }
   if (event.target.id === "assignment-student-view") { assignmentStudentView = event.target.value; render(); }
+  if (event.target.id === "completed-assignment-subject") { completedAssignmentFilters.subject = event.target.value; render(); }
+  if (event.target.id === "completed-assignment-search") { completedAssignmentFilters.search = event.target.value; render(); }
+  if (event.target.id === "completed-assignment-from") { completedAssignmentFilters.from = event.target.value; render(); }
+  if (event.target.id === "completed-assignment-to") { completedAssignmentFilters.to = event.target.value; render(); }
   if (event.target.id === "observation-category") refreshObservationQuickSection(event.target.value, []);
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.id === "class-student-search") { classStudentSearch = event.target.value; const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR"); let shown = 0; document.querySelectorAll("[data-class-student-id]").forEach((row) => { const student = studentById(row.dataset.classStudentId); row.hidden = !student || Boolean(keyword && !String(studentNumber(student)).includes(keyword) && !student.name.toLocaleLowerCase("ko-KR").includes(keyword) && !student.loginId.toLocaleLowerCase("en-US").includes(keyword)); if (!row.hidden) shown += 1; }); const count = document.querySelector(".class-student-search span"); if (count) count.textContent = `${shown}명 표시`; return; }
+  if (event.target.id === "group-settings-count") { document.querySelectorAll("[data-group-name-index]").forEach((input) => { pendingGroupNames[input.dataset.groupNameIndex] = input.value; }); const count = Math.min(8, Math.max(2, Number(event.target.value) || 2)); const container = document.querySelector("#group-name-settings"); if (container) container.innerHTML = groupSettingNameFields(count); return; }
+  if (event.target.id === "assignment-search") { assignmentSearch = event.target.value; return; }
+  if (event.target.id === "completed-assignment-search") { completedAssignmentFilters.search = event.target.value; return; }
+  if (event.target.id === "student-management-search") { studentManagementSearch = event.target.value; const keyword = studentManagementSearch.trim().toLocaleLowerCase("ko-KR"); let shown = 0; document.querySelectorAll(".student-overview-card").forEach((card) => { const student = studentById(card.dataset.id); card.hidden = !student || Boolean(keyword && !student.name.toLocaleLowerCase("ko-KR").includes(keyword) && !String(studentNumber(student)).includes(keyword)); if (!card.hidden) shown += 1; }); const count = document.querySelector("#student-management-count"); if (count) count.textContent = `${shown}명`; return; }
   if (event.target.closest("#draw-option-form") && event.target.name !== "price") {
     const form = event.target.closest("#draw-option-form"); const values = Object.keys(DEFAULT_DRAW_RATES).map((key) => Number(form.elements[key].value) || 0); const total = values.reduce((sum, value) => sum + value, 0); const valid = values.every((value) => value >= 0 && value <= 100) && Math.abs(total - 100) < 0.001;
     document.querySelector("#draw-rate-total").textContent = total; document.querySelector("#draw-rate-error").hidden = valid; document.querySelector("#draw-rate-save").disabled = !valid; return;
@@ -1118,6 +1473,8 @@ app.addEventListener("input", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (["Enter", " "].includes(event.key) && event.target.classList?.contains("collection-detail-stage")) { event.preventDefault(); event.target.click(); return; }
+  if (event.key === "Enter" && ["assignment-search", "completed-assignment-search"].includes(event.target.id)) { event.preventDefault(); render(); return; }
   const timetableInput = event.target.closest?.("#weekly-timetable-form .weekly-timetable-table input");
   if (event.key === "Enter" && timetableInput) {
     event.preventDefault();
@@ -1125,11 +1482,53 @@ document.addEventListener("keydown", (event) => {
     const nextInput = timetableInput.form?.elements[`${dayKey}-${nextIndex}`]; if (nextInput instanceof HTMLElement) nextInput.focus();
     return;
   }
-  if (event.key === "Escape") document.querySelector(".modal")?.remove();
+  if (event.key === "Escape") [...document.querySelectorAll(".modal")].at(-1)?.remove();
 });
 
 app.addEventListener("submit", (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
+  if (form.id === "class-info-form") {
+    const appName = String(formData.get("appName") || "").trim(); const className = String(formData.get("className") || "").trim(); const teacherName = String(formData.get("teacherName") || "").trim(); if (!appName || !className || !teacherName) return;
+    data.classSettings = { ...data.classSettings, appName: appName.slice(0, 50), className: className.slice(0, 50), teacherName: teacherName.slice(0, 30) }; saveData(); render(); toast("학급 정보를 저장했습니다."); return;
+  }
+  if (form.id === "class-feature-form") {
+    data.classSettings.features = Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, formData.has(key)]));
+    session.view = "class-settings"; saveData(); render(); toast("기능 사용 설정을 저장했습니다."); return;
+  }
+  if (form.id === "class-student-form") {
+    const number = Number(formData.get("number")); const name = String(formData.get("name") || "").trim(); const loginId = String(formData.get("loginId") || "").trim(); const existing = studentById(form.dataset.id);
+    if (!Number.isInteger(number) || number < 1 || number > 99 || !name) return toast("번호와 이름을 확인해 주세요.");
+    if (!/^[A-Za-z0-9._-]+$/.test(loginId)) return toast("로그인 ID는 영문, 숫자, 점, 밑줄, 하이픈만 사용할 수 있습니다.");
+    if (data.students.some((student) => student.active !== false && student.id !== existing?.id && studentNumber(student) === number)) return toast(`${number}번은 이미 사용 중입니다.`);
+    if (data.students.some((student) => student.id !== existing?.id && student.loginId?.toLocaleLowerCase("en-US") === loginId.toLocaleLowerCase("en-US"))) return toast("이미 사용 중인 로그인 ID입니다.");
+    if (existing) Object.assign(existing, { number, name: name.slice(0, 30), loginId }); else addStudentRecord(number, name.slice(0, 30), loginId);
+    form.closest(".modal")?.remove(); saveData(); render(); toast(existing ? "학생 정보를 수정했습니다." : "학생을 추가했습니다."); return;
+  }
+  if (form.id === "bulk-students-form") {
+    const rawLines = String(formData.get("students") || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean); const parsed = []; const errors = []; const usedNumbers = new Set(activeStudents().map(studentNumber));
+    rawLines.forEach((line, index) => { const parts = line.split(",").map((part) => part.trim()); const number = Number(parts[0]); const name = parts.slice(1).join(",").trim(); if (parts.length < 2 || !Number.isInteger(number) || number < 1 || number > 99 || !name) errors.push(`${index + 1}번째 줄 형식 오류`); else if (usedNumbers.has(number)) errors.push(`${index + 1}번째 줄: ${number}번 중복`); else { usedNumbers.add(number); parsed.push({ number, name: name.slice(0, 30) }); } });
+    if (errors.length) return alert(`등록할 수 없는 항목이 있습니다.\n\n${errors.slice(0, 8).join("\n")}${errors.length > 8 ? `\n외 ${errors.length - 8}건` : ""}`);
+    if (!parsed.length) return toast("추가할 학생을 입력해 주세요.");
+    if (!confirm(`${parsed.length}명의 학생을 새로 추가합니다.\n기존 학생 명단은 변경하지 않습니다.\n계속하시겠습니까?`)) return;
+    parsed.forEach((item) => addStudentRecord(item.number, item.name, nextStudentLoginId(item.number))); form.closest(".modal")?.remove(); saveData(); render(); toast(`${parsed.length}명의 학생을 추가했습니다.`); return;
+  }
+  if (form.id === "group-settings-form") {
+    const count = Number(formData.get("count")); if (!Number.isInteger(count) || count < 2 || count > 8) { toast("모둠 수는 2~8개로 설정해 주세요."); return; } const current = activeGroups();
+    if (count < current.length) { const removed = current.slice(count); const affectedStudents = data.students.filter((student) => removed.some((group) => data.groupAssignments[student.id] === group.id)).length; if (!confirm(`모둠 수를 ${count}개로 줄이면 ${affectedStudents}명의 학생이 미배정으로 이동합니다.\n모둠 점수와 이름 데이터는 안전하게 보관됩니다.\n계속하시겠습니까?`)) return; removed.forEach((group) => { group.active = false; }); Object.entries(data.groupAssignments).forEach(([studentId, groupId]) => { if (removed.some((group) => group.id === groupId)) delete data.groupAssignments[studentId]; }); }
+    if (count > current.length) { const archived = data.groups.filter((group) => !group.active).sort((first, second) => first.order - second.order); while (activeGroups().length < count && archived.length) archived.shift().active = true; while (activeGroups().length < count) { const order = data.groups.reduce((max, group) => Math.max(max, group.order), -1) + 1; data.groups.push({ id: crypto.randomUUID(), name: `${order + 1}모둠`, score: 0, active: true, order }); } }
+    activeGroups().forEach((group, index) => { const name = String(formData.get(`groupName-${index}`) || "").trim().slice(0, 30); if (name) group.name = name; });
+    if (selectedGroupId && !activeGroups().some((group) => group.id === selectedGroupId)) selectedGroupId = ""; saveData(); render(); toast("모둠 설정을 저장했습니다."); return;
+  }
+  if (form.id === "group-count-form") {
+    const count = Number(formData.get("count")); if (!Number.isInteger(count) || count < 2 || count > 8) { toast("모둠 수는 2~8개로 설정해 주세요."); return; } const current = activeGroups();
+    if (count < current.length) { const removed = current.slice(count); const affectedStudents = data.students.filter((student) => removed.some((group) => data.groupAssignments[student.id] === group.id)).length; const score = removed.reduce((sum, group) => sum + group.score, 0); if (!confirm(`모둠 수를 ${count}개로 줄이면 ${affectedStudents}명의 학생이 미배정으로 이동합니다.\n비활성 모둠의 ${score}점과 이름은 안전하게 보관됩니다.\n계속하시겠습니까?`)) return; removed.forEach((group) => { group.active = false; }); Object.entries(data.groupAssignments).forEach(([studentId, groupId]) => { if (removed.some((group) => group.id === groupId)) delete data.groupAssignments[studentId]; }); }
+    if (count > current.length) { const archived = data.groups.filter((group) => !group.active).sort((first, second) => first.order - second.order); while (activeGroups().length < count && archived.length) archived.shift().active = true; while (activeGroups().length < count) { const order = data.groups.reduce((max, group) => Math.max(max, group.order), -1) + 1; data.groups.push({ id: crypto.randomUUID(), name: `${order + 1}모둠`, score: 0, active: true, order }); } }
+    saveData(); render(); toast(`모둠 수를 ${count}개로 적용했습니다.`); return;
+  }
+  if (form.classList.contains("group-name-form")) { const group = groupById(form.dataset.id); const name = String(formData.get("name") || "").trim().slice(0, 30); if (!group || !name) return; group.name = name; saveData(); render(); toast("모둠 이름을 저장했습니다."); return; }
+  if (form.id === "selected-group-score-form") { const amount = Number(formData.get("amount")); if (!selectedGroupId) return toast("점수를 변경할 모둠을 선택하세요."); if (!Number.isInteger(amount) || amount < 1) return; changeGroupScore(selectedGroupId, event.submitter?.dataset.kind === "subtract" ? -amount : amount); return; }
+  if (form.classList.contains("group-direct-score-form")) { const amount = Number(formData.get("amount")); if (!Number.isInteger(amount) || amount < 1) return; changeGroupScore(form.dataset.id, event.submitter?.dataset.kind === "subtract" ? -amount : amount); return; }
+  if (form.id === "class-mission-form") { const target = Number(formData.get("target")); const reward = String(formData.get("reward") || "").trim(); if (!Number.isInteger(target) || target < 1 || !reward) { toast("목표 점수와 보상 내용을 확인해 주세요."); return; } const duplicate = data.classMissions.some((mission) => mission.target === target && mission.id !== form.dataset.id); if (duplicate) { toast("같은 목표 점수의 공동 미션이 이미 있습니다."); return; } const existing = data.classMissions.find((mission) => mission.id === form.dataset.id); if (existing) Object.assign(existing, { target, reward: reward.slice(0, 100) }); else data.classMissions.push({ id: crypto.randomUUID(), target, reward: reward.slice(0, 100), confirmed: false, confirmedAt: null }); saveData(); render(); toast(existing ? "공동 미션을 수정했습니다." : "새 공동 미션을 추가했습니다."); return; }
   if (form.id === "weekly-timetable-form") {
     data.weeklyTimetable = Object.fromEntries(TIMETABLE_DAYS.map((day) => { const currentLength = Math.max(6, data.weeklyTimetable[day.key]?.length || 0); return [day.key, Array.from({ length: currentLength }, (_, index) => String(formData.get(`${day.key}-${index}`) || "").trim().slice(0, 40))]; }));
     saveData(); render(); toast("기본 주간 시간표를 저장했습니다."); return;
@@ -1204,6 +1603,10 @@ app.addEventListener("submit", (event) => {
     if (existing) Object.assign(existing, { name: name.slice(0, 50), description: description.slice(0, 200) });
     else { const id = crypto.randomUUID(); data.cardSets.push({ id, name: name.slice(0, 50), description: description.slice(0, 200), createdAt: new Date().toISOString(), active: true, deleted: false }); teacherCardSetId = id; }
     saveData(); render(); toast(existing ? "카드셋을 수정했습니다." : "새 카드셋을 만들었습니다.");
+  }
+  if (form.id === "role-limit-form") {
+    const limit = Number(formData.get("limit")); if (!Number.isInteger(limit) || limit < 1 || limit > 5) { toast("하루 최대 신청 개수는 1~5 사이의 정수로 입력해 주세요."); return; }
+    data.dailyRoleApplicationLimit = limit; saveData(); render(); toast(`하루 최대 신청 개수를 ${limit}개로 저장했습니다.`);
   }
   if (form.id === "template-save-form") {
     const name = formData.get("name").trim(); if (!name) return;
