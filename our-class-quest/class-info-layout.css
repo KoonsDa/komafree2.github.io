@@ -1,0 +1,54 @@
+.teacher-shell #class-info-form.class-info-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.teacher-shell #class-info-form.class-info-form > label {
+  min-width: 0;
+}
+
+.teacher-shell #class-info-form.class-info-form > label:has(input[name="studentHomeMessageTitle"]),
+.teacher-shell #class-info-form.class-info-form > label:has(input[name="studentHomeMessageSubtitle"]) {
+  grid-column: 1 / -1;
+}
+
+.teacher-shell #class-info-form.class-info-form input[name="studentHomeMessageTitle"],
+.teacher-shell #class-info-form.class-info-form input[name="studentHomeMessageSubtitle"] {
+  width: 100%;
+}
+
+.teacher-shell #class-info-form.class-info-form > button[type="submit"] {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 140px;
+}
+
+@media (max-width: 900px) {
+  .teacher-shell #class-info-form.class-info-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .teacher-shell #class-info-form.class-info-form > button[type="submit"] {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .teacher-shell #class-info-form.class-info-form {
+    grid-template-columns: 1fr;
+  }
+
+  .teacher-shell #class-info-form.class-info-form > label,
+  .teacher-shell #class-info-form.class-info-form > label:has(input[name="studentHomeMessageTitle"]),
+  .teacher-shell #class-info-form.class-info-form > label:has(input[name="studentHomeMessageSubtitle"]),
+  .teacher-shell #class-info-form.class-info-form > button[type="submit"] {
+    grid-column: 1;
+  }
+
+  .teacher-shell #class-info-form.class-info-form > button[type="submit"] {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
