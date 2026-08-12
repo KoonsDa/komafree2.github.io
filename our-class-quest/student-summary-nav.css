@@ -1,0 +1,41 @@
+.student-shell .summary-nav-item {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.student-shell .summary-nav-item:hover {
+  transform: translateY(-2px);
+  border-color: #b8bdf2;
+  box-shadow: 0 9px 22px rgba(46, 55, 105, .11);
+}
+
+.student-shell .summary-nav-item:focus-visible {
+  outline: 3px solid rgba(91, 98, 232, .28);
+  outline-offset: 2px;
+}
+
+.student-shell .summary-nav-item.current {
+  border-color: #aeb4f3;
+  background: #f7f7ff;
+}
+
+.student-shell .summary-nav-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .student-shell .summary-strip.summary-nav-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .student-shell .summary-nav-item.class-summary-item {
+    grid-column: 1 / -1;
+  }
+}
