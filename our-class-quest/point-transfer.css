@@ -1,0 +1,22 @@
+.student-point-transfer { margin: 24px 0; }
+.point-transfer-card { min-width: 0; }
+.point-transfer-limits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.point-transfer-limits > div { padding: 10px; border-radius: 12px; background: #f7f8fc; }
+.point-transfer-limits span, .point-transfer-limits strong { display: block; }
+.point-transfer-limits span { color: #697087; font-size: .8rem; }
+.point-transfer-limits strong { margin-top: 4px; }
+.point-transfer-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .45fr) auto; align-items: end; gap: 10px; margin-top: 14px; }
+.point-transfer-form label, .point-transfer-settings label { display: grid; gap: 6px; color: #596279; font-weight: 800; }
+.point-transfer-form select, .point-transfer-form input, .point-transfer-settings input { width: 100%; min-width: 0; padding: 10px; border: 2px solid #d7dbe8; border-radius: 10px; background: #fff; }
+.point-transfer-warning { display: block; margin-top: 8px; color: #a24a42; }
+.point-transfer-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 12px; }
+.point-transfer-settings .check-label { grid-column: 1 / -1; }
+.point-transfer-history { display: grid; gap: 8px; }
+.point-transfer-history-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e3e5ed; border-radius: 12px; background: #fff; }
+.point-transfer-history-row small { display: block; margin-top: 4px; color: #697087; }
+.point-transfer-history-row b { flex: 0 0 auto; color: #e66f24; }
+@media (max-width: 700px) {
+  .point-transfer-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .point-transfer-form, .point-transfer-settings { grid-template-columns: 1fr; }
+  .point-transfer-form .button, .point-transfer-settings .button { min-height: 44px; }
+}
