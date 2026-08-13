@@ -110,8 +110,8 @@ function createDemoData() {
     students,
     classSettings: { appName: "우리반 퀘스트", className: "우리 반", teacherName: "선생님", features: { ...DEFAULT_CLASS_FEATURES } },
     roleApplications: [
-      { id: crypto.randomUUID(), studentId: "s2", roleId: "board", status: "waiting" },
-      { id: crypto.randomUUID(), studentId: "s3", roleId: "lunch", status: "completed" }
+      { id: crypto.randomUUID(), studentId: "s2", roleId: "board", status: "waiting", appliedAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), studentId: "s3", roleId: "lunch", status: "completed", appliedAt: new Date().toISOString(), completedAt: new Date().toISOString() }
     ],
     dailyRoleApplicationLimit: 1,
     groups: DEFAULT_GROUPS(),
@@ -281,6 +281,7 @@ function loadData() {
     const transferSettings = saved.pointTransferSettings && typeof saved.pointTransferSettings === "object" ? saved.pointTransferSettings : {};
     saved.pointTransferSettings = { enabled: transferSettings.enabled !== false, maxPerTransfer: Math.max(1, Number.isInteger(Number(transferSettings.maxPerTransfer)) ? Number(transferSettings.maxPerTransfer) : 10), dailyMaxAmount: Math.max(1, Number.isInteger(Number(transferSettings.dailyMaxAmount)) ? Number(transferSettings.dailyMaxAmount) : 20), dailyMaxCount: Math.max(1, Number.isInteger(Number(transferSettings.dailyMaxCount)) ? Number(transferSettings.dailyMaxCount) : 3) };
     saved.pointTransfers = (Array.isArray(saved.pointTransfers) ? saved.pointTransfers : []).filter((transfer) => transfer && /^\d{4}-\d{2}-\d{2}$/.test(String(transfer.date || "")) && String(transfer.fromStudentId || "") && String(transfer.toStudentId || "") && Number.isInteger(Number(transfer.amount)) && Number(transfer.amount) > 0).map((transfer) => ({ id: String(transfer.id || crypto.randomUUID()), fromStudentId: String(transfer.fromStudentId), toStudentId: String(transfer.toStudentId), amount: Number(transfer.amount), date: String(transfer.date), createdAt: String(transfer.createdAt || new Date().toISOString()) }));
+    saved.roleApplications = (Array.isArray(saved.roleApplications) ? saved.roleApplications : []).map((application) => ({ ...application, appliedAt: application.appliedAt || application.createdAt || application.completedAt || "" }));
     const savedRoleLimit = Number(saved.dailyRoleApplicationLimit); saved.dailyRoleApplicationLimit = Number.isInteger(savedRoleLimit) && savedRoleLimit >= 1 && savedRoleLimit <= 5 ? savedRoleLimit : 1;
     const savedGroups = Array.isArray(saved.groups) ? saved.groups : DEFAULT_GROUPS();
     saved.groups = savedGroups.map((group, index) => ({ id: String(group.id || crypto.randomUUID()), name: String(group.name || `${index + 1}모둠`).slice(0, 30), score: Math.max(0, Number.isInteger(Number(group.score)) ? Number(group.score) : 0), active: group.active !== false, order: Number.isInteger(Number(group.order)) ? Number(group.order) : index }));
@@ -406,10 +407,8 @@ function studentNavItems() {
   const featureByView = { roles: "roles", assignments: "assignments", points: "points", draw: "cards", collection: "cards", ranking: "rankings" };
   return STUDENT_NAV.filter(([view]) => !featureByView[view] || featureEnabled(featureByView[view]));
 }
-function todayRoleApplicationsForStudent(studentId) {
-  const today = todayString();
-  return data.roleApplications.filter((application) => { if (application.studentId !== studentId || application.status === "cancelled") return false; const dates = [localDateKey(application.appliedAt), localDateKey(application.completedAt)].filter(Boolean); return dates.length ? dates.includes(today) : true; });
-}
+function todayRoleApplications() { const today = todayString(); return data.roleApplications.filter((application) => application.status !== "cancelled" && localDateKey(application.appliedAt) === today); }
+function todayRoleApplicationsForStudent(studentId) { return todayRoleApplications().filter((application) => application.studentId === studentId); }
 function shell(content, teacher = false) {
   const student = currentStudent();
   document.title = data.classSettings.appName;
@@ -500,7 +499,7 @@ function studentRoles() {
   const student = currentStudent();
   const ownActive = todayRoleApplicationsForStudent(student.id); const limit = data.dailyRoleApplicationLimit;
   return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 ${limit}개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><section class="card role-application-limit-status"><span>오늘 신청</span><strong>${ownActive.length} / ${limit}개</strong>${ownActive.length >= limit ? `<small>오늘 신청 가능한 1인1역을 모두 신청했습니다.</small>` : `<small>${limit - ownActive.length}개 더 신청할 수 있어요.</small>`}</section><div class="grid">${data.currentRoles.map((role) => {
-    const applications = data.roleApplications.filter((item) => item.roleId === role.id && item.status !== "cancelled");
+    const applications = todayRoleApplications().filter((item) => item.roleId === role.id);
     const mine = applications.find((item) => item.studentId === student.id);
     const full = applications.length >= role.capacity;
     const actionButton = mine?.status === "completed"
@@ -714,7 +713,7 @@ function classFeatureSettings() {
 }
 function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}`; }
 
-function teacherRoleList(items = data.roleApplications.filter((item) => item.status !== "cancelled")) {
+function teacherRoleList(items = todayRoleApplications()) {
   if (!items.length) return `<div class="empty">역할 신청이 아직 없습니다.</div>`;
   return `<div class="list">${items.map((item) => { const student = studentById(item.studentId); const role = roleById(item.roleId); if (!student || !role) return ""; const shownPoints = item.status === "completed" ? (item.awardedPoints ?? role.points) : role.points; const actions = item.status === "completed" ? `<button class="button danger" data-action="undo-complete" data-id="${item.id}">완료 취소</button>` : `<button class="button success" data-action="complete-role" data-id="${item.id}">완료</button><button class="button danger" data-action="cancel-role" data-id="${item.id}">취소</button>`; return `<div class="list-row"><div class="list-main"><strong>${student.name} / ${escapeHtml(role.name)}</strong><span class="pill ${item.status === "completed" ? "success" : "waiting"}">${item.status === "completed" ? "수행 완료" : "수행 대기"}</span> <span class="points">${shownPoints}P</span></div><div class="list-actions">${actions}</div></div>`; }).join("")}</div>`;
 }
@@ -929,7 +928,7 @@ function render() { session.mode === "student" ? renderStudent() : session.mode 
 
 function applyRole(roleId) {
   const active = todayRoleApplicationsForStudent(session.studentId); const limit = data.dailyRoleApplicationLimit;
-  const roleApplicants = data.roleApplications.filter((item) => item.roleId === roleId && item.status !== "cancelled");
+  const roleApplicants = todayRoleApplications().filter((item) => item.roleId === roleId);
   const role = roleById(roleId);
   if (active.length >= limit) return toast(`오늘 신청 가능한 1인1역을 모두 신청했습니다. (최대 ${limit}개)`);
   if (roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
