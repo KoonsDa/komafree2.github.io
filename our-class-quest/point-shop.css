@@ -1,0 +1,29 @@
+.student-point-shop { margin: 24px 0; }
+.point-shop-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.point-shop-card { display: flex; flex-direction: column; min-width: 0; }
+.point-shop-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.point-shop-card-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.point-shop-card-heading > strong { flex: 0 0 auto; color: #e66f24; font-size: 1.2rem; }
+.point-shop-card > p, .point-shop-manage-card p { color: #697087; line-height: 1.5; }
+.point-shop-card dl, .point-use-confirm { display: grid; gap: 6px; margin: 12px 0; }
+.point-shop-card dl div, .point-use-confirm div { display: flex; justify-content: space-between; gap: 12px; }
+.point-shop-card dt, .point-use-confirm dt { color: #697087; }
+.point-shop-card dd, .point-use-confirm dd { margin: 0; font-weight: 900; }
+.point-shop-card > .button { width: 100%; margin-top: auto; }
+.point-shop-block-reason { display: block; margin-top: 8px; color: #a24a42; line-height: 1.4; }
+.point-request-list, .point-shop-manage-list { display: grid; gap: 10px; }
+.point-shop-set-list { display: grid; gap: 10px; }
+.point-shop-set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #e3e5ed; border-radius: 14px; }
+.point-shop-set-row small { display: block; margin-top: 4px; color: #697087; }
+.modal-card.point-shop-set-modal { width: min(760px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; }
+.point-request-row, .point-shop-manage-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid #e3e5ed; border-radius: 14px; background: #fff; }
+.point-request-row span, .point-request-row small, .point-shop-manage-card small { display: block; margin-top: 4px; color: #697087; }
+.point-request-row .button-row, .point-shop-manage-card .button-row { flex: 0 0 auto; margin-top: 0; }
+@media (max-width: 900px) { .point-shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) {
+  .point-shop-grid { grid-template-columns: 1fr; }
+  .point-request-row, .point-shop-manage-card { align-items: stretch; flex-direction: column; }
+  .point-shop-set-row { align-items: stretch; flex-direction: column; }
+  .point-request-row .button-row, .point-shop-manage-card .button-row { width: 100%; }
+  .point-request-row .button, .point-shop-manage-card .button { flex: 1 1 auto; min-height: 44px; }
+}
