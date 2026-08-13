@@ -19,6 +19,7 @@ function formatCardAbilityProbability(weight, total) {
 
 teacherCardsV2 = function teacherCardsWithAbilityManager() {
   return baseTeacherCardsWithAbilities()
+    .replace(/<section class="card" style="margin-top:24px"><h2>데모 설정<\/h2>.*?data-action="reset-demo".*?<\/section>/, "")
     .replace("등급별 능력 보너스와 하루 최대 보너스를 설정하세요.", "각 특수능력의 효과는 수정 팝업에서 설정하세요.")
     .replace('<form id="card-ability-settings-form">', `${cardAbilityManagerHtml()}<form id="card-ability-settings-form">`)
     .replace('<div class="special-ability-settings">', '<div class="special-ability-settings daily-cap-settings">')

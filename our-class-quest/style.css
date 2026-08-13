@@ -307,6 +307,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .inactive-student-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e1e4ee; }
 .inactive-student-section summary { color: #687188; cursor: pointer; font-weight: 900; }
 .inactive-student-section .class-roster-table-wrap { margin-top: 10px; }
+.data-management-card { margin-top: 20px; }
+.data-management-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.data-management-actions > div { padding: 15px; border: 1px solid #dfe2ed; border-radius: 13px; background: #f8f9fc; }
+.data-management-actions p { margin: 9px 0 0; }
+.data-reset-danger { margin-top: 20px; padding: 16px; border: 2px solid #e9a4a4; border-radius: 14px; background: #fff3f3; }
+.data-reset-danger h3 { margin-top: 0; color: #a33434; }
+.backup-summary { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: #f4f6fa; }
+.backup-summary > div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; }
+.backup-summary dt { color: #687188; font-weight: 900; }
+.backup-summary dd { margin: 0; }
+.reset-data-modal > label { display: grid; gap: 7px; margin-top: 16px; }
 .bulk-students-modal { width: min(620px, 92vw); }
 .class-feature-settings { margin-bottom: 20px; }
 .class-feature-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }

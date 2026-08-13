@@ -327,6 +327,7 @@ const assignmentSelections = {};
 const selectedPointStudentIds = new Set();
 let toastTimer;
 let pendingCardImageData = "";
+let pendingBackupPayload = null;
 const app = document.querySelector("#app");
 
 function todayString() { return new Date().toLocaleDateString("sv-SE"); }
@@ -334,6 +335,15 @@ function dateWithOffset(offset) { const date = new Date(); date.setDate(date.get
 function dataLengthArray(values, fallback, length = STUDENT_NAMES.length) { return Array.from({ length }, (_, index) => ASSIGNMENT_STATUSES.includes(values[index]) ? values[index] : fallback); }
 
 function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+function createBackupPayload() { return { type: "our-class-quest-backup", version: 1, exportedAt: new Date().toISOString(), appName: data.classSettings?.appName || "우리반 퀘스트", className: data.classSettings?.className || "우리 반", data: structuredClone(data) }; }
+function safeBackupFilenamePart(value) { return String(value || "우리반").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "").slice(0, 40) || "우리반"; }
+function downloadBackup() { const payload = createBackupPayload(); const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `우리반퀘스트_${safeBackupFilenamePart(payload.className)}_${todayString()}.json`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); toast("백업 파일 다운로드를 시작했습니다."); }
+function validateBackup(value) { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("올바른 백업 파일이 아닙니다."); if (value.type !== "our-class-quest-backup" || !value.data || typeof value.data !== "object" || Array.isArray(value.data)) throw new Error("우리반 퀘스트 백업 파일만 복원할 수 있습니다."); if (!Array.isArray(value.data.students) || !value.data.classSettings || typeof value.data.classSettings !== "object" || Array.isArray(value.data.classSettings)) throw new Error("백업 파일에 필수 학급 데이터가 없습니다."); return value; }
+function restoreBackup(payload) {
+  const previousRaw = localStorage.getItem(STORAGE_KEY); const previousData = data;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload.data)); const restored = loadData(); if (!restored || !Array.isArray(restored.students) || !restored.classSettings) throw new Error("복원 데이터를 읽지 못했습니다."); data = restored; saveData(); teacherCardSetId = data.activeCardSetIds[0] || data.cardSets.find((item) => !item.deleted)?.id || ""; collectionCardSetFilter = "all"; selectedPointStudentIds.clear(); session = { mode: "teacher", studentId: null, view: "class-settings" }; pendingBackupPayload = null; render(); toast("백업 데이터를 복원했습니다."); }
+  catch { try { if (previousRaw === null) localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, previousRaw); } catch {} data = previousData; render(); toast("백업 복원에 실패했습니다. 기존 데이터는 유지되었습니다."); }
+}
 function studentById(id) { return data.students.find((student) => student.id === id); }
 function activeStudents() { return data.students.filter((student) => student.active !== false).sort((first, second) => studentNumber(first) - studentNumber(second) || first.name.localeCompare(second.name, "ko")); }
 function roleById(id) { return data.currentRoles.find((role) => role.id === id); }
@@ -714,7 +724,10 @@ function classFeatureSettings() {
   const items = CLASS_FEATURES.map((feature) => `<label class="class-feature-row"><span><strong>${feature.label}</strong><small>${feature.description}</small></span><span class="feature-toggle"><input type="checkbox" name="${feature.key}" ${featureEnabled(feature.key) ? "checked" : ""}><b>${featureEnabled(feature.key) ? "사용" : "사용 안 함"}</b></span></label>`).join("");
   return `<section class="card class-feature-settings"><div class="section-heading"><div><h2>기능 사용 설정</h2><p class="muted">이 학급에서 사용할 기능만 선택하세요. 기능을 꺼도 기존 데이터는 삭제되지 않습니다.</p></div></div><form id="class-feature-form"><div class="class-feature-list">${items}</div><div class="button-row"><button class="button success" type="submit">기능 설정 저장</button></div></form><p class="class-core-features">대시보드 · 학생 관리 · 관찰 기록 · 학급 설정은 항상 사용할 수 있습니다.</p></section>`;
 }
-function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}`; }
+function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions"><div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
+function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}${dataManagementSettings()}`; }
+function openRestoreBackupModal(payload) { const className = payload.data.classSettings?.className || payload.className || "이름 없음"; const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "날짜 정보 없음"; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>백업 파일 복원</h2><p>현재 학급 데이터를 백업 파일의 내용으로 교체합니다.</p><dl class="backup-summary"><div><dt>학급 이름</dt><dd>${escapeHtml(className)}</dd></div><div><dt>학생 수</dt><dd>${payload.data.students.length}명</dd></div><div><dt>백업 날짜</dt><dd>${escapeHtml(exportedAt)}</dd></div></dl><div class="button-row"><button class="button danger" data-action="confirm-restore-backup">복원하기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
+function openResetDataModal() { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card reset-data-modal"><h2>모든 데이터 초기화</h2><p>학생, 과제, 포인트, 관찰 기록, 카드 등 현재 학급의 모든 데이터가 초기 상태로 돌아갑니다.</p><p class="muted">초기화 전에 백업 파일을 다운로드하는 것을 권장합니다.</p><button class="button secondary" data-action="download-backup">먼저 백업 다운로드</button><label>확인을 위해 <strong>초기화</strong>를 입력하세요.<input id="reset-data-confirmation" autocomplete="off"></label><div class="button-row"><button id="confirm-reset-data" class="button danger" data-action="confirm-reset-data" disabled>정말 초기화</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
 
 function teacherRoleList(items = todayRoleApplications()) {
   if (!items.length) return `<div class="empty">역할 신청이 아직 없습니다.</div>`;
@@ -1482,11 +1495,23 @@ app.addEventListener("click", (event) => {
     data.roleTemplates = data.roleTemplates.filter((item) => item.id !== template.id); if (editingTemplateId === template.id) editingTemplateId = null;
     saveData(); render(); toast("템플릿을 삭제했습니다."); return;
   }
+  if (action === "download-backup") { downloadBackup(); return; }
+  if (action === "choose-backup-file") { document.querySelector("#backup-file-input")?.click(); return; }
+  if (action === "confirm-restore-backup") { if (!pendingBackupPayload) return; target.closest(".modal")?.remove(); restoreBackup(pendingBackupPayload); return; }
+  if (action === "open-reset-data") { openResetDataModal(); return; }
+  if (action === "confirm-reset-data") {
+    const modal = target.closest(".reset-data-modal"); if (modal?.querySelector("#reset-data-confirmation")?.value !== "초기화") return;
+    if (!confirm("현재 학급의 모든 데이터를 정말 초기화하시겠습니까?")) return;
+    data = createDemoData(); teacherCardSetId = data.activeCardSetIds[0]; collectionCardSetFilter = "all"; selectedPointStudentIds.clear(); session = { mode: "teacher", studentId: null, view: "class-settings" }; saveData(); render(); toast("모든 데이터를 초기 상태로 되돌렸습니다."); return;
+  }
   if (action === "close-modal") { target.closest(".modal")?.remove(); return; }
-  if (action === "reset-demo") { if (confirm("모든 데모 데이터를 처음 상태로 되돌릴까요?")) { data = createDemoData(); teacherCardSetId = data.activeCardSetIds[0]; collectionCardSetFilter = "all"; saveData(); render(); toast("데모 데이터를 초기화했습니다."); } }
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.id === "backup-file-input") {
+    const input = event.target; const file = input.files?.[0]; input.value = ""; if (!file) return;
+    file.text().then((text) => { const payload = validateBackup(JSON.parse(text)); pendingBackupPayload = payload; openRestoreBackupModal(payload); }).catch((error) => { pendingBackupPayload = null; toast(error instanceof SyntaxError ? "JSON 파일을 읽을 수 없습니다." : error.message || "백업 파일을 확인할 수 없습니다."); }); return;
+  }
   if (event.target.id === "card-image-input") {
     const input = event.target; const field = input.closest(".card-image-field"); const message = field?.querySelector("#card-image-message"); const file = input.files?.[0]; if (!file) return;
     input.disabled = true; if (message) message.textContent = "이미지를 자동 축소하는 중입니다…";
@@ -1507,6 +1532,7 @@ app.addEventListener("change", (event) => {
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.id === "reset-data-confirmation") { const button = event.target.closest(".reset-data-modal")?.querySelector("#confirm-reset-data"); if (button) button.disabled = event.target.value !== "초기화"; return; }
   if (event.target.id === "class-student-search") { classStudentSearch = event.target.value; const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR"); let shown = 0; document.querySelectorAll("[data-class-student-id]").forEach((row) => { const student = studentById(row.dataset.classStudentId); row.hidden = !student || Boolean(keyword && !String(studentNumber(student)).includes(keyword) && !student.name.toLocaleLowerCase("ko-KR").includes(keyword) && !student.loginId.toLocaleLowerCase("en-US").includes(keyword)); if (!row.hidden) shown += 1; }); const count = document.querySelector(".class-student-search span"); if (count) count.textContent = `${shown}명 표시`; return; }
   if (event.target.id === "group-settings-count") { document.querySelectorAll("[data-group-name-index]").forEach((input) => { pendingGroupNames[input.dataset.groupNameIndex] = input.value; }); const count = Math.min(8, Math.max(2, Number(event.target.value) || 2)); const container = document.querySelector("#group-name-settings"); if (container) container.innerHTML = groupSettingNameFields(count); return; }
   if (event.target.id === "assignment-search") { assignmentSearch = event.target.value; return; }
