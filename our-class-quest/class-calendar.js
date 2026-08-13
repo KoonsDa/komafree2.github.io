@@ -84,6 +84,6 @@
     const now = new Date().toISOString(); const existing = data.classEvents.find((item) => item.id === form.dataset.id);
     if (existing) Object.assign(existing, { date, category, title: title.slice(0, 100), description: description.slice(0, 500), updatedAt: now });
     else data.classEvents.push({ id: crypto.randomUUID(), date, category, title: title.slice(0, 100), description: description.slice(0, 500), createdAt: now, updatedAt: now });
-    dashboardSelectedDate = date; dashboardMonth = date.slice(0, 7); saveData(); render(); toast(existing ? "우리반 일정을 수정했습니다." : "우리반 일정을 추가했습니다.");
+    saveData(); render(); toast(existing ? "우리반 일정을 수정했습니다." : "우리반 일정을 추가했습니다.");
   });
 })();
