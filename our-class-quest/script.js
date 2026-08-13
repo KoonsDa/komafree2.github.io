@@ -328,6 +328,10 @@ const selectedPointStudentIds = new Set();
 let toastTimer;
 let pendingCardImageData = "";
 let pendingBackupPayload = null;
+let firebaseTeacherUser = null;
+let firebaseTeacherSession = false;
+let firebaseAuthPending = true;
+let firebaseAuthFallbackTimer;
 const app = document.querySelector("#app");
 
 function todayString() { return new Date().toLocaleDateString("sv-SE"); }
@@ -397,12 +401,17 @@ async function compressCardImage(file) {
   if (result.length > 1.5 * 1024 * 1024) throw new Error("압축 후에도 이미지가 너무 큽니다. 더 작은 이미지를 선택해 주세요."); return result;
 }
 function toast(message) { const element = document.querySelector("#toast"); element.textContent = message; element.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove("show"), 2200); }
+function firebaseAuthMessage(error) { const code = error?.code || ""; if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return "Google 로그인 창이 닫혔습니다."; if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요."; if (code === "auth/unauthorized-domain") return "현재 도메인은 Google 로그인 허용 목록에 없습니다."; if (code === "auth/network-request-failed") return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."; return "Google 로그인 중 오류가 발생했습니다."; }
+function logFirebaseAuthError(error) { console.error("Firebase Google sign-in error details", { code: error?.code, message: error?.message, name: error?.name, customData: error?.customData }); console.error("Firebase Google sign-in error object", error); }
+async function enterFirebaseTeacher() { const client = window.ourClassFirebase; if (!client?.ready) { toast(client?.error ? "Firebase 초기화에 실패했습니다." : "Google 로그인을 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; } try { const user = await client.signInTeacher(); if (!user) return; firebaseTeacherUser = user; firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); toast(`${user.displayName || user.email || "선생님"} 선생님, 로그인했습니다.`); } catch (error) { logFirebaseAuthError(error); const isLocalDevelopment = location.hostname === "localhost" || location.hostname === "127.0.0.1"; toast(isLocalDevelopment ? `Google 로그인 오류: ${error?.code || "unknown"}` : firebaseAuthMessage(error)); } }
+async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
 saveData();
 
 function renderWelcome(showStudents = false) {
   document.title = data.classSettings.appName;
-  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생으로 체험하기</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button></div>${showStudents ? `<div class="student-picker" aria-label="체험할 학생 선택">${activeStudents().map((student) => `<button class="student-pick" data-action="enter-student" data-id="${student.id}">${student.name}</button>`).join("")}</div>` : ""}</section></main>`;
+  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생으로 체험하기</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button><button class="role-choice google" data-action="firebase-teacher-login">🔵 Google로 선생님 로그인</button></div>${showStudents ? `<div class="student-picker" aria-label="체험할 학생 선택">${activeStudents().map((student) => `<button class="student-pick" data-action="enter-student" data-id="${student.id}">${student.name}</button>`).join("")}</div>` : ""}</section></main>`;
 }
+function renderAuthLoading() { document.title = data.classSettings.appName; app.innerHTML = `<main class="welcome"><section class="welcome-card auth-loading"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>로그인 상태 확인 중...</p></section></main>`; }
 
 const STUDENT_NAV = [["home", "⌂", "홈"], ["roles", "✓", "오늘의 역할"], ["assignments", "▣", "과제"], ["points", "◆", "포인트"], ["draw", "★", "카드 뽑기"], ["collection", "▦", "위인 도감"], ["ranking", "♛", "랭킹"]];
 const TEACHER_NAV = [["dashboard", "⌂", "대시보드"], ["students", "♙", "학생 관리"], ["groups", "◉", "모둠활동"], ["roles", "✓", "1인1역"], ["assignments", "▣", "과제"], ["observations", "✎", "관찰 기록"], ["points", "◆", "포인트"], ["cards", "★", "카드 관리"], ["ranking", "♛", "랭킹"], ["class-settings", "⚙", "학급 설정"]];
@@ -423,6 +432,8 @@ function shell(content, teacher = false) {
   const student = currentStudent();
   document.title = data.classSettings.appName;
   const top = teacher ? `<span>${escapeHtml(data.classSettings.className)} · ${escapeHtml(data.classSettings.teacherName)}</span>` : `<span>${escapeHtml(data.classSettings.className)} · ${escapeHtml(student.name)}</span>`;
+  const firebaseTeacherTop = teacher && firebaseTeacherSession && firebaseTeacherUser ? `<span>${escapeHtml(firebaseTeacherUser.displayName || firebaseTeacherUser.email || "Google")} 선생님</span>` : top;
+  const exitLabel = teacher && firebaseTeacherSession ? "로그아웃" : "처음으로";
   const studentSummaryItems = teacher ? [] : [
     `<div class="summary-item class-summary-item">학급<strong>${escapeHtml(data.classSettings.className)}</strong></div>`,
     featureEnabled("points") ? `<div class="summary-item">현재 포인트<strong>${student.points}P</strong></div>` : "",
@@ -430,7 +441,7 @@ function shell(content, teacher = false) {
     featureEnabled("cards") ? `<div class="summary-item">보유 카드<strong>${cardCount(student)}장</strong></div>` : ""
   ].filter(Boolean);
   const summary = teacher ? "" : `<section class="summary-strip" style="--summary-count:${studentSummaryItems.length}">${studentSummaryItems.join("")}</section>`;
-  return `<div class="app-shell ${teacher ? "teacher-shell" : "student-shell"}"><header class="topbar"><div class="brand"><span class="brand-icon">⚔</span>${escapeHtml(data.classSettings.appName)}</div><div class="user-area">${top}<button class="ghost-button" data-action="logout">처음으로</button></div></header>${summary}<div class="layout"><nav class="side-nav">${navHtml(teacher ? teacherNavItems() : studentNavItems())}</nav><main class="content">${content}</main></div></div>`;
+  return `<div class="app-shell ${teacher ? "teacher-shell" : "student-shell"}"><header class="topbar"><div class="brand"><span class="brand-icon">⚔</span>${escapeHtml(data.classSettings.appName)}</div><div class="user-area">${firebaseTeacherTop}<button class="ghost-button" data-action="logout">${exitLabel}</button></div></header>${summary}<div class="layout"><nav class="side-nav">${navHtml(teacher ? teacherNavItems() : studentNavItems())}</nav><main class="content">${content}</main></div></div>`;
 }
 
 function assignmentStatusClass(status) { return { submitted: "success", review: "waiting", missing: "danger" }[status] || "danger"; }
@@ -942,7 +953,7 @@ function renderTeacher() {
   if (!teacherNavItems().some(([view]) => view === session.view)) session.view = "class-settings";
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
-function render() { session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
+function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
 
 function applyRole(roleId) {
   const active = todayRoleApplicationsForStudent(session.studentId); const limit = data.dailyRoleApplicationLimit;
@@ -1237,8 +1248,9 @@ app.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
   if (action === "show-students") return renderWelcome(true);
   if (action === "enter-student") { studentAssignmentFilter = "todo"; showAllStudentCompletedAssignments = false; showAllStudentPoints = false; session = { mode: "student", studentId: target.dataset.id, view: "home" }; return render(); }
-  if (action === "enter-teacher") { session = { mode: "teacher", studentId: null, view: "dashboard" }; return render(); }
-  if (action === "logout") { session = { mode: "welcome", studentId: null, view: "home" }; return render(); }
+  if (action === "enter-teacher") { firebaseTeacherSession = false; session = { mode: "teacher", studentId: null, view: "dashboard" }; return render(); }
+  if (action === "firebase-teacher-login") { enterFirebaseTeacher(); return; }
+  if (action === "logout") { if (firebaseTeacherSession && window.ourClassFirebase?.ready) { exitFirebaseTeacher(); return; } firebaseTeacherSession = false; firebaseTeacherUser = null; session = { mode: "welcome", studentId: null, view: "home" }; return render(); }
   if (action === "navigate") { session.view = target.dataset.view; return render(); }
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
@@ -1507,6 +1519,14 @@ app.addEventListener("click", (event) => {
   if (action === "close-modal") { target.closest(".modal")?.remove(); return; }
 });
 
+window.addEventListener("our-class-firebase-auth", (event) => {
+  firebaseAuthPending = false; clearTimeout(firebaseAuthFallbackTimer);
+  firebaseTeacherUser = event.detail || null;
+  if (!firebaseTeacherUser) { if (firebaseTeacherSession) { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; } if (session.mode === "welcome") render(); return; }
+  if (session.mode === "welcome") { firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); }
+});
+window.addEventListener("our-class-firebase-error", () => { firebaseAuthPending = false; clearTimeout(firebaseAuthFallbackTimer); if (session.mode === "welcome") { render(); toast("Firebase 초기화에 실패했습니다. 기존 체험 기능은 계속 사용할 수 있습니다."); } });
+
 app.addEventListener("change", (event) => {
   if (event.target.id === "backup-file-input") {
     const input = event.target; const file = input.files?.[0]; input.value = ""; if (!file) return;
@@ -1709,3 +1729,4 @@ app.addEventListener("submit", (event) => {
 });
 
 render();
+firebaseAuthFallbackTimer = setTimeout(() => { if (!firebaseAuthPending) return; firebaseAuthPending = false; if (session.mode === "welcome") { render(); toast("Google 로그인을 불러오지 못했습니다. 기존 체험 기능은 계속 사용할 수 있습니다."); } }, 5000);

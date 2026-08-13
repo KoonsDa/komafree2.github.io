@@ -28,6 +28,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .role-choice { padding: 24px 18px; border: 0; border-radius: 22px; color: #fff; font-size: 1.15rem; font-weight: 900; box-shadow: 0 6px 0 rgba(35, 41, 100, .2); }
 .role-choice.student { background: #5b62e8; }
 .role-choice.teacher { background: #15957a; }
+.role-choice.google { grid-column: 1 / -1; background: #fff; color: #344054; border: 2px solid #d0d5dd; box-shadow: 0 6px 0 rgba(35, 41, 100, .12); }
 .student-picker { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 24px; }
 .student-pick { padding: 14px 8px; border: 2px solid #c9cbff; border-radius: 14px; color: #4047b5; background: #f2f2ff; font-weight: 800; }
 
