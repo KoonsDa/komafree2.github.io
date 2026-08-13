@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFirestore, doc, collection, getDoc, setDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, doc, collection, getDoc, getDocs, setDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCEjJSL0PNZUfoQ_j06xvPMlDgbC8x_FwI",
@@ -17,6 +17,10 @@ function publicUser(user) {
 
 function classSettings(value) {
   return { className: String(value?.className || ""), teacherName: String(value?.teacherName || ""), appName: String(value?.appName || "") };
+}
+
+function studentFields(value, orderIndex) {
+  return { id: String(value?.id || ""), number: Number(value?.number), name: String(value?.name || ""), loginId: String(value?.loginId || ""), active: value?.active !== false, orderIndex: Number.isInteger(orderIndex) ? orderIndex : Number(value?.orderIndex) || 0 };
 }
 
 try {
@@ -59,6 +63,29 @@ try {
       const user = auth.currentUser;
       if (!user || !activeClassId) throw new Error("Connected Firebase class was not found.");
       await setDoc(doc(db, "classes", activeClassId), { ...classSettings(value), updatedAt: serverTimestamp() }, { merge: true });
+    },
+    loadStudents: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "students"));
+      return snapshot.docs.map((studentDoc) => studentFields({ ...studentDoc.data(), id: studentDoc.id }));
+    },
+    uploadInitialStudents: async (students) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const batch = writeBatch(db); const timestamp = serverTimestamp();
+      students.forEach((student, orderIndex) => batch.set(doc(db, "classes", activeClassId, "students", student.id), { ...studentFields(student, orderIndex), createdAt: timestamp, updatedAt: timestamp }));
+      await batch.commit();
+    },
+    saveStudent: async (student, orderIndex, isNew = false) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const timestamp = serverTimestamp();
+      const fields = isNew ? { ...studentFields(student, orderIndex), createdAt: timestamp } : { number: Number(student.number), name: String(student.name || ""), loginId: String(student.loginId || ""), active: student.active !== false };
+      await setDoc(doc(db, "classes", activeClassId, "students", student.id), { ...fields, updatedAt: timestamp }, { merge: true });
+    },
+    saveStudentsBatch: async (students) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const batch = writeBatch(db); const timestamp = serverTimestamp();
+      students.forEach(({ student, orderIndex }) => batch.set(doc(db, "classes", activeClassId, "students", student.id), { ...studentFields(student, orderIndex), createdAt: timestamp, updatedAt: timestamp }, { merge: true }));
+      await batch.commit();
     }
   };
   window.dispatchEvent(new CustomEvent("our-class-firebase-ready"));
