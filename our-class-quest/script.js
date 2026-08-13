@@ -138,7 +138,8 @@ function createDemoData() {
     rankingVisibility: Object.fromEntries(RANKING_TYPES.map((ranking) => [ranking.id, true])),
     weeklyTimetable: Object.fromEntries(TIMETABLE_DAYS.map((day) => [day.key, EMPTY_TIMETABLE()])),
     dateTimetableOverrides: {},
-    dailyClassNotes: {}
+    dailyClassNotes: {},
+    classEvents: []
   };
 }
 
@@ -219,7 +220,7 @@ function loadData() {
       usedLoginIds.add(loginId.toLocaleLowerCase("en-US"));
       return { ...student, number: Number.isInteger(Number(student.number)) && Number(student.number) > 0 ? Number(student.number) : studentIndex + 1, loginId, active: student.active !== false, cards, representativeCard, cardUpgradeHistory: Array.isArray(student.cardUpgradeHistory) ? student.cardUpgradeHistory : [], cardAcquisitionHistory: Array.isArray(student.cardAcquisitionHistory) ? student.cardAcquisitionHistory : [], pointHistory: Array.isArray(student.pointHistory) ? student.pointHistory : [] };
     });
-    saved.classSettings = { appName: String(saved.classSettings?.appName || "우리반 퀘스트").slice(0, 50), className: String(saved.classSettings?.className || "우리 반").slice(0, 50), teacherName: String(saved.classSettings?.teacherName || "선생님").slice(0, 30), features: Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, saved.classSettings?.features?.[key] !== false])) };
+    saved.classSettings = { appName: String(saved.classSettings?.appName || "우리반 퀘스트").slice(0, 50), className: String(saved.classSettings?.className || "우리 반").slice(0, 50), teacherName: String(saved.classSettings?.teacherName || "선생님").slice(0, 30), features: Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, saved.classSettings?.features?.[key] !== false])), ...(saved.classSettings?.studentHomeMessageTitle != null ? { studentHomeMessageTitle: String(saved.classSettings.studentHomeMessageTitle).slice(0, 100) } : {}), ...(saved.classSettings?.studentHomeMessageSubtitle != null ? { studentHomeMessageSubtitle: String(saved.classSettings.studentHomeMessageSubtitle).slice(0, 200) } : {}) };
     if (!Array.isArray(saved.currentRoles)) saved.currentRoles = structuredClone(DEFAULT_ROLES);
     saved.currentRoles = saved.currentRoles.map((role) => ({ ...role, description: role.description || "" }));
     if (!Array.isArray(saved.roleTemplates)) {
@@ -265,6 +266,7 @@ function loadData() {
     saved.weeklyTimetable = Object.fromEntries(TIMETABLE_DAYS.map((day) => [day.key, Array.from({ length: Math.max(6, Array.isArray(saved.weeklyTimetable?.[day.key]) ? saved.weeklyTimetable[day.key].length : 0) }, (_, index) => String(saved.weeklyTimetable?.[day.key]?.[index] || "").slice(0, 40))]));
     saved.dateTimetableOverrides = saved.dateTimetableOverrides && typeof saved.dateTimetableOverrides === "object" && !Array.isArray(saved.dateTimetableOverrides) ? Object.fromEntries(Object.entries(saved.dateTimetableOverrides).filter(([date, periods]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(periods)).map(([date, periods]) => [date, periods.map((period) => String(period || "").slice(0, 40))])) : {};
     saved.dailyClassNotes = saved.dailyClassNotes && typeof saved.dailyClassNotes === "object" && !Array.isArray(saved.dailyClassNotes) ? Object.fromEntries(Object.entries(saved.dailyClassNotes).filter(([date]) => /^\d{4}-\d{2}-\d{2}$/.test(date)).map(([date, note]) => [date, { text: String(typeof note === "string" ? note : note?.text || "").slice(0, 2000), updatedAt: typeof note === "object" ? note.updatedAt || "" : "" }])) : {};
+    saved.classEvents = (Array.isArray(saved.classEvents) ? saved.classEvents : []).filter((event) => event && /^\d{4}-\d{2}-\d{2}$/.test(String(event.date || "")) && String(event.title || "").trim()).map((event) => ({ id: String(event.id || crypto.randomUUID()), date: String(event.date), title: String(event.title).trim().slice(0, 100), description: String(event.description || "").trim().slice(0, 500), category: ["학급행사", "학교행사", "준비물·안내", "기타"].includes(event.category) ? event.category : "기타", createdAt: String(event.createdAt || new Date().toISOString()), updatedAt: String(event.updatedAt || event.createdAt || new Date().toISOString()) }));
     const savedRoleLimit = Number(saved.dailyRoleApplicationLimit); saved.dailyRoleApplicationLimit = Number.isInteger(savedRoleLimit) && savedRoleLimit >= 1 && savedRoleLimit <= 5 ? savedRoleLimit : 1;
     const savedGroups = Array.isArray(saved.groups) ? saved.groups : DEFAULT_GROUPS();
     saved.groups = savedGroups.map((group, index) => ({ id: String(group.id || crypto.randomUUID()), name: String(group.name || `${index + 1}모둠`).slice(0, 30), score: Math.max(0, Number.isInteger(Number(group.score)) ? Number(group.score) : 0), active: group.active !== false, order: Number.isInteger(Number(group.order)) ? Number(group.order) : index }));

@@ -44,10 +44,10 @@
 
     const title = hero.querySelector("h2");
     const subtitle = hero.querySelector("p");
-    if (title) title.textContent = currentTitle();
+    if (title && title.textContent !== currentTitle()) title.textContent = currentTitle();
     if (subtitle) {
       const text = currentSubtitle();
-      subtitle.textContent = text;
+      if (subtitle.textContent !== text) subtitle.textContent = text;
       subtitle.hidden = !text;
     }
   }
