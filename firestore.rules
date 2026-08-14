@@ -45,6 +45,16 @@ service cloud.firestore {
         ]);
     }
 
+    match /classes/{classId}/assignments/{assignmentId} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.id == assignmentId
+        && request.resource.data.keys().hasOnly([
+          'id', 'title', 'subject', 'description', 'createdAt', 'dueDate',
+          'important', 'points', 'assignmentState', 'completedAt', 'deleted', 'updatedAt'
+        ]);
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

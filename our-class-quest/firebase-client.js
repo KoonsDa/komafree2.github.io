@@ -23,6 +23,11 @@ function studentFields(value, orderIndex) {
   return { id: String(value?.id || ""), number: Number(value?.number), name: String(value?.name || ""), loginId: String(value?.loginId || ""), active: value?.active !== false, orderIndex: Number.isInteger(orderIndex) ? orderIndex : Number(value?.orderIndex) || 0 };
 }
 
+function assignmentFields(value) {
+  const assignmentState = value?.assignmentState === "completed" ? "completed" : "active";
+  return { id: String(value?.id || ""), title: String(value?.title || ""), subject: String(value?.subject || ""), description: String(value?.description || ""), createdAt: value?.createdAt || null, dueDate: String(value?.dueDate || ""), important: value?.important === true, points: Number(value?.points) || 0, assignmentState, completedAt: assignmentState === "completed" ? value?.completedAt || null : null, deleted: value?.deleted === true };
+}
+
 try {
   const firebaseApp = initializeApp(firebaseConfig);
   const auth = getAuth(firebaseApp);
@@ -43,7 +48,7 @@ try {
       if (!activeClassId) return { connected: false, activeClassId: "", classSettings: null };
       const classSnapshot = await getDoc(doc(db, "classes", activeClassId));
       if (!classSnapshot.exists()) { activeClassId = ""; return { connected: false, activeClassId: "", classSettings: null }; }
-      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()) };
+      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true };
     },
     connectCurrentClass: async (value) => {
       const user = auth.currentUser;
@@ -86,6 +91,28 @@ try {
       const batch = writeBatch(db); const timestamp = serverTimestamp();
       students.forEach(({ student, orderIndex }) => batch.set(doc(db, "classes", activeClassId, "students", student.id), { ...studentFields(student, orderIndex), createdAt: timestamp, updatedAt: timestamp }, { merge: true }));
       await batch.commit();
+    },
+    loadAssignments: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "assignments"));
+      return snapshot.docs.map((assignmentDoc) => assignmentFields({ ...assignmentDoc.data(), id: assignmentDoc.id }));
+    },
+    connectInitialAssignments: async (assignments) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      for (let index = 0; index < assignments.length; index += 450) {
+        const batch = writeBatch(db); const timestamp = serverTimestamp();
+        assignments.slice(index, index + 450).forEach((assignment) => batch.set(doc(db, "classes", activeClassId, "assignments", assignment.id), { ...assignmentFields(assignment), deleted: false, updatedAt: timestamp }));
+        await batch.commit();
+      }
+      await setDoc(doc(db, "classes", activeClassId), { assignmentsConnected: true, updatedAt: serverTimestamp() }, { merge: true });
+    },
+    saveAssignment: async (assignment) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      await setDoc(doc(db, "classes", activeClassId, "assignments", assignment.id), { ...assignmentFields(assignment), deleted: false, updatedAt: serverTimestamp() });
+    },
+    markAssignmentDeleted: async (assignmentId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      await setDoc(doc(db, "classes", activeClassId, "assignments", assignmentId), { deleted: true, updatedAt: serverTimestamp() }, { merge: true });
     }
   };
   window.dispatchEvent(new CustomEvent("our-class-firebase-ready"));
