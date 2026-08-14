@@ -13,8 +13,7 @@
     return "";
   }
   function addUseHistory(student, item, request) {
-    student.points -= request.price;
-    student.pointHistory.push({ id: crypto.randomUUID(), amount: -request.price, reason: `${item.name} 사용`, source: "포인트 상품", relatedId: request.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+    return applyStudentPointChange(student, -request.price, { id: crypto.randomUUID(), amount: -request.price, reason: `${item.name} 사용`, source: "포인트 상품", relatedId: request.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
   }
 
   function studentShopSection(student) {
@@ -83,12 +82,12 @@
     if (action === "confirm-use-point-item") {
       const item = itemById(target.dataset.id); const student = currentStudent(); const reason = requestBlockReason(item, student); if (reason) { target.closest(".modal")?.remove(); return toast(reason); }
       const now = new Date().toISOString(); const request = { id: crypto.randomUUID(), itemId: item.id, studentId: student.id, date: todayString(), price: item.price, status: item.approvalRequired ? "pending" : "completed", createdAt: now, resolvedAt: item.approvalRequired ? null : now };
-      data.pointUseRequests.push(request); if (!item.approvalRequired) addUseHistory(student, item, request); saveData(); render(); toast(item.approvalRequired ? "사용 승인을 신청했습니다." : `${item.name} 상품을 사용했습니다.`); return;
+      if (!item.approvalRequired && !addUseHistory(student, item, request)) return toast("포인트가 부족합니다."); data.pointUseRequests.push(request); saveData(); render(); toast(item.approvalRequired ? "사용 승인을 신청했습니다." : `${item.name} 상품을 사용했습니다.`); return;
     }
     if (action === "approve-point-use") {
       const request = data.pointUseRequests.find((item) => item.id === target.dataset.id); if (!request || request.status !== "pending") return toast("이미 처리된 신청입니다.");
       const item = itemById(request.itemId); const student = studentById(request.studentId); const reason = requestBlockReason(item, student, request.date, request.id, request.price); if (reason) return toast(reason);
-      addUseHistory(student, item, request); request.status = "completed"; request.resolvedAt = new Date().toISOString(); saveData(); render(); toast(`${student.name}의 사용을 승인했습니다.`); return;
+      if (!addUseHistory(student, item, request)) return toast("포인트가 부족합니다."); request.status = "completed"; request.resolvedAt = new Date().toISOString(); saveData(); render(); toast(`${student.name}의 사용을 승인했습니다.`); return;
     }
     if (action === "reject-point-use") { const request = data.pointUseRequests.find((item) => item.id === target.dataset.id); if (!request || request.status !== "pending") return toast("이미 처리된 신청입니다."); request.status = "rejected"; request.resolvedAt = new Date().toISOString(); saveData(); render(); toast("사용 신청을 거절했습니다."); return; }
   });

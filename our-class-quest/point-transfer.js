@@ -56,10 +56,11 @@
     try {
       const fromStudent = currentStudent(); const toStudent = activeStudents().find((student) => student.id === toStudentId); const reason = transferBlockReason(fromStudent, toStudent, amount); if (reason) { toast(reason); return; }
       const transferId = crypto.randomUUID(); const now = new Date().toISOString();
-      fromStudent.points -= amount; toStudent.points += amount;
+      const fromEntry = { id: crypto.randomUUID(), amount: -amount, reason: `친구에게 선물 (${toStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now };
+      const toEntry = { id: crypto.randomUUID(), amount, reason: `친구에게 선물 받음 (${fromStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now };
+      if (!applyStudentPointChange(fromStudent, -amount, fromEntry)) { toast("현재 보유 포인트가 부족합니다."); return; }
+      applyStudentPointChange(toStudent, amount, toEntry);
       data.pointTransfers.push({ id: transferId, fromStudentId: fromStudent.id, toStudentId: toStudent.id, amount, date: todayString(), createdAt: now });
-      fromStudent.pointHistory.push({ id: crypto.randomUUID(), amount: -amount, reason: `친구에게 선물 (${toStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now });
-      toStudent.pointHistory.push({ id: crypto.randomUUID(), amount, reason: `친구에게 선물 받음 (${fromStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now });
       saveData(); render(); toast(`${toStudent.name}에게 ${amount}P를 선물했습니다.`);
     } finally { processingTransfer = false; }
   }

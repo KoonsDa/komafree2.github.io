@@ -388,17 +388,25 @@ function representativeCardInfo(student) {
 }
 function historyDateKey(value) { const parts = String(value || "").match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/); return parts ? `${parts[1]}-${parts[2].padStart(2, "0")}-${parts[3].padStart(2, "0")}` : ""; }
 function todayCardBonus(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (item.source === "카드 능력 보너스" && historyDateKey(item.date) === todayString() ? Number(item.amount) || 0 : 0), 0); }
+function applyStudentPointChange(student, balanceDelta, historyEntries = []) {
+  if (!student || typeof student !== "object" || !Number.isInteger(balanceDelta)) return false;
+  const currentPoints = Number(student.points); if (!Number.isInteger(currentPoints) || currentPoints + balanceDelta < 0) return false;
+  const entries = (Array.isArray(historyEntries) ? historyEntries : [historyEntries]).filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry));
+  if (!Array.isArray(student.pointHistory)) student.pointHistory = [];
+  student.points = currentPoints + balanceDelta;
+  student.pointHistory.push(...entries);
+  return true;
+}
 function cardBonusAward(student, baseAmount, originalSource, relatedId) {
   const representative = representativeCardInfo(student); if (!representative || !representative.ability?.active || representative.ability?.deleted || baseAmount <= 0) return { amount: 0 };
   const percent = abilityPercent(representative.rarity, representative.abilityId, originalSource); const cap = Number(representative.setting.dailyCap) || 0;
   const amount = Math.max(0, Math.min(Math.round(baseAmount * percent / 100), Math.max(0, cap - todayCardBonus(student))));
   const snapshot = { amount, cardId: representative.card.id, cardName: representative.card.name, rarity: representative.rarity, abilityId: representative.abilityId, abilityName: representative.ability?.name, bonusPercent: percent, dailyCap: cap, originalSource, baseAmount, relatedId };
-  if (amount > 0) student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: `${representative.card.name} ${representative.ability?.name} 카드 능력 보너스`, source: "카드 능력 보너스", studentId: student.id, representativeCardId: representative.card.id, representativeCardName: representative.card.name, representativeCardRarity: representative.rarity, representativeCardAbilityId: representative.abilityId, representativeCardAbilityName: representative.ability?.name, originalSource, baseAmount, bonusPercent: percent, bonusAmount: amount, relatedId, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
-  return snapshot;
+  return { ...snapshot, historyEntry: amount > 0 ? { id: crypto.randomUUID(), amount, reason: `${representative.card.name} ${representative.ability?.name} 카드 능력 보너스`, source: "카드 능력 보너스", studentId: student.id, representativeCardId: representative.card.id, representativeCardName: representative.card.name, representativeCardRarity: representative.rarity, representativeCardAbilityId: representative.abilityId, representativeCardAbilityName: representative.ability?.name, originalSource, baseAmount, bonusPercent: percent, bonusAmount: amount, relatedId, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() } : null };
 }
 function reverseCardBonus(student, snapshot, reason) {
   const amount = Number(snapshot?.amount) || 0; if (amount <= 0) return;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: -amount, reason, source: "카드 능력 보너스", studentId: student.id, representativeCardId: snapshot.cardId, representativeCardName: snapshot.cardName, representativeCardRarity: snapshot.rarity, representativeCardAbilityId: snapshot.abilityId, representativeCardAbilityName: snapshot.abilityName, originalSource: snapshot.originalSource, baseAmount: snapshot.baseAmount, bonusPercent: snapshot.bonusPercent, bonusAmount: -amount, relatedId: snapshot.relatedId, reversal: true, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+  return { id: crypto.randomUUID(), amount: -amount, reason, source: "카드 능력 보너스", studentId: student.id, representativeCardId: snapshot.cardId, representativeCardName: snapshot.cardName, representativeCardRarity: snapshot.rarity, representativeCardAbilityId: snapshot.abilityId, representativeCardAbilityName: snapshot.abilityName, originalSource: snapshot.originalSource, baseAmount: snapshot.baseAmount, bonusPercent: snapshot.bonusPercent, bonusAmount: -amount, relatedId: snapshot.relatedId, reversal: true, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() };
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
 function cardImageMarkup(card, className = "card-person-image") { return card?.imageData ? `<img class="${className}" src="${card.imageData}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span class="${className} card-image-placeholder" aria-hidden="true">★</span>`; }
@@ -925,8 +933,7 @@ function applyTeacherPointChange(amount) {
   }
   const source = amount > 0 ? "교사 직접 지급" : "교사 직접 차감";
   students.forEach((student) => {
-    student.points += amount;
-    student.pointHistory.push({ id: crypto.randomUUID(), amount, reason: source, source, date: new Date().toLocaleDateString("ko-KR") });
+    applyStudentPointChange(student, amount, { id: crypto.randomUUID(), amount, reason: source, source, date: new Date().toLocaleDateString("ko-KR") });
   });
   saveData(); render(); toast(`${students.length}명에게 ${amount > 0 ? "+" : ""}${amount}P를 반영했습니다.`);
 }
@@ -1035,10 +1042,10 @@ function completeRole(id) {
   if (!application || application.status !== "waiting") return;
   const student = studentById(application.studentId); const role = roleById(application.roleId);
   if (!student || !role) return;
-  const baseAmount = role.points; const cardAbilityAward = cardBonusAward(student, baseAmount, "1인1역", role.id); const bonusAmount = cardAbilityAward.amount || 0;
+  const baseAmount = role.points; const cardAbilityResult = cardBonusAward(student, baseAmount, "1인1역", role.id); const { historyEntry: cardBonusHistoryEntry, ...cardAbilityAward } = cardAbilityResult; const bonusAmount = cardAbilityAward.amount || 0;
+  const historyEntries = [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${role.name} 완료`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, cardBonusHistoryEntry];
+  if (!applyStudentPointChange(student, baseAmount + bonusAmount, historyEntries)) return;
   application.status = "completed"; application.completedAt = new Date().toISOString(); application.awardedBasePoints = baseAmount; application.awardedBonusPoints = bonusAmount; application.cardAbilityAward = cardAbilityAward; application.awardedPoints = baseAmount + bonusAmount;
-  student.points += baseAmount + bonusAmount;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: baseAmount, reason: `${role.name} 완료`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
   saveData(); render(); toast(`${student.name}에게 ${baseAmount + bonusAmount}P를 지급했습니다.${bonusAmount ? ` (카드 보너스 +${bonusAmount}P)` : ""}`);
 }
 
@@ -1056,11 +1063,11 @@ function undoCompleteRole(id) {
     return;
   }
 
-  student.points -= pointsToRecover;
+  const historyEntries = [{ id: crypto.randomUUID(), amount: -baseToRecover, reason: `${role.name} 완료 취소`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, reverseCardBonus(student, application.cardAbilityAward, `${role.name} 완료 카드 보너스 취소`)];
+  if (!applyStudentPointChange(student, -pointsToRecover, historyEntries)) return;
   application.status = "waiting"; application.completedAt = null;
   application.awardedPoints = 0; application.awardedBasePoints = 0; application.awardedBonusPoints = 0;
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: -baseToRecover, reason: `${role.name} 완료 취소`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
-  reverseCardBonus(student, application.cardAbilityAward, `${role.name} 완료 카드 보너스 취소`); application.cardAbilityAward = null;
+  application.cardAbilityAward = null;
   saveData(); render(); toast(`${student.name}의 역할 완료를 취소하고 ${pointsToRecover}P를 회수했습니다.`);
 }
 
@@ -1074,9 +1081,11 @@ function drawCard(optionId) {
   const activeCards = data.cards.filter((card) => data.activeCardSetIds.includes(card.cardSetId) && cardSetById(card.cardSetId)?.active && card.active && !card.deleted); if (!activeCards.length) { toast("선택한 카드셋에서 뽑을 수 있는 카드가 없습니다."); return; }
   const rarity = pickRarity(option.rates); const figure = activeCards[Math.floor(Math.random() * activeCards.length)]; const abilityId = randomAbilityId(); const ability = cardAbilityById(abilityId);
   if (!abilityId || !ability) { toast("사용 가능한 특수능력이 없습니다. 교사 설정을 확인해 주세요."); return; }
-  student.points -= option.price; if (!student.cards[figure.id]) student.cards[figure.id] = {}; if (!student.cards[figure.id][rarity]) student.cards[figure.id][rarity] = Object.fromEntries(cardAbilities().map((item) => [item.id, 0])); student.cards[figure.id][rarity][abilityId] = (student.cards[figure.id][rarity][abilityId] || 0) + 1;
+  const pointEntry = { id: crypto.randomUUID(), amount: -option.price, reason: `${option.name} · ${figure.name} 카드 뽑기`, source: "카드 뽑기", drawOptionId: option.id, drawOptionName: option.name, drawPrice: option.price, date: new Date().toLocaleDateString("ko-KR") };
+  if (!applyStudentPointChange(student, -option.price, pointEntry)) return;
+  if (!student.cards[figure.id]) student.cards[figure.id] = {}; if (!student.cards[figure.id][rarity]) student.cards[figure.id][rarity] = Object.fromEntries(cardAbilities().map((item) => [item.id, 0])); student.cards[figure.id][rarity][abilityId] = (student.cards[figure.id][rarity][abilityId] || 0) + 1;
   student.cardAcquisitionHistory.push({ id: crypto.randomUUID(), cardId: figure.id, rarity, abilityId, source: "카드 뽑기", createdAt: new Date().toISOString() });
-  student.pointHistory.push({ id: crypto.randomUUID(), amount: -option.price, reason: `${option.name} · ${figure.name} 카드 뽑기`, source: "카드 뽑기", drawOptionId: option.id, drawOptionName: option.name, drawPrice: option.price, date: new Date().toLocaleDateString("ko-KR") }); saveData();
+  saveData();
   const card = document.querySelector("#draw-card"); const result = document.querySelector("#draw-result");
   result.className = `draw-face draw-front rarity-${rarityClass(rarity)}`;
   result.innerHTML = `<div class="card-front-content"><span class="pill rarity-${rarityClass(rarity)}">${rarity}</span>${cardImageMarkup(figure, "draw-card-image")}<h3>${escapeHtml(figure.name)}</h3><p>${escapeHtml(figure.era)}</p><strong>${ability.icon} ${escapeHtml(ability.name)}</strong></div>`;
@@ -1184,23 +1193,25 @@ function changeAssignmentStudentStatus(assignment, studentId, nextStatus) {
   const previousStatus = assignmentStatusForStudent(assignment, studentId); if (previousStatus === nextStatus) return true;
   if (!assignment.pointAwards || typeof assignment.pointAwards !== "object") assignment.pointAwards = {};
   const award = assignmentAward(assignment, student.id);
-  if (previousStatus === "submitted" && nextStatus !== "submitted" && award.awarded && award.amount > 0) {
-    if (student.points < award.amount) {
-      alert(`${student.name}의 현재 포인트가 ${student.points}P라서 ${award.amount}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
-      return false;
+  if (previousStatus === "submitted" && nextStatus !== "submitted" && award.awarded) {
+    const awardedAmount = Number(award.amount) || 0;
+    if (awardedAmount > 0) {
+      if (student.points < awardedAmount) {
+        alert(`${student.name}의 현재 포인트가 ${student.points}P라서 ${awardedAmount}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
+        return false;
+      }
+      const baseAmount = award.baseAmount ?? awardedAmount;
+      const historyEntries = [{ id: crypto.randomUUID(), amount: -baseAmount, reason: `${assignment.title} 제출 완료 취소`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, reverseCardBonus(student, award.cardAbilityAward, `${assignment.title} 제출 완료 카드 보너스 취소`)];
+      if (!applyStudentPointChange(student, -awardedAmount, historyEntries)) return false;
     }
-    const baseAmount = award.baseAmount ?? award.amount; const bonusAmount = award.bonusAmount ?? 0;
-    student.points -= award.amount;
-    student.pointHistory.push({ id: crypto.randomUUID(), amount: -baseAmount, reason: `${assignment.title} 제출 완료 취소`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
-    reverseCardBonus(student, award.cardAbilityAward, `${assignment.title} 제출 완료 카드 보너스 취소`);
     assignment.pointAwards[student.id] = { ...award, awarded: false, revokedAt: new Date().toISOString() };
   }
   setAssignmentStatusForStudent(assignment, studentId, nextStatus);
   if (nextStatus === "submitted" && !assignmentAward(assignment, student.id).awarded) {
-    const baseAmount = assignment.points; const cardAbilityAward = cardBonusAward(student, baseAmount, "과제", assignment.id); const bonusAmount = cardAbilityAward.amount || 0; const amount = baseAmount + bonusAmount;
+    const baseAmount = assignment.points; const cardAbilityResult = cardBonusAward(student, baseAmount, "과제", assignment.id); const { historyEntry: cardBonusHistoryEntry, ...cardAbilityAward } = cardAbilityResult; const bonusAmount = cardAbilityAward.amount || 0; const amount = baseAmount + bonusAmount;
     if (baseAmount > 0) {
-      student.points += amount;
-      student.pointHistory.push({ id: crypto.randomUUID(), amount: baseAmount, reason: `${assignment.title} 제출 완료`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() });
+      const historyEntries = [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${assignment.title} 제출 완료`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, cardBonusHistoryEntry];
+      if (!applyStudentPointChange(student, amount, historyEntries)) return false;
     }
     assignment.pointAwards[student.id] = { awarded: true, amount, baseAmount, bonusAmount, cardAbilityAward, awardedAt: new Date().toISOString(), revokedAt: null };
   }
