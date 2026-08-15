@@ -37,6 +37,24 @@ function cloudHistoryId(studentId, historyId) {
   return `${encodeURIComponent(String(studentId))}_${encodeURIComponent(String(historyId))}`;
 }
 
+function assignmentStudentStateId(assignmentId, studentId) {
+  return encodeURIComponent(JSON.stringify([String(assignmentId), String(studentId)]));
+}
+
+function assignmentStudentStateFields(value) {
+  const status = ["missing", "review", "submitted"].includes(value?.status) ? value.status : "missing";
+  return { assignmentId: String(value?.assignmentId || ""), studentId: String(value?.studentId || ""), status, pointAward: jsonSafeMap(value?.pointAward) };
+}
+
+function canonicalJson(value) {
+  const normalize = (item) => {
+    if (Array.isArray(item)) return item.map(normalize);
+    if (!item || typeof item !== "object") return item;
+    return Object.fromEntries(Object.keys(item).sort().map((key) => [key, normalize(item[key])]));
+  };
+  return JSON.stringify(normalize(JSON.parse(JSON.stringify(value ?? {}))));
+}
+
 function timestampIso(value) {
   if (!value) return "";
   if (typeof value.toDate === "function") return value.toDate().toISOString();
@@ -63,7 +81,7 @@ try {
       if (!activeClassId) return { connected: false, activeClassId: "", classSettings: null };
       const classSnapshot = await getDoc(doc(db, "classes", activeClassId));
       if (!classSnapshot.exists()) { activeClassId = ""; return { connected: false, activeClassId: "", classSettings: null }; }
-      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true };
+      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true };
     },
     connectCurrentClass: async (value) => {
       const user = auth.currentUser;
@@ -129,6 +147,23 @@ try {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       await setDoc(doc(db, "classes", activeClassId, "assignments", assignmentId), { deleted: true, updatedAt: serverTimestamp() }, { merge: true });
     },
+    connectInitialAssignmentStudentStates: async (states) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      for (let index = 0; index < states.length; index += 425) {
+        const batch = writeBatch(db); const timestamp = serverTimestamp();
+        states.slice(index, index + 425).forEach((state) => {
+          const fields = assignmentStudentStateFields(state); const stateId = assignmentStudentStateId(fields.assignmentId, fields.studentId);
+          batch.set(doc(db, "classes", activeClassId, "assignmentStudentStates", stateId), { ...fields, createdAt: timestamp, updatedAt: timestamp });
+        });
+        await batch.commit();
+      }
+      await setDoc(doc(db, "classes", activeClassId), { assignmentStudentStatesConnected: true, updatedAt: serverTimestamp() }, { merge: true });
+    },
+    loadAssignmentStudentStates: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "assignmentStudentStates"));
+      return snapshot.docs.map((stateDoc) => { const value = stateDoc.data(); return { id: stateDoc.id, ...assignmentStudentStateFields(value), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
     connectInitialPoints: async (students) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       const writes = [];
@@ -157,18 +192,37 @@ try {
     applyPointMutations: async (mutations) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       await runTransaction(db, async (transaction) => {
-        const prepared = mutations.map((mutation) => ({ ...mutation, stateRef: doc(db, "classes", activeClassId, "studentPointStates", mutation.studentId), historyEntries: (mutation.historyEntries || []).map(jsonSafeMap) }));
-        const stateSnapshots = await Promise.all(prepared.map((mutation) => transaction.get(mutation.stateRef)));
+        const prepared = mutations.map((mutation) => {
+          const assignmentState = mutation.assignmentStudentState ? {
+            ...assignmentStudentStateFields(mutation.assignmentStudentState),
+            expectedStatus: ["missing", "review", "submitted"].includes(mutation.assignmentStudentState.expectedStatus) ? mutation.assignmentStudentState.expectedStatus : "missing",
+            expectedPointAward: jsonSafeMap(mutation.assignmentStudentState.expectedPointAward),
+            ref: doc(db, "classes", activeClassId, "assignmentStudentStates", assignmentStudentStateId(mutation.assignmentStudentState.assignmentId, mutation.assignmentStudentState.studentId))
+          } : null;
+          return { ...mutation, stateRef: doc(db, "classes", activeClassId, "studentPointStates", mutation.studentId), historyEntries: (mutation.historyEntries || []).map(jsonSafeMap), assignmentStudentState: assignmentState };
+        });
+        const [stateSnapshots, assignmentStateSnapshots] = await Promise.all([
+          Promise.all(prepared.map((mutation) => transaction.get(mutation.stateRef))),
+          Promise.all(prepared.map((mutation) => mutation.assignmentStudentState ? transaction.get(mutation.assignmentStudentState.ref) : Promise.resolve(null)))
+        ]);
         prepared.forEach((mutation, index) => {
           const snapshot = stateSnapshots[index]; const cloudPoints = snapshot.exists() ? Number(snapshot.data()?.points) : NaN;
           if (!Number.isInteger(cloudPoints) || cloudPoints !== mutation.expectedPoints) { const error = new Error("Cloud point state conflicts with local state."); error.code = "point/conflict"; error.details = { studentId: mutation.studentId, expectedPoints: mutation.expectedPoints, cloudPoints }; throw error; }
           const nextPoints = cloudPoints + mutation.balanceDelta; if (!Number.isInteger(nextPoints) || nextPoints < 0) { const error = new Error("Point balance cannot become negative."); error.code = "point/insufficient"; throw error; }
+          if (!mutation.assignmentStudentState) return;
+          const assignmentSnapshot = assignmentStateSnapshots[index]; const cloudStatus = assignmentSnapshot?.exists() ? assignmentStudentStateFields(assignmentSnapshot.data()).status : "missing"; const cloudPointAward = assignmentSnapshot?.exists() ? jsonSafeMap(assignmentSnapshot.data()?.pointAward) : {};
+          if (cloudStatus !== mutation.assignmentStudentState.expectedStatus) { const error = new Error("Cloud assignment status conflicts with local state."); error.code = "assignment/status-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
+          if (canonicalJson(cloudPointAward) !== canonicalJson(mutation.assignmentStudentState.expectedPointAward)) { const error = new Error("Cloud assignment point award conflicts with local state."); error.code = "assignment/award-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
         });
         const timestamp = serverTimestamp();
         prepared.forEach((mutation, index) => {
           const nextPoints = Number(stateSnapshots[index].data().points) + mutation.balanceDelta;
-          transaction.set(mutation.stateRef, { id: mutation.studentId, points: nextPoints, updatedAt: timestamp }, { merge: true });
+          if (mutation.balanceDelta !== 0 || !mutation.assignmentStudentState) transaction.set(mutation.stateRef, { id: mutation.studentId, points: nextPoints, updatedAt: timestamp }, { merge: true });
           mutation.historyEntries.forEach((entry) => transaction.set(doc(db, "classes", activeClassId, "pointHistory", cloudHistoryId(mutation.studentId, entry.id)), { id: entry.id, studentId: mutation.studentId, entry, createdAt: timestamp }));
+          if (mutation.assignmentStudentState) {
+            const assignmentSnapshot = assignmentStateSnapshots[index]; const state = mutation.assignmentStudentState;
+            transaction.set(state.ref, { assignmentId: state.assignmentId, studentId: state.studentId, status: state.status, pointAward: state.pointAward, createdAt: assignmentSnapshot?.exists() && assignmentSnapshot.data().createdAt ? assignmentSnapshot.data().createdAt : timestamp, updatedAt: timestamp });
+          }
         });
       });
     }

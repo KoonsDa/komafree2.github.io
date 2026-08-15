@@ -347,6 +347,8 @@ let firebaseStudentsLoadFailed = false;
 let firebaseAssignmentsChecked = false;
 let firebaseAssignmentsConnected = false;
 let firebaseAssignmentsLoadFailed = false;
+let firebaseAssignmentStudentStatesConnected = false;
+let firebaseAssignmentStudentStatesConnecting = false;
 let firebasePointsChecked = false;
 let firebasePointsConnected = false;
 let firebasePointsLoadFailed = false;
@@ -410,7 +412,13 @@ function enqueuePointMutations(mutations) {
     try { await window.ourClassFirebase.applyPointMutations(queued); }
     catch (error) {
       console.error("Firestore point mutation failed", { code: error?.code, message: error?.message, details: error?.details, mutations: queued }, error);
-      if (error?.code === "point/conflict") { toast("다른 화면에서 포인트가 변경되어 최신 값을 다시 불러왔습니다."); await loadFirebasePoints(userUid); }
+      const assignmentConflict = queued.some((mutation) => mutation.assignmentStudentState) && ["assignment/status-conflict", "assignment/award-conflict", "point/conflict"].includes(error?.code);
+      if (assignmentConflict) {
+        const [pointsLoaded, statesLoaded] = await Promise.all([loadFirebasePoints(userUid, false), loadFirebaseAssignmentStudentStates(userUid, false)]);
+        if (firebaseTeacherUser?.uid === userUid && pointsLoaded && statesLoaded) { saveData(); render(); toast("다른 화면에서 과제 상태가 변경되어 최신 상태를 다시 불러왔습니다."); }
+        else toast("최신 과제 상태를 다시 불러오지 못했습니다. 연결을 확인해 주세요.");
+      }
+      else if (error?.code === "point/conflict") { toast("다른 화면에서 포인트가 변경되어 최신 값을 다시 불러왔습니다."); await loadFirebasePoints(userUid); }
       else toast("클라우드 포인트 저장에 실패했습니다. 로컬 데이터는 유지됩니다.");
     }
   });
@@ -418,14 +426,25 @@ function enqueuePointMutations(mutations) {
 function applyStudentPointChanges(changes) {
   pointChangeFailureReason = "";
   if (!Array.isArray(changes) || !changes.length) return false;
-  if (cloudPointMutationUnavailable()) { pointChangeFailureReason = "cloud-unavailable"; toast("클라우드 연결을 확인한 후 다시 시도해주세요."); return false; }
-  const prepared = changes.map((change) => { const student = change?.student; const balanceDelta = change?.balanceDelta; const currentPoints = Number(student?.points); return { student, balanceDelta, currentPoints, historyEntries: pointHistoryEntries(change?.historyEntries || []) }; });
+  const prepared = changes.map((change) => { const student = change?.student; const balanceDelta = change?.balanceDelta; const currentPoints = Number(student?.points); const assignment = change?.assignment; const assignmentStudentState = change?.assignmentStudentState; return { student, balanceDelta, currentPoints, historyEntries: pointHistoryEntries(change?.historyEntries || []), assignment, assignmentStudentState }; });
   if (prepared.some(({ student, balanceDelta, currentPoints }) => !student || typeof student !== "object" || !Number.isInteger(balanceDelta) || !Number.isInteger(currentPoints) || currentPoints + balanceDelta < 0)) return false;
-  prepared.forEach(({ student, balanceDelta, currentPoints, historyEntries }) => { if (!Array.isArray(student.pointHistory)) student.pointHistory = []; student.points = currentPoints + balanceDelta; student.pointHistory.push(...historyEntries); });
-  enqueuePointMutations(prepared.map(({ student, balanceDelta, currentPoints, historyEntries }) => ({ studentId: student.id, expectedPoints: currentPoints, balanceDelta, historyEntries })));
+  if (prepared.some(({ assignment, assignmentStudentState }) => assignmentStudentState && (!assignment || typeof assignment !== "object" || !ASSIGNMENT_STATUSES.includes(assignmentStudentState.expectedStatus) || !ASSIGNMENT_STATUSES.includes(assignmentStudentState.status)))) return false;
+  const cloudMutations = prepared.map(({ student, balanceDelta, currentPoints, historyEntries, assignmentStudentState }) => ({ studentId: student.id, expectedPoints: currentPoints, balanceDelta, historyEntries, ...(firebaseAssignmentStudentStatesConnected && assignmentStudentState ? { assignmentStudentState } : {}) })).filter((mutation) => mutation.balanceDelta !== 0 || mutation.historyEntries.length || mutation.assignmentStudentState);
+  if (cloudMutations.length && cloudPointMutationUnavailable()) { pointChangeFailureReason = "cloud-unavailable"; toast("클라우드 연결을 확인한 후 다시 시도해주세요."); return false; }
+  prepared.forEach(({ student, balanceDelta, currentPoints, historyEntries, assignment, assignmentStudentState }) => {
+    if (!Array.isArray(student.pointHistory)) student.pointHistory = [];
+    student.points = currentPoints + balanceDelta;
+    student.pointHistory.push(...historyEntries);
+    if (!assignmentStudentState) return;
+    if (!assignment.pointAwards || typeof assignment.pointAwards !== "object" || Array.isArray(assignment.pointAwards)) assignment.pointAwards = {};
+    setAssignmentStatusForStudent(assignment, assignmentStudentState.studentId, assignmentStudentState.status);
+    if (Object.keys(assignmentStudentState.pointAward).length) assignment.pointAwards[assignmentStudentState.studentId] = structuredClone(assignmentStudentState.pointAward); else delete assignment.pointAwards[assignmentStudentState.studentId];
+    refreshAssignmentCompletion(assignment);
+  });
+  enqueuePointMutations(cloudMutations);
   return true;
 }
-function applyStudentPointChange(student, balanceDelta, historyEntries = []) { return applyStudentPointChanges([{ student, balanceDelta, historyEntries }]); }
+function applyStudentPointChange(student, balanceDelta, historyEntries = [], options = {}) { return applyStudentPointChanges([{ student, balanceDelta, historyEntries, assignment: options.assignment, assignmentStudentState: options.assignmentStudentState }]); }
 function cardBonusAward(student, baseAmount, originalSource, relatedId) {
   const representative = representativeCardInfo(student); if (!representative || !representative.ability?.active || representative.ability?.deleted || baseAmount <= 0) return { amount: 0 };
   const percent = abilityPercent(representative.rarity, representative.abilityId, originalSource); const cap = Number(representative.setting.dailyCap) || 0;
@@ -454,11 +473,11 @@ function firebaseAuthMessage(error) { const code = error?.code || ""; if (code =
 function logFirebaseAuthError(error) { console.error("Firebase Google sign-in error details", { code: error?.code, message: error?.message, name: error?.name, customData: error?.customData }); console.error("Firebase Google sign-in error object", error); }
 async function enterFirebaseTeacher() { const client = window.ourClassFirebase; if (!client?.ready) { toast(client?.error ? "Firebase 초기화에 실패했습니다." : "Google 로그인을 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; } try { const user = await client.signInTeacher(); if (!user) return; firebaseTeacherUser = user; firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); toast(`${user.displayName || user.email || "선생님"} 선생님, 로그인했습니다.`); } catch (error) { logFirebaseAuthError(error); const isLocalDevelopment = location.hostname === "localhost" || location.hostname === "127.0.0.1"; toast(isLocalDevelopment ? `Google 로그인 오류: ${error?.code || "unknown"}` : firebaseAuthMessage(error)); } }
 function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; }
-function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; }
+function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
 async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
 function appendCloudStudent(student) { const added = { id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] }; data.students.push(added); data.assignments.forEach((assignment) => setAssignmentStatusForStudent(assignment, added.id, "missing")); return added; }
-async function loadFirebaseStudents(userUid) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); saveData(); } render(); return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (session.view === "class-settings") render(); return false; } }
+async function loadFirebaseStudents(userUid, commit = true) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); } if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (commit && session.view === "class-settings") render(); return false; } }
 function mergeFirebaseAssignments(cloudAssignments) {
   const cloudById = new Map(cloudAssignments.map((assignment) => [assignment.id, assignment]));
   const localById = new Map(data.assignments.map((assignment) => [assignment.id, assignment]));
@@ -478,16 +497,63 @@ function mergeFirebaseAssignments(cloudAssignments) {
   });
   return archivedCount;
 }
-async function loadFirebaseAssignments(userUid) { try { const assignments = await window.ourClassFirebase.loadAssignments(); if (firebaseTeacherUser?.uid !== userUid) return; const archivedCount = mergeFirebaseAssignments(assignments); firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = false; saveData(); render(); if (archivedCount) toast(`이 브라우저에만 있던 과제 ${archivedCount}개를 안전하게 별도 보관했습니다.`); } catch (error) { console.error("Firestore assignments load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = true; if (session.view === "class-settings") render(); } }
+async function loadFirebaseAssignments(userUid, commit = true) { try { const assignments = await window.ourClassFirebase.loadAssignments(); if (firebaseTeacherUser?.uid !== userUid) return false; const archivedCount = mergeFirebaseAssignments(assignments); firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = false; if (commit) { saveData(); render(); } if (archivedCount) toast(`이 브라우저에만 있던 과제 ${archivedCount}개를 안전하게 별도 보관했습니다.`); return true; } catch (error) { console.error("Firestore assignments load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = true; if (commit && session.view === "class-settings") render(); return false; } }
 function pointHistorySortValue(entry) { const value = entry?.createdAt || entry?.date || ""; const timestamp = Date.parse(value); return Number.isFinite(timestamp) ? timestamp : 0; }
-async function loadFirebasePoints(userUid) { try { const result = await window.ourClassFirebase.loadPoints(); if (firebaseTeacherUser?.uid !== userUid) return; const historyByStudent = new Map(); result.history.forEach(({ studentId, entry, cloudCreatedAt }) => { if (!studentId || !entry?.id) return; const normalizedEntry = entry.createdAt || !cloudCreatedAt ? entry : { ...entry, createdAt: cloudCreatedAt }; if (!historyByStudent.has(studentId)) historyByStudent.set(studentId, new Map()); historyByStudent.get(studentId).set(normalizedEntry.id, normalizedEntry); }); const stateByStudent = new Map(result.states.map((state) => [state.id, state])); data.students.forEach((student) => { const state = stateByStudent.get(student.id); if (!state) return; student.points = state.points; student.pointHistory = [...(historyByStudent.get(student.id)?.values() || [])].sort((first, second) => pointHistorySortValue(first) - pointHistorySortValue(second) || String(first.id).localeCompare(String(second.id))); }); firebasePointsChecked = true; firebasePointsLoadFailed = false; saveData(); render(); } catch (error) { console.error("Firestore points load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebasePointsChecked = true; firebasePointsLoadFailed = true; if (session.view === "class-settings") render(); } }
-async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebasePointsConnected = result.pointsConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; saveData(); render(); const studentsReady = await loadFirebaseStudents(userUid); if (studentsReady) { if (firebasePointsConnected) await loadFirebasePoints(userUid); if (firebaseAssignmentsConnected) loadFirebaseAssignments(userUid); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } }
+async function loadFirebasePoints(userUid, commit = true) { try { const result = await window.ourClassFirebase.loadPoints(); if (firebaseTeacherUser?.uid !== userUid) return false; const historyByStudent = new Map(); result.history.forEach(({ studentId, entry, cloudCreatedAt }) => { if (!studentId || !entry?.id) return; const normalizedEntry = entry.createdAt || !cloudCreatedAt ? entry : { ...entry, createdAt: cloudCreatedAt }; if (!historyByStudent.has(studentId)) historyByStudent.set(studentId, new Map()); historyByStudent.get(studentId).set(normalizedEntry.id, normalizedEntry); }); const stateByStudent = new Map(result.states.map((state) => [state.id, state])); data.students.forEach((student) => { const state = stateByStudent.get(student.id); if (!state) return; student.points = state.points; student.pointHistory = [...(historyByStudent.get(student.id)?.values() || [])].sort((first, second) => pointHistorySortValue(first) - pointHistorySortValue(second) || String(first.id).localeCompare(String(second.id))); }); firebasePointsChecked = true; firebasePointsLoadFailed = false; if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore points load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebasePointsChecked = true; firebasePointsLoadFailed = true; if (commit && session.view === "class-settings") render(); return false; } }
+function mergeFirebaseAssignmentStudentStates(cloudStates) {
+  const validStudentIds = new Set(data.students.map((student) => student.id));
+  const statesByAssignment = new Map();
+  cloudStates.forEach((state) => {
+    if (!validStudentIds.has(state.studentId)) return;
+    if (!statesByAssignment.has(state.assignmentId)) statesByAssignment.set(state.assignmentId, new Map());
+    statesByAssignment.get(state.assignmentId).set(state.studentId, state);
+  });
+  data.assignments.filter((assignment) => assignment.deleted !== true).forEach((assignment) => {
+    if (!assignment.studentStatuses || typeof assignment.studentStatuses !== "object" || Array.isArray(assignment.studentStatuses)) assignment.studentStatuses = {};
+    if (!assignment.pointAwards || typeof assignment.pointAwards !== "object" || Array.isArray(assignment.pointAwards)) assignment.pointAwards = {};
+    const cloudByStudent = statesByAssignment.get(assignment.id);
+    data.students.forEach((student) => {
+      const cloudState = cloudByStudent?.get(student.id);
+      if (cloudState) { assignment.studentStatuses[student.id] = cloudState.status; assignment.pointAwards[student.id] = structuredClone(cloudState.pointAward); }
+      else { assignment.studentStatuses[student.id] = "missing"; delete assignment.pointAwards[student.id]; }
+    });
+    refreshAssignmentCompletion(assignment);
+  });
+}
+async function loadFirebaseAssignmentStudentStates(userUid, commit = true) { if (!firebaseAssignmentStudentStatesConnected) return false; try { const states = await window.ourClassFirebase.loadAssignmentStudentStates(); if (firebaseTeacherUser?.uid !== userUid) return false; mergeFirebaseAssignmentStudentStates(states); if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore assignment student states load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; if (commit && session.view === "class-settings") render(); return false; } }
+async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } }
 async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
 async function saveFirebaseClassSettings() { if (!firebaseTeacherSession || !firebaseActiveClassId || !window.ourClassFirebase?.ready) return; try { await window.ourClassFirebase.saveClassSettings({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); } catch (error) { console.error("Firestore class settings save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectStudentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsChecked || firebaseStudentsConnected || firebaseStudentsLoadFailed) return; if (!confirm("현재 브라우저의 학생 명단을 클라우드 학급의 기준 명단으로 등록할까요?")) return; try { await window.ourClassFirebase.uploadInitialStudents(data.students); firebaseStudentsConnected = true; render(); toast("학생 명단을 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial students upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectAssignmentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsConnected || firebaseAssignmentsConnected) return; if (!confirm("현재 브라우저의 과제 기본정보를\n클라우드 학급의 기준 과제로 등록할까요?")) return; try { await window.ourClassFirebase.connectInitialAssignments(data.assignments); firebaseAssignmentsConnected = true; firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = false; render(); toast("과제 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial assignments upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 function ensurePointHistoryIds() { let changed = false; data.students.forEach((student) => { if (!Array.isArray(student.pointHistory)) student.pointHistory = []; student.pointHistory.forEach((entry) => { if (!entry.id) { entry.id = crypto.randomUUID(); changed = true; } }); }); if (changed) saveData(); }
 async function connectPointsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsConnected || firebasePointsConnected) return; if (!confirm("현재 브라우저의 학생 포인트와 포인트 기록을\n클라우드 학급의 기준 데이터로 등록할까요?")) return; ensurePointHistoryIds(); try { await window.ourClassFirebase.connectInitialPoints(data.students); firebasePointsConnected = true; firebasePointsChecked = true; firebasePointsLoadFailed = false; saveLocalCloudConnection(firebaseActiveClassId, true); render(); toast("포인트와 포인트 기록을 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial points upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
+function initialAssignmentStudentStateSnapshots() {
+  return data.assignments.filter((assignment) => assignment.deleted !== true).flatMap((assignment) => data.students.map((student) => ({ assignmentId: assignment.id, studentId: student.id, status: storedAssignmentStatus(assignment, student.id), pointAward: storedAssignmentAward(assignment, student.id) || {} })));
+}
+async function connectAssignmentStudentStatesToFirebase() {
+  if (!firebaseTeacherSession || !firebaseTeacherUser || !firebaseActiveClassId || !window.ourClassFirebase?.ready || !firebaseStudentsConnected || !firebaseAssignmentsConnected || !firebasePointsConnected || firebaseAssignmentStudentStatesConnected || firebaseAssignmentStudentStatesConnecting) return;
+  if (!confirm("현재 과제의 학생별 제출 상태와 포인트 지급 기록을\n클라우드 학급의 기준 데이터로 등록할까요?")) return;
+  const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId;
+  firebaseAssignmentStudentStatesConnecting = true; render();
+  try {
+    const states = initialAssignmentStudentStateSnapshots();
+    await window.ourClassFirebase.connectInitialAssignmentStudentStates(states);
+    if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during assignment state connection.");
+    firebaseAssignmentStudentStatesConnected = true;
+    const statesLoaded = await loadFirebaseAssignmentStudentStates(userUid, false);
+    if (!statesLoaded) throw new Error("Connected assignment student states could not be loaded.");
+    saveData();
+    toast("과제 제출 상태를 클라우드에 연결했습니다.");
+  } catch (error) {
+    console.error("Firestore initial assignment student states upload failed", error);
+    firebaseAssignmentStudentStatesConnected = false;
+    toast("과제 제출 상태를 연결하지 못했습니다. 연결을 확인해 주세요.");
+  } finally {
+    firebaseAssignmentStudentStatesConnecting = false;
+    render();
+  }
+}
 async function saveFirebaseAssignment(assignment) { if (!firebaseAssignmentsConnected || !assignment) return; try { await window.ourClassFirebase.saveAssignment(assignment); } catch (error) { console.error("Firestore assignment save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function saveFirebaseStudent(student, isNew = false) { if (!firebaseStudentsConnected || !student) return; try { await window.ourClassFirebase.saveStudent(student, data.students.findIndex((item) => item.id === student.id), isNew); if (isNew && firebasePointsConnected) await window.ourClassFirebase.createPointStates([student]); } catch (error) { console.error("Firestore student save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function saveFirebaseStudentsBatch(students) { if (!firebaseStudentsConnected || !students.length) return; try { await window.ourClassFirebase.saveStudentsBatch(students.map((student) => ({ student, orderIndex: data.students.findIndex((item) => item.id === student.id) }))); if (firebasePointsConnected) await window.ourClassFirebase.createPointStates(students); } catch (error) { console.error("Firestore students batch save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
@@ -830,7 +896,8 @@ function classFeatureSettings() {
 function cloudStudentSettings() { if (!firebaseActiveClassId) return ""; if (!firebaseStudentsChecked) return `<div><button class="button secondary" disabled>학생 명단 확인 중</button><p class="muted">클라우드 학생 명단을 확인하고 있습니다.</p></div>`; if (firebaseStudentsLoadFailed) return `<div><button class="button secondary" disabled>학생 명단 확인 실패</button><p class="muted">로컬 학생 데이터는 그대로 유지됩니다.</p></div>`; if (firebaseStudentsConnected) return `<div><button class="button secondary" disabled>학생 명단 연결됨</button><p class="muted">학생 기본정보가 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-students">현재 학생 명단을 클라우드에 연결</button><p class="muted">학생의 번호, 이름, 로그인 ID, 활성 상태만 저장합니다.</p></div>`; }
 function cloudAssignmentSettings() { if (!firebaseStudentsConnected) return ""; if (firebaseAssignmentsConnected) return `<div><button class="button secondary" disabled>과제 기본정보 연결됨</button><p class="muted">과제 기본정보가 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-assignments">현재 과제를 클라우드에 연결</button><p class="muted">과제 제목, 내용, 마감일, 지급 포인트 설정 등 과제 기본정보만 클라우드에 저장합니다.</p></div>`; }
 function cloudPointSettings() { if (!firebaseStudentsConnected) return ""; if (firebasePointsConnected) return `<div><button class="button secondary" disabled>포인트 및 포인트 기록 연결됨</button><p class="muted">학생 포인트와 포인트 기록이 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-points">현재 포인트를 클라우드에 연결</button><p class="muted">학생의 현재 포인트와 기존 포인트 기록을 클라우드에 저장합니다.</p></div>`; }
-function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
+function cloudAssignmentStudentStateSettings() { if (!firebaseActiveClassId) return ""; if (firebaseAssignmentStudentStatesConnected) return `<div><button class="button secondary" disabled>과제 제출 상태 연결됨</button><p class="muted">과제의 학생별 제출 상태와 포인트 지급 snapshot이 클라우드와 연결되어 있습니다.</p></div>`; if (firebaseAssignmentStudentStatesConnecting) return `<div><button class="button secondary" disabled>과제 제출 상태 연결 중</button><p class="muted">현재 상태를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected && firebaseAssignmentsConnected && firebasePointsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-assignment-states" ${ready ? "" : "disabled"}>과제 제출 상태를 클라우드에 연결</button><p class="muted">과제 제출 상태 클라우드 미연결 · ${ready ? "학생별 제출 상태와 기존 포인트 지급 snapshot만 저장합니다." : "학생 명단, 과제 기본정보, 포인트를 먼저 연결해 주세요."}</p></div>`; }
+function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
 function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions">${cloudClassSettings()}<div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
 function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}${dataManagementSettings()}`; }
 function openRestoreBackupModal(payload) { const className = payload.data.classSettings?.className || payload.className || "이름 없음"; const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "날짜 정보 없음"; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>백업 파일 복원</h2><p>현재 학급 데이터를 백업 파일의 내용으로 교체합니다.</p><dl class="backup-summary"><div><dt>학급 이름</dt><dd>${escapeHtml(className)}</dd></div><div><dt>학생 수</dt><dd>${payload.data.students.length}명</dd></div><div><dt>백업 날짜</dt><dd>${escapeHtml(exportedAt)}</dd></div></dl><div class="button-row"><button class="button danger" data-action="confirm-restore-backup">복원하기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
@@ -1224,35 +1291,55 @@ function assignmentAward(assignment, studentId) {
   return assignment.pointAwards?.[studentId] || { awarded: false, amount: 0 };
 }
 
-function changeAssignmentStudentStatus(assignment, studentId, nextStatus) {
-  const student = studentById(studentId); if (!student || !ASSIGNMENT_STATUSES.includes(nextStatus)) return false;
-  const previousStatus = assignmentStatusForStudent(assignment, studentId); if (previousStatus === nextStatus) return true;
-  if (!assignment.pointAwards || typeof assignment.pointAwards !== "object") assignment.pointAwards = {};
-  const award = assignmentAward(assignment, student.id);
+function storedAssignmentAward(assignment, studentId) {
+  const awards = assignment.pointAwards;
+  return awards && typeof awards === "object" && !Array.isArray(awards) && Object.hasOwn(awards, studentId) && awards[studentId] && typeof awards[studentId] === "object" && !Array.isArray(awards[studentId]) ? structuredClone(awards[studentId]) : null;
+}
+
+function storedAssignmentStatus(assignment, studentId) {
+  const statuses = assignment.studentStatuses;
+  const status = statuses && typeof statuses === "object" && !Array.isArray(statuses) ? statuses[studentId] : null;
+  return ASSIGNMENT_STATUSES.includes(status) ? status : "missing";
+}
+
+function prepareAssignmentStudentStatusChange(assignment, studentId, nextStatus) {
+  const student = studentById(studentId); if (!assignment || !student || !ASSIGNMENT_STATUSES.includes(nextStatus)) return { ok: false, reason: "invalid" };
+  const previousStatus = storedAssignmentStatus(assignment, studentId); if (previousStatus === nextStatus) return { ok: true, noOp: true, student, expectedStatus: previousStatus, nextStatus };
+  const storedAward = storedAssignmentAward(assignment, student.id); const expectedPointAward = storedAward || {}; const award = storedAward || { awarded: false, amount: 0 };
+  let nextPointAward = structuredClone(expectedPointAward); let balanceDelta = 0; let historyEntries = [];
   if (previousStatus === "submitted" && nextStatus !== "submitted" && award.awarded) {
     const awardedAmount = Number(award.amount) || 0;
     if (awardedAmount > 0) {
-      if (student.points < awardedAmount) {
-        alert(`${student.name}의 현재 포인트가 ${student.points}P라서 ${awardedAmount}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
-        return false;
-      }
+      if (student.points < awardedAmount) return { ok: false, reason: "insufficient", student, requiredPoints: awardedAmount };
       const baseAmount = award.baseAmount ?? awardedAmount;
-      const historyEntries = [{ id: crypto.randomUUID(), amount: -baseAmount, reason: `${assignment.title} 제출 완료 취소`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, reverseCardBonus(student, award.cardAbilityAward, `${assignment.title} 제출 완료 카드 보너스 취소`)];
-      if (!applyStudentPointChange(student, -awardedAmount, historyEntries)) return false;
+      historyEntries = [{ id: crypto.randomUUID(), amount: -baseAmount, reason: `${assignment.title} 제출 완료 취소`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, reverseCardBonus(student, award.cardAbilityAward, `${assignment.title} 제출 완료 카드 보너스 취소`)];
+      balanceDelta = -awardedAmount;
     }
-    assignment.pointAwards[student.id] = { ...award, awarded: false, revokedAt: new Date().toISOString() };
+    nextPointAward = { ...award, awarded: false, revokedAt: new Date().toISOString() };
   }
-  setAssignmentStatusForStudent(assignment, studentId, nextStatus);
-  if (nextStatus === "submitted" && !assignmentAward(assignment, student.id).awarded) {
+  if (nextStatus === "submitted" && !nextPointAward.awarded) {
     const baseAmount = assignment.points; const cardAbilityResult = cardBonusAward(student, baseAmount, "과제", assignment.id); const { historyEntry: cardBonusHistoryEntry, ...cardAbilityAward } = cardAbilityResult; const bonusAmount = cardAbilityAward.amount || 0; const amount = baseAmount + bonusAmount;
     if (baseAmount > 0) {
-      const historyEntries = [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${assignment.title} 제출 완료`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, cardBonusHistoryEntry];
-      if (!applyStudentPointChange(student, amount, historyEntries)) return false;
+      historyEntries = [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${assignment.title} 제출 완료`, source: "과제", relatedId: assignment.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, cardBonusHistoryEntry];
+      balanceDelta = amount;
     }
-    assignment.pointAwards[student.id] = { awarded: true, amount, baseAmount, bonusAmount, cardAbilityAward, awardedAt: new Date().toISOString(), revokedAt: null };
+    nextPointAward = { awarded: true, amount, baseAmount, bonusAmount, cardAbilityAward, awardedAt: new Date().toISOString(), revokedAt: null };
   }
-  refreshAssignmentCompletion(assignment);
-  return true;
+  const assignmentStudentState = { assignmentId: assignment.id, studentId, expectedStatus: previousStatus, expectedPointAward, status: nextStatus, pointAward: nextPointAward };
+  return { ok: true, noOp: false, student, expectedStatus: previousStatus, expectedPointAward, nextStatus, nextPointAward, balanceDelta, historyEntries, assignmentStudentState, change: { student, balanceDelta, historyEntries, assignment, assignmentStudentState } };
+}
+
+function showAssignmentStatusPreparationError(plan) {
+  if (plan?.reason !== "insufficient" || !plan.student) return;
+  alert(`${plan.student.name}의 현재 포인트가 ${plan.student.points}P라서 ${plan.requiredPoints}P를 회수할 수 없습니다.\n학생의 포인트를 먼저 확인해 주세요.`);
+}
+
+function changeAssignmentStudentStatus(assignment, studentId, nextStatus) {
+  if (firebaseAssignmentStudentStatesConnecting) { toast("과제 상태를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return false; }
+  const plan = prepareAssignmentStudentStatusChange(assignment, studentId, nextStatus);
+  if (!plan.ok) { showAssignmentStatusPreparationError(plan); return false; }
+  if (plan.noOp) return true;
+  return applyStudentPointChanges([plan.change]);
 }
 
 function openCancelAssignmentSubmissionModal(assignmentId, studentId, nextStatus) {
@@ -1271,8 +1358,7 @@ function openAssignmentRequestModal(assignmentId) {
 function requestAssignmentReview(assignmentId) {
   const assignment = data.assignments.find((item) => item.id === assignmentId);
   if (!assignment || assignment.assignmentState !== "active" || !studentById(session.studentId) || assignmentStatusForStudent(assignment, session.studentId) !== "missing") return;
-  setAssignmentStatusForStudent(assignment, session.studentId, "review"); refreshAssignmentCompletion(assignment);
-  saveData(); render(); toast("선생님께 제출 확인을 요청했습니다.");
+  if (changeAssignmentStudentStatus(assignment, session.studentId, "review")) { saveData(); render(); toast("선생님께 제출 확인을 요청했습니다."); }
 }
 
 function openAssignmentConfirm(message, action, assignmentId, attributes = "") {
@@ -1308,19 +1394,20 @@ function reopenAssignment(assignmentId) {
 }
 
 function applyBulkAssignmentStatus(assignmentId, status, scope) {
-  const assignment = data.assignments.find((item) => item.id === assignmentId); if (!assignment) return;
-  const activeStudentIds = activeStudents().map((student) => student.id);
-  const targets = scope === "selected" ? [...selectedStudentsForAssignment(assignmentId)].filter((studentId) => activeStudentIds.includes(studentId)) : activeStudentIds;
-  const requiresPointChange = targets.some((studentId) => { const previousStatus = assignmentStatusForStudent(assignment, studentId); const award = assignmentAward(assignment, studentId); return (previousStatus === "submitted" && status !== "submitted" && award.awarded && Number(award.amount) > 0) || (previousStatus !== "submitted" && status === "submitted" && !award.awarded && Number(assignment.points) > 0); });
-  if (requiresPointChange && cloudPointMutationUnavailable()) { toast("클라우드 연결을 확인한 후 다시 시도해주세요."); return; }
-  const recoveries = targets.map((studentId) => ({ studentId, student: studentById(studentId), award: assignmentAward(assignment, studentId) }))
-    .filter((item) => assignmentStatusForStudent(assignment, item.studentId) === "submitted" && status !== "submitted" && item.award.awarded && item.award.amount > 0);
-  const insufficient = recoveries.find((item) => item.student.points < item.award.amount);
-  if (insufficient) { alert(`${insufficient.student.name}의 현재 포인트가 부족해 제출 완료를 취소할 수 없습니다.`); return; }
+  if (firebaseAssignmentStudentStatesConnecting) { toast("과제 상태를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return; }
+  const assignment = data.assignments.find((item) => item.id === assignmentId); if (!assignment || !ASSIGNMENT_STATUSES.includes(status)) return;
+  const activeStudentIds = new Set(activeStudents().map((student) => student.id));
+  const targetIds = scope === "selected" ? [...selectedStudentsForAssignment(assignmentId)] : [...activeStudentIds];
+  const targets = [...new Set(targetIds)].filter((studentId) => activeStudentIds.has(studentId));
+  const plans = targets.map((studentId) => prepareAssignmentStudentStatusChange(assignment, studentId, status));
+  const invalidPlan = plans.find((plan) => !plan.ok); if (invalidPlan) { showAssignmentStatusPreparationError(invalidPlan); return; }
+  const changes = plans.filter((plan) => !plan.noOp);
+  if (!changes.length) return;
+  const recoveries = changes.filter((plan) => plan.expectedStatus === "submitted" && plan.nextStatus !== "submitted" && plan.balanceDelta < 0);
   if (recoveries.length && !confirm(`${recoveries.length}명의 제출 완료를 취소하면 지급된 과제 포인트도 함께 회수됩니다.\n계속하시겠습니까?`)) return;
-  if (!targets.every((studentId) => changeAssignmentStudentStatus(assignment, studentId, status))) return;
+  if (!applyStudentPointChanges(changes.map((plan) => plan.change))) return;
   if (scope === "selected") selectedStudentsForAssignment(assignmentId).clear();
-  saveData(); render(); toast(`${targets.length}명의 상태를 ${ASSIGNMENT_STATUS_LABELS[status]}로 변경했습니다.`);
+  saveData(); render(); toast(`${changes.length}명의 상태를 ${ASSIGNMENT_STATUS_LABELS[status]}로 변경했습니다.`);
 }
 
 function rolesForScope(scope, templateId) {
@@ -1614,6 +1701,7 @@ app.addEventListener("click", (event) => {
   if (action === "connect-cloud-students") { connectStudentsToFirebase(); return; }
   if (action === "connect-cloud-assignments") { connectAssignmentsToFirebase(); return; }
   if (action === "connect-cloud-points") { connectPointsToFirebase(); return; }
+  if (action === "connect-cloud-assignment-states") { connectAssignmentStudentStatesToFirebase(); return; }
   if (action === "choose-backup-file") { document.querySelector("#backup-file-input")?.click(); return; }
   if (action === "confirm-restore-backup") { if (!pendingBackupPayload) return; target.closest(".modal")?.remove(); restoreBackup(pendingBackupPayload); return; }
   if (action === "open-reset-data") { openResetDataModal(); return; }

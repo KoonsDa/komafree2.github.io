@@ -55,6 +55,23 @@ service cloud.firestore {
         ]);
     }
 
+    match /classes/{classId}/assignmentStudentStates/{stateId} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'assignmentId', 'studentId', 'status', 'pointAward', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'assignmentId', 'studentId', 'status', 'pointAward', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.assignmentId is string
+        && request.resource.data.assignmentId.size() > 0
+        && request.resource.data.studentId is string
+        && request.resource.data.studentId.size() > 0
+        && request.resource.data.status in ['missing', 'review', 'submitted']
+        && request.resource.data.pointAward is map;
+    }
+
     match /classes/{classId}/studentPointStates/{studentId} {
       allow read: if isClassOwner(classId);
       allow create, update: if isClassOwner(classId)
