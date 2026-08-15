@@ -433,6 +433,29 @@ function seoulDateKey() {
   }).format(new Date());
 }
 
+function assignmentStudentStateId(assignmentId, studentId) {
+  return encodeURIComponent(JSON.stringify([String(assignmentId), String(studentId)]));
+}
+
+function dailyRoleClaimKey(date, studentId, roleId) {
+  return encodeURIComponent(JSON.stringify([String(date), String(studentId), String(roleId)]));
+}
+
+function callableMutationError(code, message, httpsCode = "failed-precondition") {
+  return new HttpsError(httpsCode, message, {code});
+}
+
+function transactionStudentIsActive(account, student, uid, classId, studentId) {
+  return account?.uid === uid && account?.classId === classId &&
+    account?.studentId === studentId && account?.active === true &&
+    student?.id === studentId && student?.active !== false;
+}
+
+function safeMap(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ?
+    {...value} : {};
+}
+
 exports.resolveStudentLogin = onCall(
     {region: "asia-northeast3"},
     async (request) => {
@@ -606,5 +629,309 @@ exports.getStudentHomeData = onCall(
         roleSettings: {dailyLimit, roles},
         myRoleApplications,
       };
+    },
+);
+
+exports.studentRequestAssignmentReview = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const context = await getVerifiedStudentContext(request);
+      const assignmentId = requiredInputString(
+          request.data?.assignmentId,
+          "assignmentId",
+      );
+      const db = getFirestore();
+      const classRef = db.doc(`classes/${context.classId}`);
+      const accountRef = db.doc(`studentAccounts/${context.uid}`);
+      const studentRef = classRef.collection("students").doc(context.studentId);
+      const assignmentRef = classRef.collection("assignments").doc(assignmentId);
+      const stateRef = classRef.collection("assignmentStudentStates").doc(
+          assignmentStudentStateId(assignmentId, context.studentId),
+      );
+
+      await db.runTransaction(async (transaction) => {
+        const [accountSnapshot, classSnapshot, studentSnapshot,
+          assignmentSnapshot, stateSnapshot] = await Promise.all([
+          transaction.get(accountRef),
+          transaction.get(classRef),
+          transaction.get(studentRef),
+          transaction.get(assignmentRef),
+          transaction.get(stateRef),
+        ]);
+        if (!transactionStudentIsActive(
+            accountSnapshot.data(),
+            studentSnapshot.data(),
+            context.uid,
+            context.classId,
+            context.studentId,
+        ) || !classSnapshot.exists) {
+          throw new HttpsError("permission-denied", "Student session is not active.");
+        }
+        if (classSnapshot.data()?.features?.assignments === false) {
+          throw callableMutationError(
+              "assignment/disabled",
+              "Assignments are not enabled for this class.",
+          );
+        }
+        const assignment = assignmentSnapshot.exists ?
+          assignmentSnapshot.data() : null;
+        if (!assignment || assignment.deleted === true ||
+            assignment.assignmentState !== "active") {
+          throw callableMutationError(
+              "assignment/not-available",
+              "Assignment is not available.",
+              "not-found",
+          );
+        }
+        const currentState = stateSnapshot.exists ? stateSnapshot.data() : null;
+        const currentStatus = ["missing", "review", "submitted"].includes(
+            currentState?.status,
+        ) ? currentState.status : "missing";
+        if (currentStatus !== "missing") {
+          throw callableMutationError(
+              "assignment/already-requested",
+              "Assignment review has already been requested.",
+          );
+        }
+        const timestamp = FieldValue.serverTimestamp();
+        transaction.set(stateRef, {
+          assignmentId,
+          studentId: context.studentId,
+          status: "review",
+          pointAward: safeMap(currentState?.pointAward),
+          createdAt: stateSnapshot.exists && currentState?.createdAt ?
+            currentState.createdAt : timestamp,
+          updatedAt: timestamp,
+        });
+      });
+
+      return {ok: true, assignmentId, status: "review"};
+    },
+);
+
+exports.studentApplyRole = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const context = await getVerifiedStudentContext(request);
+      const roleId = requiredInputString(request.data?.roleId, "roleId");
+      const db = getFirestore();
+      const today = seoulDateKey();
+      const classRef = db.doc(`classes/${context.classId}`);
+      const accountRef = db.doc(`studentAccounts/${context.uid}`);
+      const studentRef = classRef.collection("students").doc(context.studentId);
+      const settingsRef = classRef.collection("roleSettings").doc("current");
+      const usageRef = classRef.collection("roleDailyUsage").doc(today);
+      const applicationRef = classRef.collection("dailyRoleAssignments").doc();
+      const applicationId = applicationRef.id;
+      const appliedAt = new Date().toISOString();
+
+      await db.runTransaction(async (transaction) => {
+        const [accountSnapshot, classSnapshot, studentSnapshot,
+          settingsSnapshot, usageSnapshot, applicationSnapshot] =
+          await Promise.all([
+            transaction.get(accountRef),
+            transaction.get(classRef),
+            transaction.get(studentRef),
+            transaction.get(settingsRef),
+            transaction.get(usageRef),
+            transaction.get(applicationRef),
+          ]);
+        if (!transactionStudentIsActive(
+            accountSnapshot.data(),
+            studentSnapshot.data(),
+            context.uid,
+            context.classId,
+            context.studentId,
+        ) || !classSnapshot.exists) {
+          throw new HttpsError("permission-denied", "Student session is not active.");
+        }
+        if (classSnapshot.data()?.features?.roles === false) {
+          throw callableMutationError(
+              "role/disabled",
+              "Roles are not enabled for this class.",
+          );
+        }
+        if (!settingsSnapshot.exists) {
+          throw callableMutationError("role/settings-missing", "Role settings were not found.");
+        }
+        if (!usageSnapshot.exists || usageSnapshot.data()?.date !== today) {
+          throw callableMutationError("role/usage-missing", "Role daily usage was not initialized.");
+        }
+        if (applicationSnapshot.exists) {
+          throw callableMutationError("role/status-conflict", "Role application already exists.");
+        }
+        const settings = settingsSnapshot.data();
+        const rawLimit = Number(settings?.dailyRoleApplicationLimit);
+        if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 5) {
+          throw callableMutationError("role/settings-invalid", "Role settings are invalid.");
+        }
+        const rawRoles = Array.isArray(settings?.currentRoles) ?
+          settings.currentRoles : [];
+        const role = rawRoles.find((item) => item?.id === roleId);
+        const capacity = Number(role?.capacity);
+        if (!role || !Number.isInteger(capacity) || capacity < 1) {
+          throw callableMutationError("role/not-found", "Current role was not found.", "not-found");
+        }
+        const usage = usageSnapshot.data();
+        const roleCounts = safeMap(usage?.roleCounts);
+        const studentCounts = safeMap(usage?.studentCounts);
+        const activeClaims = safeMap(usage?.activeClaims);
+        const roleCount = Number(roleCounts[roleId]) || 0;
+        const studentCount = Number(studentCounts[context.studentId]) || 0;
+        if (!Number.isInteger(roleCount) || roleCount < 0 ||
+            !Number.isInteger(studentCount) || studentCount < 0) {
+          throw callableMutationError("role/usage-conflict", "Role usage is invalid.");
+        }
+        const claimKey = dailyRoleClaimKey(today, context.studentId, roleId);
+        if (activeClaims[claimKey]) {
+          throw callableMutationError("role/already-applied", "Role is already active for this student.");
+        }
+        if (studentCount >= rawLimit) {
+          throw callableMutationError("role/limit-reached", "Daily role application limit was reached.", "resource-exhausted");
+        }
+        if (roleCount >= capacity) {
+          throw callableMutationError("role/capacity-reached", "Role capacity was reached.", "resource-exhausted");
+        }
+
+        roleCounts[roleId] = roleCount + 1;
+        studentCounts[context.studentId] = studentCount + 1;
+        activeClaims[claimKey] = applicationId;
+        const roleSnapshot = {
+          id: roleId,
+          name: typeof role.name === "string" ? role.name : "",
+          points: Number.isInteger(Number(role.points)) && Number(role.points) >= 0 ?
+            Number(role.points) : 0,
+          capacity,
+          description: typeof role.description === "string" ? role.description : "",
+        };
+        const timestamp = FieldValue.serverTimestamp();
+        transaction.set(applicationRef, {
+          id: applicationId,
+          date: today,
+          studentId: context.studentId,
+          roleId,
+          status: "waiting",
+          roleSnapshot,
+          pointAward: {},
+          appliedAt,
+          completedAt: null,
+          cancelledAt: null,
+          cancelledBy: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        transaction.set(usageRef, {
+          ...usage,
+          date: today,
+          roleCounts,
+          studentCounts,
+          activeClaims,
+          createdAt: usage.createdAt || timestamp,
+          updatedAt: timestamp,
+        });
+      });
+
+      return {ok: true, applicationId, roleId, status: "waiting"};
+    },
+);
+
+exports.studentCancelRole = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const context = await getVerifiedStudentContext(request);
+      const applicationId = requiredInputString(
+          request.data?.applicationId,
+          "applicationId",
+      );
+      const db = getFirestore();
+      const today = seoulDateKey();
+      const classRef = db.doc(`classes/${context.classId}`);
+      const accountRef = db.doc(`studentAccounts/${context.uid}`);
+      const studentRef = classRef.collection("students").doc(context.studentId);
+      const applicationRef = classRef.collection("dailyRoleAssignments")
+          .doc(applicationId);
+      const usageRef = classRef.collection("roleDailyUsage").doc(today);
+      const cancelledAt = new Date().toISOString();
+
+      await db.runTransaction(async (transaction) => {
+        const [accountSnapshot, classSnapshot, studentSnapshot,
+          applicationSnapshot, usageSnapshot] = await Promise.all([
+          transaction.get(accountRef),
+          transaction.get(classRef),
+          transaction.get(studentRef),
+          transaction.get(applicationRef),
+          transaction.get(usageRef),
+        ]);
+        if (!transactionStudentIsActive(
+            accountSnapshot.data(),
+            studentSnapshot.data(),
+            context.uid,
+            context.classId,
+            context.studentId,
+        ) || !classSnapshot.exists) {
+          throw new HttpsError("permission-denied", "Student session is not active.");
+        }
+        if (classSnapshot.data()?.features?.roles === false) {
+          throw callableMutationError("role/disabled", "Roles are not enabled for this class.");
+        }
+        if (!applicationSnapshot.exists || !usageSnapshot.exists ||
+            usageSnapshot.data()?.date !== today) {
+          throw callableMutationError("role/usage-conflict", "Role usage or application was not found.");
+        }
+        const application = applicationSnapshot.data();
+        if (application?.studentId !== context.studentId ||
+            application?.date !== today) {
+          throw new HttpsError("permission-denied", "Role application cannot be cancelled.");
+        }
+        if (application.status !== "waiting") {
+          throw callableMutationError("role/status-conflict", "Role application is no longer waiting.");
+        }
+        const roleId = typeof application.roleId === "string" ?
+          application.roleId : "";
+        if (!roleId) {
+          throw callableMutationError("role/usage-conflict", "Role application is invalid.");
+        }
+        const usage = usageSnapshot.data();
+        const roleCounts = safeMap(usage?.roleCounts);
+        const studentCounts = safeMap(usage?.studentCounts);
+        const activeClaims = safeMap(usage?.activeClaims);
+        const roleCount = Number(roleCounts[roleId]) || 0;
+        const studentCount = Number(studentCounts[context.studentId]) || 0;
+        const claimKey = dailyRoleClaimKey(today, context.studentId, roleId);
+        if (activeClaims[claimKey] !== applicationId ||
+            !Number.isInteger(roleCount) || roleCount < 1 ||
+            !Number.isInteger(studentCount) || studentCount < 1) {
+          throw callableMutationError("role/usage-conflict", "Role usage does not match the application.");
+        }
+
+        roleCounts[roleId] = roleCount - 1;
+        studentCounts[context.studentId] = studentCount - 1;
+        delete activeClaims[claimKey];
+        if (roleCounts[roleId] === 0) delete roleCounts[roleId];
+        if (studentCounts[context.studentId] === 0) {
+          delete studentCounts[context.studentId];
+        }
+        const timestamp = FieldValue.serverTimestamp();
+        transaction.set(applicationRef, {
+          ...application,
+          id: applicationId,
+          status: "cancelled",
+          cancelledAt,
+          cancelledBy: "student",
+          createdAt: application.createdAt || timestamp,
+          updatedAt: timestamp,
+        });
+        transaction.set(usageRef, {
+          ...usage,
+          date: today,
+          roleCounts,
+          studentCounts,
+          activeClaims,
+          createdAt: usage.createdAt || timestamp,
+          updatedAt: timestamp,
+        });
+      });
+
+      return {ok: true, applicationId, status: "cancelled"};
     },
 );

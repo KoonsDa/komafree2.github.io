@@ -153,6 +153,9 @@ try {
   const resolveStudentLoginCallable = httpsCallable(studentFunctions, "resolveStudentLogin");
   const getStudentSessionCallable = httpsCallable(studentFunctions, "getStudentSession");
   const getStudentHomeDataCallable = httpsCallable(studentFunctions, "getStudentHomeData");
+  const studentRequestAssignmentReviewCallable = httpsCallable(studentFunctions, "studentRequestAssignmentReview");
+  const studentApplyRoleCallable = httpsCallable(studentFunctions, "studentApplyRole");
+  const studentCancelRoleCallable = httpsCallable(studentFunctions, "studentCancelRole");
   const provider = new GoogleAuthProvider();
   let activeClassId = "";
   window.ourClassFirebase = {
@@ -189,6 +192,21 @@ try {
         roleSettings: {dailyLimit: Number(roleSettings.dailyLimit) || 1, roles: (Array.isArray(roleSettings.roles) ? roleSettings.roles : []).map((role) => ({id: String(role?.id || ""), name: String(role?.name || ""), points: Number(role?.points) || 0, capacity: Number(role?.capacity) || 1, description: String(role?.description || ""), currentCount: Number(role?.currentCount) || 0}))},
         myRoleApplications: (Array.isArray(value.myRoleApplications) ? value.myRoleApplications : []).map((application) => ({id: String(application?.id || ""), roleId: String(application?.roleId || ""), status: ["waiting", "completed", "cancelled"].includes(application?.status) ? application.status : "waiting", date: String(application?.date || "")})),
       };
+    },
+    studentRequestAssignmentReview: async ({assignmentId}) => {
+      const result = await studentRequestAssignmentReviewCallable({assignmentId: String(assignmentId || "")});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      return {ok: value.ok === true, assignmentId: String(value.assignmentId || ""), status: String(value.status || "")};
+    },
+    studentApplyRole: async ({roleId}) => {
+      const result = await studentApplyRoleCallable({roleId: String(roleId || "")});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      return {ok: value.ok === true, applicationId: String(value.applicationId || ""), roleId: String(value.roleId || ""), status: String(value.status || "")};
+    },
+    studentCancelRole: async ({applicationId}) => {
+      const result = await studentCancelRoleCallable({applicationId: String(applicationId || "")});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      return {ok: value.ok === true, applicationId: String(value.applicationId || ""), status: String(value.status || "")};
     },
     studentSignIn: async ({classId, loginId, password}) => {
       const resolved = await window.ourClassFirebase.resolveStudentLogin({classId, loginId});
