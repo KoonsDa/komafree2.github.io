@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFirestore, doc, collection, getDoc, getDocs, setDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, doc, collection, getDoc, getDocs, setDoc, deleteDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCEjJSL0PNZUfoQ_j06xvPMlDgbC8x_FwI",
@@ -46,6 +46,43 @@ function assignmentStudentStateFields(value) {
   return { assignmentId: String(value?.assignmentId || ""), studentId: String(value?.studentId || ""), status, pointAward: jsonSafeMap(value?.pointAward) };
 }
 
+function roleFields(value) {
+  const points = Number(value?.points); const capacity = Number(value?.capacity);
+  return { id: String(value?.id || ""), name: String(value?.name || ""), points: Number.isInteger(points) && points >= 0 ? points : 0, capacity: Number.isInteger(capacity) && capacity >= 1 ? capacity : 1, description: String(value?.description || "") };
+}
+
+function roleSettingsFields(value) {
+  const limit = Number(value?.dailyRoleApplicationLimit);
+  return { dailyRoleApplicationLimit: Number.isInteger(limit) && limit >= 1 && limit <= 5 ? limit : 1, currentRoles: (Array.isArray(value?.currentRoles) ? value.currentRoles : []).map(roleFields) };
+}
+
+function roleTemplateFields(value) {
+  return { id: String(value?.id || ""), name: String(value?.name || ""), roles: (Array.isArray(value?.roles) ? value.roles : []).map(roleFields) };
+}
+
+function dailyRoleAssignmentFields(value) {
+  const status = ["waiting", "completed", "cancelled"].includes(value?.status) ? value.status : "waiting";
+  const cancelledBy = ["student", "teacher"].includes(value?.cancelledBy) ? value.cancelledBy : null;
+  return { id: String(value?.id || ""), date: String(value?.date || ""), studentId: String(value?.studentId || ""), roleId: String(value?.roleId || ""), status, roleSnapshot: jsonSafeMap(value?.roleSnapshot), pointAward: jsonSafeMap(value?.pointAward), appliedAt: String(value?.appliedAt || ""), completedAt: value?.completedAt == null ? null : String(value.completedAt), cancelledAt: value?.cancelledAt == null ? null : String(value.cancelledAt), cancelledBy };
+}
+
+function dailyRoleClaimKey(date, studentId, roleId) {
+  return encodeURIComponent(JSON.stringify([String(date), String(studentId), String(roleId)]));
+}
+
+function countMap(value) {
+  const source = jsonSafeMap(value);
+  return Object.fromEntries(Object.entries(source).filter(([, count]) => Number.isInteger(count) && count >= 0));
+}
+
+function roleDailyUsageFields(value) {
+  return { date: String(value?.date || ""), roleCounts: countMap(value?.roleCounts), studentCounts: countMap(value?.studentCounts), activeClaims: jsonSafeMap(value?.activeClaims) };
+}
+
+function roleError(code, message, details = {}) {
+  const error = new Error(message); error.code = code; error.details = details; return error;
+}
+
 function canonicalJson(value) {
   const normalize = (item) => {
     if (Array.isArray(item)) return item.map(normalize);
@@ -81,7 +118,7 @@ try {
       if (!activeClassId) return { connected: false, activeClassId: "", classSettings: null };
       const classSnapshot = await getDoc(doc(db, "classes", activeClassId));
       if (!classSnapshot.exists()) { activeClassId = ""; return { connected: false, activeClassId: "", classSettings: null }; }
-      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true };
+      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true, rolesConnected: classSnapshot.data()?.rolesConnected === true };
     },
     connectCurrentClass: async (value) => {
       const user = auth.currentUser;
@@ -101,6 +138,142 @@ try {
       const user = auth.currentUser;
       if (!user || !activeClassId) throw new Error("Connected Firebase class was not found.");
       await setDoc(doc(db, "classes", activeClassId), { ...classSettings(value), updatedAt: serverTimestamp() }, { merge: true });
+    },
+    saveRoleSettings: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const settingsRef = doc(db, "classes", activeClassId, "roleSettings", "current"); const snapshot = await getDoc(settingsRef); const timestamp = serverTimestamp();
+      await setDoc(settingsRef, { ...roleSettingsFields(value), ...(!snapshot.exists() ? { createdAt: timestamp } : {}), updatedAt: timestamp }, { merge: true });
+    },
+    loadRoleSettings: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDoc(doc(db, "classes", activeClassId, "roleSettings", "current")); if (!snapshot.exists()) return null; const value = snapshot.data();
+      return { ...roleSettingsFields(value), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) };
+    },
+    saveRoleTemplate: async (template) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = roleTemplateFields(template); if (!fields.id) throw new Error("Role template id is required.");
+      const templateRef = doc(db, "classes", activeClassId, "roleTemplates", fields.id); const snapshot = await getDoc(templateRef); const timestamp = serverTimestamp();
+      await setDoc(templateRef, { ...fields, ...(!snapshot.exists() ? { createdAt: timestamp } : {}), updatedAt: timestamp }, { merge: true });
+    },
+    loadRoleTemplates: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "roleTemplates"));
+      return snapshot.docs.map((templateDoc) => { const value = templateDoc.data(); return { ...roleTemplateFields({ ...value, id: templateDoc.id }), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
+    deleteRoleTemplate: async (templateId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(templateId || ""); if (!id) throw new Error("Role template id is required.");
+      await deleteDoc(doc(db, "classes", activeClassId, "roleTemplates", id));
+    },
+    saveDailyRoleAssignment: async (application) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = dailyRoleAssignmentFields(application); if (!fields.id || !fields.studentId || !fields.roleId) throw new Error("Daily role assignment id, student id, and role id are required.");
+      const applicationRef = doc(db, "classes", activeClassId, "dailyRoleAssignments", fields.id); const snapshot = await getDoc(applicationRef); const timestamp = serverTimestamp();
+      await setDoc(applicationRef, { ...fields, ...(!snapshot.exists() ? { createdAt: timestamp } : {}), updatedAt: timestamp }, { merge: true });
+    },
+    loadDailyRoleAssignments: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "dailyRoleAssignments"));
+      return snapshot.docs.map((applicationDoc) => { const value = applicationDoc.data(); return { ...dailyRoleAssignmentFields({ ...value, id: applicationDoc.id }), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
+    initializeRoleDailyUsage: async (date) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const dateKey = String(date || ""); if (!dateKey) throw new Error("Role usage date is required.");
+      const assignmentsSnapshot = await getDocs(collection(db, "classes", activeClassId, "dailyRoleAssignments"));
+      const usage = { date: dateKey, roleCounts: {}, studentCounts: {}, activeClaims: {} };
+      assignmentsSnapshot.docs.forEach((applicationDoc) => {
+        const application = dailyRoleAssignmentFields({ ...applicationDoc.data(), id: applicationDoc.id });
+        if (application.date !== dateKey || !["waiting", "completed"].includes(application.status)) return;
+        const claimKey = dailyRoleClaimKey(dateKey, application.studentId, application.roleId);
+        if (usage.activeClaims[claimKey]) throw roleError("role/usage-duplicate", "Duplicate active role claims were found.", { date: dateKey, studentId: application.studentId, roleId: application.roleId });
+        usage.roleCounts[application.roleId] = (usage.roleCounts[application.roleId] || 0) + 1;
+        usage.studentCounts[application.studentId] = (usage.studentCounts[application.studentId] || 0) + 1;
+        usage.activeClaims[claimKey] = application.id;
+      });
+      const usageRef = doc(db, "classes", activeClassId, "roleDailyUsage", dateKey);
+      return runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(usageRef);
+        if (snapshot.exists()) { const existing = roleDailyUsageFields(snapshot.data()); if (existing.date !== dateKey) throw roleError("role/usage-conflict", "Role usage date does not match its document.", { date: dateKey, cloudDate: existing.date }); return { ...existing, created: false }; }
+        const timestamp = serverTimestamp(); transaction.set(usageRef, { ...usage, createdAt: timestamp, updatedAt: timestamp });
+        return { ...usage, created: true };
+      });
+    },
+    loadRoleDailyUsage: async (date) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDoc(doc(db, "classes", activeClassId, "roleDailyUsage", String(date || "")));
+      return snapshot.exists() ? roleDailyUsageFields(snapshot.data()) : null;
+    },
+    applyDailyRoleApplicationTransaction: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const proposed = dailyRoleAssignmentFields(value); const reuseCancelled = value?.expectedStatus === "cancelled";
+      if (!proposed.id || !proposed.date || !proposed.studentId || !proposed.roleId) throw new Error("Daily role application fields are required.");
+      const settingsRef = doc(db, "classes", activeClassId, "roleSettings", "current");
+      const usageRef = doc(db, "classes", activeClassId, "roleDailyUsage", proposed.date);
+      const applicationRef = doc(db, "classes", activeClassId, "dailyRoleAssignments", proposed.id);
+      return runTransaction(db, async (transaction) => {
+        const [settingsSnapshot, usageSnapshot, applicationSnapshot] = await Promise.all([transaction.get(settingsRef), transaction.get(usageRef), transaction.get(applicationRef)]);
+        if (!settingsSnapshot.exists()) throw roleError("role/settings-missing", "Role settings were not found.");
+        if (!usageSnapshot.exists()) throw roleError("role/usage-missing", "Role daily usage was not initialized.", { date: proposed.date });
+        const settings = roleSettingsFields(settingsSnapshot.data()); const role = settings.currentRoles.find((item) => item.id === proposed.roleId);
+        if (!role) throw roleError("role/not-found", "Current role was not found.", { roleId: proposed.roleId });
+        const existingApplication = applicationSnapshot.exists() ? dailyRoleAssignmentFields({ ...applicationSnapshot.data(), id: proposed.id }) : null;
+        if (reuseCancelled) {
+          if (!existingApplication || existingApplication.status !== "cancelled" || existingApplication.date !== proposed.date || existingApplication.studentId !== proposed.studentId || existingApplication.roleId !== proposed.roleId) throw roleError("role/status-conflict", "Cancelled role application state changed.", { id: proposed.id });
+        } else if (applicationSnapshot.exists()) throw roleError("role/status-conflict", "Role application already exists.", { id: proposed.id });
+        const usage = roleDailyUsageFields(usageSnapshot.data()); const claimKey = dailyRoleClaimKey(proposed.date, proposed.studentId, proposed.roleId);
+        if (usage.activeClaims[claimKey]) throw roleError("role/already-applied", "Role is already active for this student.", { claimKey, applicationId: usage.activeClaims[claimKey] });
+        if ((usage.studentCounts[proposed.studentId] || 0) >= settings.dailyRoleApplicationLimit) throw roleError("role/limit-reached", "Daily role application limit was reached.", { studentId: proposed.studentId });
+        if ((usage.roleCounts[proposed.roleId] || 0) >= role.capacity) throw roleError("role/capacity-reached", "Role capacity was reached.", { roleId: proposed.roleId });
+        usage.studentCounts[proposed.studentId] = (usage.studentCounts[proposed.studentId] || 0) + 1;
+        usage.roleCounts[proposed.roleId] = (usage.roleCounts[proposed.roleId] || 0) + 1;
+        usage.activeClaims[claimKey] = proposed.id;
+        const application = { ...proposed, status: "waiting", roleSnapshot: role, pointAward: existingApplication?.pointAward || proposed.pointAward, completedAt: null, cancelledAt: null, cancelledBy: null };
+        const timestamp = serverTimestamp();
+        transaction.set(applicationRef, { ...application, createdAt: applicationSnapshot.exists() && applicationSnapshot.data().createdAt ? applicationSnapshot.data().createdAt : timestamp, updatedAt: timestamp });
+        transaction.set(usageRef, { ...usage, createdAt: usageSnapshot.data().createdAt || timestamp, updatedAt: timestamp });
+        return application;
+      });
+    },
+    cancelDailyRoleApplicationTransaction: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(value?.id || ""); const date = String(value?.date || ""); const cancelledBy = ["student", "teacher"].includes(value?.cancelledBy) ? value.cancelledBy : null; const cancelledAt = String(value?.cancelledAt || "");
+      if (!id || !date || !cancelledBy || !cancelledAt) throw new Error("Role cancellation fields are required.");
+      const usageRef = doc(db, "classes", activeClassId, "roleDailyUsage", date); const applicationRef = doc(db, "classes", activeClassId, "dailyRoleAssignments", id);
+      return runTransaction(db, async (transaction) => {
+        const [usageSnapshot, applicationSnapshot] = await Promise.all([transaction.get(usageRef), transaction.get(applicationRef)]);
+        if (!usageSnapshot.exists() || !applicationSnapshot.exists()) throw roleError("role/usage-conflict", "Role usage or application was not found.", { id, date });
+        const application = dailyRoleAssignmentFields({ ...applicationSnapshot.data(), id });
+        if (application.status !== "waiting") throw roleError("role/status-conflict", "Role application is no longer waiting.", { id, cloudStatus: application.status });
+        const usage = roleDailyUsageFields(usageSnapshot.data()); const claimKey = dailyRoleClaimKey(date, application.studentId, application.roleId);
+        if (usage.activeClaims[claimKey] !== id || (usage.roleCounts[application.roleId] || 0) < 1 || (usage.studentCounts[application.studentId] || 0) < 1) throw roleError("role/usage-conflict", "Role usage does not match the application.", { id, claimKey });
+        usage.roleCounts[application.roleId] -= 1; usage.studentCounts[application.studentId] -= 1; delete usage.activeClaims[claimKey];
+        if (usage.roleCounts[application.roleId] === 0) delete usage.roleCounts[application.roleId];
+        if (usage.studentCounts[application.studentId] === 0) delete usage.studentCounts[application.studentId];
+        const cancelled = { ...application, status: "cancelled", cancelledAt, cancelledBy };
+        const timestamp = serverTimestamp(); transaction.set(applicationRef, { ...cancelled, createdAt: applicationSnapshot.data().createdAt || timestamp, updatedAt: timestamp }); transaction.set(usageRef, { ...usage, createdAt: usageSnapshot.data().createdAt || timestamp, updatedAt: timestamp });
+        return cancelled;
+      });
+    },
+    connectInitialRoles: async ({ settings, templates, assignments }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const normalizedSettings = roleSettingsFields(settings);
+      const normalizedTemplates = (Array.isArray(templates) ? templates : []).map(roleTemplateFields);
+      const normalizedAssignments = (Array.isArray(assignments) ? assignments : []).map(dailyRoleAssignmentFields);
+      if (normalizedTemplates.some((template) => !template.id)) throw new Error("Role template id is required.");
+      if (normalizedAssignments.some((application) => !application.id || !application.studentId || !application.roleId)) throw new Error("Daily role assignment id, student id, and role id are required.");
+
+      const settingsTimestamp = serverTimestamp();
+      await setDoc(doc(db, "classes", activeClassId, "roleSettings", "current"), { ...normalizedSettings, createdAt: settingsTimestamp, updatedAt: settingsTimestamp });
+      const writes = [
+        ...normalizedTemplates.map((template) => ({ ref: doc(db, "classes", activeClassId, "roleTemplates", template.id), data: template })),
+        ...normalizedAssignments.map((application) => ({ ref: doc(db, "classes", activeClassId, "dailyRoleAssignments", application.id), data: application }))
+      ];
+      for (let index = 0; index < writes.length; index += 425) {
+        const batch = writeBatch(db); const timestamp = serverTimestamp();
+        writes.slice(index, index + 425).forEach((write) => batch.set(write.ref, { ...write.data, createdAt: timestamp, updatedAt: timestamp }));
+        await batch.commit();
+      }
+      await setDoc(doc(db, "classes", activeClassId), { rolesConnected: true, updatedAt: serverTimestamp() }, { merge: true });
     },
     loadStudents: async () => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
@@ -199,29 +372,46 @@ try {
             expectedPointAward: jsonSafeMap(mutation.assignmentStudentState.expectedPointAward),
             ref: doc(db, "classes", activeClassId, "assignmentStudentStates", assignmentStudentStateId(mutation.assignmentStudentState.assignmentId, mutation.assignmentStudentState.studentId))
           } : null;
-          return { ...mutation, stateRef: doc(db, "classes", activeClassId, "studentPointStates", mutation.studentId), historyEntries: (mutation.historyEntries || []).map(jsonSafeMap), assignmentStudentState: assignmentState };
+          const roleAssignment = mutation.dailyRoleAssignment ? {
+            ...dailyRoleAssignmentFields(mutation.dailyRoleAssignment),
+            expectedStatus: ["waiting", "completed", "cancelled"].includes(mutation.dailyRoleAssignment.expectedStatus) ? mutation.dailyRoleAssignment.expectedStatus : "waiting",
+            expectedPointAward: jsonSafeMap(mutation.dailyRoleAssignment.expectedPointAward),
+            ref: doc(db, "classes", activeClassId, "dailyRoleAssignments", String(mutation.dailyRoleAssignment.id || ""))
+          } : null;
+          return { ...mutation, stateRef: doc(db, "classes", activeClassId, "studentPointStates", mutation.studentId), historyEntries: (mutation.historyEntries || []).map(jsonSafeMap), assignmentStudentState: assignmentState, dailyRoleAssignment: roleAssignment };
         });
-        const [stateSnapshots, assignmentStateSnapshots] = await Promise.all([
+        const [stateSnapshots, assignmentStateSnapshots, roleAssignmentSnapshots] = await Promise.all([
           Promise.all(prepared.map((mutation) => transaction.get(mutation.stateRef))),
-          Promise.all(prepared.map((mutation) => mutation.assignmentStudentState ? transaction.get(mutation.assignmentStudentState.ref) : Promise.resolve(null)))
+          Promise.all(prepared.map((mutation) => mutation.assignmentStudentState ? transaction.get(mutation.assignmentStudentState.ref) : Promise.resolve(null))),
+          Promise.all(prepared.map((mutation) => mutation.dailyRoleAssignment ? transaction.get(mutation.dailyRoleAssignment.ref) : Promise.resolve(null)))
         ]);
         prepared.forEach((mutation, index) => {
           const snapshot = stateSnapshots[index]; const cloudPoints = snapshot.exists() ? Number(snapshot.data()?.points) : NaN;
           if (!Number.isInteger(cloudPoints) || cloudPoints !== mutation.expectedPoints) { const error = new Error("Cloud point state conflicts with local state."); error.code = "point/conflict"; error.details = { studentId: mutation.studentId, expectedPoints: mutation.expectedPoints, cloudPoints }; throw error; }
           const nextPoints = cloudPoints + mutation.balanceDelta; if (!Number.isInteger(nextPoints) || nextPoints < 0) { const error = new Error("Point balance cannot become negative."); error.code = "point/insufficient"; throw error; }
-          if (!mutation.assignmentStudentState) return;
-          const assignmentSnapshot = assignmentStateSnapshots[index]; const cloudStatus = assignmentSnapshot?.exists() ? assignmentStudentStateFields(assignmentSnapshot.data()).status : "missing"; const cloudPointAward = assignmentSnapshot?.exists() ? jsonSafeMap(assignmentSnapshot.data()?.pointAward) : {};
-          if (cloudStatus !== mutation.assignmentStudentState.expectedStatus) { const error = new Error("Cloud assignment status conflicts with local state."); error.code = "assignment/status-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
-          if (canonicalJson(cloudPointAward) !== canonicalJson(mutation.assignmentStudentState.expectedPointAward)) { const error = new Error("Cloud assignment point award conflicts with local state."); error.code = "assignment/award-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
+          if (mutation.assignmentStudentState) {
+            const assignmentSnapshot = assignmentStateSnapshots[index]; const cloudStatus = assignmentSnapshot?.exists() ? assignmentStudentStateFields(assignmentSnapshot.data()).status : "missing"; const cloudPointAward = assignmentSnapshot?.exists() ? jsonSafeMap(assignmentSnapshot.data()?.pointAward) : {};
+            if (cloudStatus !== mutation.assignmentStudentState.expectedStatus) { const error = new Error("Cloud assignment status conflicts with local state."); error.code = "assignment/status-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
+            if (canonicalJson(cloudPointAward) !== canonicalJson(mutation.assignmentStudentState.expectedPointAward)) { const error = new Error("Cloud assignment point award conflicts with local state."); error.code = "assignment/award-conflict"; error.details = { assignmentId: mutation.assignmentStudentState.assignmentId, studentId: mutation.assignmentStudentState.studentId, expectedStatus: mutation.assignmentStudentState.expectedStatus, cloudStatus }; throw error; }
+          }
+          if (mutation.dailyRoleAssignment) {
+            const roleSnapshot = roleAssignmentSnapshots[index]; const cloudStatus = roleSnapshot?.exists() ? dailyRoleAssignmentFields(roleSnapshot.data()).status : null; const cloudPointAward = roleSnapshot?.exists() ? jsonSafeMap(roleSnapshot.data()?.pointAward) : null;
+            if (cloudStatus !== mutation.dailyRoleAssignment.expectedStatus) { const error = new Error("Cloud role status conflicts with local state."); error.code = "role/status-conflict"; error.details = { id: mutation.dailyRoleAssignment.id, studentId: mutation.dailyRoleAssignment.studentId, expectedStatus: mutation.dailyRoleAssignment.expectedStatus, cloudStatus }; throw error; }
+            if (cloudPointAward === null || canonicalJson(cloudPointAward) !== canonicalJson(mutation.dailyRoleAssignment.expectedPointAward)) { const error = new Error("Cloud role point award conflicts with local state."); error.code = "role/award-conflict"; error.details = { id: mutation.dailyRoleAssignment.id, studentId: mutation.dailyRoleAssignment.studentId, expectedStatus: mutation.dailyRoleAssignment.expectedStatus, cloudStatus }; throw error; }
+          }
         });
         const timestamp = serverTimestamp();
         prepared.forEach((mutation, index) => {
           const nextPoints = Number(stateSnapshots[index].data().points) + mutation.balanceDelta;
-          if (mutation.balanceDelta !== 0 || !mutation.assignmentStudentState) transaction.set(mutation.stateRef, { id: mutation.studentId, points: nextPoints, updatedAt: timestamp }, { merge: true });
+          if (mutation.balanceDelta !== 0 || (!mutation.assignmentStudentState && !mutation.dailyRoleAssignment)) transaction.set(mutation.stateRef, { id: mutation.studentId, points: nextPoints, updatedAt: timestamp }, { merge: true });
           mutation.historyEntries.forEach((entry) => transaction.set(doc(db, "classes", activeClassId, "pointHistory", cloudHistoryId(mutation.studentId, entry.id)), { id: entry.id, studentId: mutation.studentId, entry, createdAt: timestamp }));
           if (mutation.assignmentStudentState) {
             const assignmentSnapshot = assignmentStateSnapshots[index]; const state = mutation.assignmentStudentState;
             transaction.set(state.ref, { assignmentId: state.assignmentId, studentId: state.studentId, status: state.status, pointAward: state.pointAward, createdAt: assignmentSnapshot?.exists() && assignmentSnapshot.data().createdAt ? assignmentSnapshot.data().createdAt : timestamp, updatedAt: timestamp });
+          }
+          if (mutation.dailyRoleAssignment) {
+            const roleSnapshot = roleAssignmentSnapshots[index]; const application = mutation.dailyRoleAssignment;
+            transaction.set(application.ref, { ...dailyRoleAssignmentFields(application), createdAt: roleSnapshot.data().createdAt || timestamp, updatedAt: timestamp });
           }
         });
       });

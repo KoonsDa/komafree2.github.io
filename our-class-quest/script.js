@@ -352,6 +352,13 @@ let firebaseAssignmentStudentStatesConnecting = false;
 let firebasePointsChecked = false;
 let firebasePointsConnected = false;
 let firebasePointsLoadFailed = false;
+let firebaseRolesConnected = false;
+let firebaseRolesConnecting = false;
+let firebaseRoleConfigurationSaving = false;
+let firebaseRoleDailyUsageReady = false;
+let firebaseRoleDailyUsageInitializing = false;
+let firebaseRoleDailyUsageDate = "";
+let firebaseRoleApplicationMutating = false;
 let pointMutationQueue = Promise.resolve();
 const app = document.querySelector("#app");
 
@@ -413,7 +420,13 @@ function enqueuePointMutations(mutations) {
     catch (error) {
       console.error("Firestore point mutation failed", { code: error?.code, message: error?.message, details: error?.details, mutations: queued }, error);
       const assignmentConflict = queued.some((mutation) => mutation.assignmentStudentState) && ["assignment/status-conflict", "assignment/award-conflict", "point/conflict"].includes(error?.code);
-      if (assignmentConflict) {
+      const roleConflict = queued.some((mutation) => mutation.dailyRoleAssignment) && ["role/status-conflict", "role/award-conflict", "point/conflict"].includes(error?.code);
+      if (roleConflict) {
+        const [pointsLoaded, rolesLoaded] = await Promise.all([loadFirebasePoints(userUid, false), loadFirebaseRoleApplications(userUid, false)]);
+        if (firebaseTeacherUser?.uid === userUid && pointsLoaded && rolesLoaded) { saveData(); render(); toast("다른 화면에서 역할 상태가 변경되어 최신 상태를 다시 불러왔습니다."); }
+        else toast("최신 역할 상태를 다시 불러오지 못했습니다. 연결을 확인해 주세요.");
+      }
+      else if (assignmentConflict) {
         const [pointsLoaded, statesLoaded] = await Promise.all([loadFirebasePoints(userUid, false), loadFirebaseAssignmentStudentStates(userUid, false)]);
         if (firebaseTeacherUser?.uid === userUid && pointsLoaded && statesLoaded) { saveData(); render(); toast("다른 화면에서 과제 상태가 변경되어 최신 상태를 다시 불러왔습니다."); }
         else toast("최신 과제 상태를 다시 불러오지 못했습니다. 연결을 확인해 주세요.");
@@ -426,25 +439,28 @@ function enqueuePointMutations(mutations) {
 function applyStudentPointChanges(changes) {
   pointChangeFailureReason = "";
   if (!Array.isArray(changes) || !changes.length) return false;
-  const prepared = changes.map((change) => { const student = change?.student; const balanceDelta = change?.balanceDelta; const currentPoints = Number(student?.points); const assignment = change?.assignment; const assignmentStudentState = change?.assignmentStudentState; return { student, balanceDelta, currentPoints, historyEntries: pointHistoryEntries(change?.historyEntries || []), assignment, assignmentStudentState }; });
+  const prepared = changes.map((change) => { const student = change?.student; const balanceDelta = change?.balanceDelta; const currentPoints = Number(student?.points); const assignment = change?.assignment; const assignmentStudentState = change?.assignmentStudentState; const roleApplication = change?.roleApplication; const dailyRoleAssignment = change?.dailyRoleAssignment; return { student, balanceDelta, currentPoints, historyEntries: pointHistoryEntries(change?.historyEntries || []), assignment, assignmentStudentState, roleApplication, dailyRoleAssignment }; });
   if (prepared.some(({ student, balanceDelta, currentPoints }) => !student || typeof student !== "object" || !Number.isInteger(balanceDelta) || !Number.isInteger(currentPoints) || currentPoints + balanceDelta < 0)) return false;
   if (prepared.some(({ assignment, assignmentStudentState }) => assignmentStudentState && (!assignment || typeof assignment !== "object" || !ASSIGNMENT_STATUSES.includes(assignmentStudentState.expectedStatus) || !ASSIGNMENT_STATUSES.includes(assignmentStudentState.status)))) return false;
-  const cloudMutations = prepared.map(({ student, balanceDelta, currentPoints, historyEntries, assignmentStudentState }) => ({ studentId: student.id, expectedPoints: currentPoints, balanceDelta, historyEntries, ...(firebaseAssignmentStudentStatesConnected && assignmentStudentState ? { assignmentStudentState } : {}) })).filter((mutation) => mutation.balanceDelta !== 0 || mutation.historyEntries.length || mutation.assignmentStudentState);
+  if (prepared.some(({ roleApplication, dailyRoleAssignment }) => dailyRoleAssignment && (!roleApplication || typeof roleApplication !== "object" || roleApplication.id !== dailyRoleAssignment.id || !["waiting", "completed", "cancelled"].includes(dailyRoleAssignment.expectedStatus) || !["waiting", "completed", "cancelled"].includes(dailyRoleAssignment.status)))) return false;
+  const cloudMutations = prepared.map(({ student, balanceDelta, currentPoints, historyEntries, assignmentStudentState, dailyRoleAssignment }) => ({ studentId: student.id, expectedPoints: currentPoints, balanceDelta, historyEntries, ...(firebaseAssignmentStudentStatesConnected && assignmentStudentState ? { assignmentStudentState } : {}), ...(firebaseRolesConnected && dailyRoleAssignment ? { dailyRoleAssignment } : {}) })).filter((mutation) => mutation.balanceDelta !== 0 || mutation.historyEntries.length || mutation.assignmentStudentState || mutation.dailyRoleAssignment);
   if (cloudMutations.length && cloudPointMutationUnavailable()) { pointChangeFailureReason = "cloud-unavailable"; toast("클라우드 연결을 확인한 후 다시 시도해주세요."); return false; }
-  prepared.forEach(({ student, balanceDelta, currentPoints, historyEntries, assignment, assignmentStudentState }) => {
+  prepared.forEach(({ student, balanceDelta, currentPoints, historyEntries, assignment, assignmentStudentState, roleApplication, dailyRoleAssignment }) => {
     if (!Array.isArray(student.pointHistory)) student.pointHistory = [];
     student.points = currentPoints + balanceDelta;
     student.pointHistory.push(...historyEntries);
-    if (!assignmentStudentState) return;
-    if (!assignment.pointAwards || typeof assignment.pointAwards !== "object" || Array.isArray(assignment.pointAwards)) assignment.pointAwards = {};
-    setAssignmentStatusForStudent(assignment, assignmentStudentState.studentId, assignmentStudentState.status);
-    if (Object.keys(assignmentStudentState.pointAward).length) assignment.pointAwards[assignmentStudentState.studentId] = structuredClone(assignmentStudentState.pointAward); else delete assignment.pointAwards[assignmentStudentState.studentId];
-    refreshAssignmentCompletion(assignment);
+    if (assignmentStudentState) {
+      if (!assignment.pointAwards || typeof assignment.pointAwards !== "object" || Array.isArray(assignment.pointAwards)) assignment.pointAwards = {};
+      setAssignmentStatusForStudent(assignment, assignmentStudentState.studentId, assignmentStudentState.status);
+      if (Object.keys(assignmentStudentState.pointAward).length) assignment.pointAwards[assignmentStudentState.studentId] = structuredClone(assignmentStudentState.pointAward); else delete assignment.pointAwards[assignmentStudentState.studentId];
+      refreshAssignmentCompletion(assignment);
+    }
+    if (dailyRoleAssignment) Object.assign(roleApplication, { status: dailyRoleAssignment.status, pointAward: structuredClone(dailyRoleAssignment.pointAward), date: dailyRoleAssignment.date, studentId: dailyRoleAssignment.studentId, roleId: dailyRoleAssignment.roleId, roleSnapshot: structuredClone(dailyRoleAssignment.roleSnapshot), appliedAt: dailyRoleAssignment.appliedAt, completedAt: dailyRoleAssignment.completedAt, cancelledAt: dailyRoleAssignment.cancelledAt, cancelledBy: dailyRoleAssignment.cancelledBy });
   });
   enqueuePointMutations(cloudMutations);
   return true;
 }
-function applyStudentPointChange(student, balanceDelta, historyEntries = [], options = {}) { return applyStudentPointChanges([{ student, balanceDelta, historyEntries, assignment: options.assignment, assignmentStudentState: options.assignmentStudentState }]); }
+function applyStudentPointChange(student, balanceDelta, historyEntries = [], options = {}) { return applyStudentPointChanges([{ student, balanceDelta, historyEntries, assignment: options.assignment, assignmentStudentState: options.assignmentStudentState, roleApplication: options.roleApplication, dailyRoleAssignment: options.dailyRoleAssignment }]); }
 function cardBonusAward(student, baseAmount, originalSource, relatedId) {
   const representative = representativeCardInfo(student); if (!representative || !representative.ability?.active || representative.ability?.deleted || baseAmount <= 0) return { amount: 0 };
   const percent = abilityPercent(representative.rarity, representative.abilityId, originalSource); const cap = Number(representative.setting.dailyCap) || 0;
@@ -475,7 +491,8 @@ async function enterFirebaseTeacher() { const client = window.ourClassFirebase; 
 function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; }
 function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
-async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
+function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRolesConnecting = false; firebaseRoleConfigurationSaving = false; firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageInitializing = false; firebaseRoleDailyUsageDate = ""; firebaseRoleApplicationMutating = false; }
+async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
 function appendCloudStudent(student) { const added = { id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] }; data.students.push(added); data.assignments.forEach((assignment) => setAssignmentStatusForStudent(assignment, added.id, "missing")); return added; }
 async function loadFirebaseStudents(userUid, commit = true) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); } if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (commit && session.view === "class-settings") render(); return false; } }
 function mergeFirebaseAssignments(cloudAssignments) {
@@ -521,8 +538,69 @@ function mergeFirebaseAssignmentStudentStates(cloudStates) {
   });
 }
 async function loadFirebaseAssignmentStudentStates(userUid, commit = true) { if (!firebaseAssignmentStudentStatesConnected) return false; try { const states = await window.ourClassFirebase.loadAssignmentStudentStates(); if (firebaseTeacherUser?.uid !== userUid) return false; mergeFirebaseAssignmentStudentStates(states); if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore assignment student states load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; if (commit && session.view === "class-settings") render(); return false; } }
-async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (session.view === "class-settings") render(); } }
-async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
+async function loadFirebaseRoles(userUid, commit = true) {
+  if (!firebaseRolesConnected) return false;
+  try {
+    const [settings, templates, applications] = await Promise.all([window.ourClassFirebase.loadRoleSettings(), window.ourClassFirebase.loadRoleTemplates(), window.ourClassFirebase.loadDailyRoleAssignments()]);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    if (!settings) throw new Error("Connected role settings were not found.");
+    data.dailyRoleApplicationLimit = settings.dailyRoleApplicationLimit;
+    data.currentRoles = settings.currentRoles;
+    data.roleTemplates = templates;
+    data.roleApplications = applications;
+    if (!await ensureFirebaseRoleDailyUsage(userUid, false)) return false;
+    if (commit) { saveData(); render(); }
+    return true;
+  } catch (error) {
+    console.error("Firestore roles load failed", error);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    if (commit && session.view === "class-settings") render();
+    return false;
+  }
+}
+async function loadFirebaseRoleApplications(userUid, commit = true) {
+  if (!firebaseRolesConnected) return false;
+  try {
+    const applications = await window.ourClassFirebase.loadDailyRoleAssignments();
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    data.roleApplications = applications;
+    if (commit) { saveData(); render(); }
+    return true;
+  } catch (error) {
+    console.error("Firestore role assignments load failed", error);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    return false;
+  }
+}
+async function ensureFirebaseRoleDailyUsage(userUid, commit = true) {
+  if (!firebaseRolesConnected || firebaseRoleDailyUsageInitializing) return firebaseRoleDailyUsageReady;
+  firebaseRoleDailyUsageInitializing = true; firebaseRoleDailyUsageReady = false; if (commit) render();
+  try {
+    await window.ourClassFirebase.initializeRoleDailyUsage(todayString());
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    firebaseRoleDailyUsageReady = true; firebaseRoleDailyUsageDate = todayString(); return true;
+  } catch (error) {
+    console.error("Firestore role daily usage initialization failed", error);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageDate = "";
+    if (error?.code === "role/usage-duplicate") toast("오늘의 역할 신청에 중복 기록이 있어 사용량을 초기화하지 못했습니다.");
+    else toast("오늘의 역할 신청 사용량을 준비하지 못했습니다. 연결을 확인해 주세요.");
+    return false;
+  } finally {
+    firebaseRoleDailyUsageInitializing = false; if (commit) render();
+  }
+}
+async function reloadFirebaseRoleApplicationsAndUsage(userUid) {
+  const applicationsLoaded = await loadFirebaseRoleApplications(userUid, false);
+  let usage = await window.ourClassFirebase.loadRoleDailyUsage(todayString()).catch(() => null);
+  if (firebaseTeacherUser?.uid !== userUid) return false;
+  if (!usage && applicationsLoaded) { firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageDate = ""; if (await ensureFirebaseRoleDailyUsage(userUid, false)) usage = await window.ourClassFirebase.loadRoleDailyUsage(todayString()).catch(() => null); }
+  firebaseRoleDailyUsageReady = Boolean(usage); firebaseRoleDailyUsageDate = usage ? todayString() : "";
+  if (!applicationsLoaded || !usage) return false;
+  saveData(); render(); return true;
+}
+async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; firebaseRolesConnected = result.rolesConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); if (firebaseRolesConnected) await loadFirebaseRoles(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (session.view === "class-settings") render(); } }
+async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
 async function saveFirebaseClassSettings() { if (!firebaseTeacherSession || !firebaseActiveClassId || !window.ourClassFirebase?.ready) return; try { await window.ourClassFirebase.saveClassSettings({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); } catch (error) { console.error("Firestore class settings save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectStudentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsChecked || firebaseStudentsConnected || firebaseStudentsLoadFailed) return; if (!confirm("현재 브라우저의 학생 명단을 클라우드 학급의 기준 명단으로 등록할까요?")) return; try { await window.ourClassFirebase.uploadInitialStudents(data.students); firebaseStudentsConnected = true; render(); toast("학생 명단을 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial students upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectAssignmentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsConnected || firebaseAssignmentsConnected) return; if (!confirm("현재 브라우저의 과제 기본정보를\n클라우드 학급의 기준 과제로 등록할까요?")) return; try { await window.ourClassFirebase.connectInitialAssignments(data.assignments); firebaseAssignmentsConnected = true; firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = false; render(); toast("과제 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial assignments upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
@@ -554,6 +632,90 @@ async function connectAssignmentStudentStatesToFirebase() {
     render();
   }
 }
+function initialRoleApplicationSnapshot(application) {
+  const storedSnapshot = application?.roleSnapshot && typeof application.roleSnapshot === "object" && !Array.isArray(application.roleSnapshot) ? structuredClone(application.roleSnapshot) : null;
+  const fallbackRole = roleForApplication(application);
+  const storedAward = storedRolePointAward(application);
+  return {
+    id: String(application?.id || ""),
+    date: roleApplicationDate(application),
+    studentId: String(application?.studentId || ""),
+    roleId: String(application?.roleId || ""),
+    status: ["waiting", "completed", "cancelled"].includes(application?.status) ? application.status : "waiting",
+    roleSnapshot: storedSnapshot || roleSnapshot(fallbackRole) || {},
+    pointAward: storedAward || (application?.status === "completed" ? legacyRolePointAward(application, fallbackRole) : {}),
+    appliedAt: String(application?.appliedAt || ""),
+    completedAt: application?.completedAt || null,
+    cancelledAt: application?.cancelledAt || null,
+    cancelledBy: ["student", "teacher"].includes(application?.cancelledBy) ? application.cancelledBy : null
+  };
+}
+function initialRoleCloudSnapshot() {
+  return {
+    settings: { dailyRoleApplicationLimit: data.dailyRoleApplicationLimit, currentRoles: structuredClone(data.currentRoles) },
+    templates: structuredClone(data.roleTemplates),
+    assignments: data.roleApplications.map(initialRoleApplicationSnapshot)
+  };
+}
+async function connectRolesToFirebase() {
+  if (!firebaseTeacherSession || !firebaseTeacherUser || !firebaseActiveClassId || !window.ourClassFirebase?.ready || !firebaseStudentsConnected || !firebasePointsConnected || firebaseRolesConnected || firebaseRolesConnecting) return;
+  if (!confirm("현재 1인1역 설정과 기존 신청 기록을\n클라우드 학급의 기준 데이터로 등록할까요?")) return;
+  const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId;
+  firebaseRolesConnecting = true; render();
+  try {
+    const snapshot = initialRoleCloudSnapshot();
+    await window.ourClassFirebase.connectInitialRoles(snapshot);
+    if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during roles connection.");
+    firebaseRolesConnected = true;
+    const rolesLoaded = await loadFirebaseRoles(userUid, false);
+    if (!rolesLoaded) throw new Error("Connected roles could not be loaded.");
+    saveData();
+    toast("1인1역을 클라우드에 연결했습니다.");
+  } catch (error) {
+    console.error("Firestore initial roles upload failed", error);
+    firebaseRolesConnected = false;
+    toast("1인1역을 클라우드에 연결하지 못했습니다. 연결을 확인해 주세요.");
+  } finally {
+    firebaseRolesConnecting = false;
+    render();
+  }
+}
+function roleSettingsSnapshot() { return { currentRoles: structuredClone(data.currentRoles), dailyRoleApplicationLimit: data.dailyRoleApplicationLimit }; }
+async function persistRoleSettings(previousSettings, successMessage) {
+  saveData();
+  if (!firebaseRolesConnected) { render(); toast(successMessage); return true; }
+  firebaseRoleConfigurationSaving = true; render();
+  try {
+    await window.ourClassFirebase.saveRoleSettings({ currentRoles: data.currentRoles, dailyRoleApplicationLimit: data.dailyRoleApplicationLimit });
+    toast(successMessage); return true;
+  } catch (error) {
+    console.error("Firestore role settings save failed", error);
+    data.currentRoles = previousSettings.currentRoles;
+    data.dailyRoleApplicationLimit = previousSettings.dailyRoleApplicationLimit;
+    saveData();
+    toast("1인1역 설정을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
+    return false;
+  } finally {
+    firebaseRoleConfigurationSaving = false; render();
+  }
+}
+async function persistRoleTemplateChange(previousTemplates, cloudOperation, successMessage) {
+  saveData();
+  if (!firebaseRolesConnected) { render(); toast(successMessage); return true; }
+  firebaseRoleConfigurationSaving = true; render();
+  try {
+    await cloudOperation();
+    toast(successMessage); return true;
+  } catch (error) {
+    console.error("Firestore role template save failed", error);
+    data.roleTemplates = previousTemplates;
+    saveData();
+    toast("역할 템플릿을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
+    return false;
+  } finally {
+    firebaseRoleConfigurationSaving = false; render();
+  }
+}
 async function saveFirebaseAssignment(assignment) { if (!firebaseAssignmentsConnected || !assignment) return; try { await window.ourClassFirebase.saveAssignment(assignment); } catch (error) { console.error("Firestore assignment save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function saveFirebaseStudent(student, isNew = false) { if (!firebaseStudentsConnected || !student) return; try { await window.ourClassFirebase.saveStudent(student, data.students.findIndex((item) => item.id === student.id), isNew); if (isNew && firebasePointsConnected) await window.ourClassFirebase.createPointStates([student]); } catch (error) { console.error("Firestore student save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function saveFirebaseStudentsBatch(students) { if (!firebaseStudentsConnected || !students.length) return; try { await window.ourClassFirebase.saveStudentsBatch(students.map((student) => ({ student, orderIndex: data.students.findIndex((item) => item.id === student.id) }))); if (firebasePointsConnected) await window.ourClassFirebase.createPointStates(students); } catch (error) { console.error("Firestore students batch save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
@@ -578,7 +740,14 @@ function studentNavItems() {
   const featureByView = { roles: "roles", assignments: "assignments", points: "points", draw: "cards", collection: "cards", ranking: "rankings" };
   return STUDENT_NAV.filter(([view]) => !featureByView[view] || featureEnabled(featureByView[view]));
 }
-function todayRoleApplications() { const today = todayString(); return data.roleApplications.filter((application) => application.status !== "cancelled" && localDateKey(application.appliedAt) === today); }
+function roleApplicationDate(application) { const date = String(application?.date || ""); return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : localDateKey(application?.appliedAt); }
+function roleSnapshot(role) { return role ? { id: String(role.id || ""), name: String(role.name || ""), points: Number(role.points) || 0, capacity: Number(role.capacity) || 1, description: String(role.description || "") } : null; }
+function roleForApplication(application) { const snapshot = application?.roleSnapshot; return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && String(snapshot.id || application.roleId || "") ? { ...snapshot, id: String(snapshot.id || application.roleId), name: String(snapshot.name || ""), points: Number(snapshot.points) || 0, capacity: Number(snapshot.capacity) || 1, description: String(snapshot.description || "") } : roleById(application?.roleId); }
+function storedRolePointAward(application) { const award = application?.pointAward; return application && Object.hasOwn(application, "pointAward") && award && typeof award === "object" && !Array.isArray(award) ? structuredClone(award) : null; }
+function legacyRolePointAward(application, role) { const legacyTotal = Number(application?.awardedPoints); const legacyBonus = Number(application?.awardedBonusPoints); const bonusAmount = Number.isFinite(legacyBonus) ? legacyBonus : 0; const legacyBase = Number(application?.awardedBasePoints); const baseAmount = Number.isFinite(legacyBase) ? legacyBase : Number.isFinite(legacyTotal) ? legacyTotal - bonusAmount : Number(role?.points) || 0; const amount = Number.isFinite(legacyTotal) ? legacyTotal : baseAmount + bonusAmount; return { awarded: application?.status === "completed", amount, baseAmount, bonusAmount, cardAbilityAward: application?.cardAbilityAward && typeof application.cardAbilityAward === "object" ? structuredClone(application.cardAbilityAward) : { amount: 0 }, awardedAt: application?.completedAt || application?.appliedAt || "", revokedAt: null }; }
+function rolePointAward(application, role) { return storedRolePointAward(application) || legacyRolePointAward(application, role); }
+function preserveCurrentRoleApplicationSnapshots() { data.roleApplications.forEach((application) => { if (application.roleSnapshot && typeof application.roleSnapshot === "object" && !Array.isArray(application.roleSnapshot)) return; const role = roleById(application.roleId); if (role) application.roleSnapshot = roleSnapshot(role); }); }
+function todayRoleApplications() { const today = todayString(); return data.roleApplications.filter((application) => application.status !== "cancelled" && roleApplicationDate(application) === today); }
 function todayRoleApplicationsForStudent(studentId) { return todayRoleApplications().filter((application) => application.studentId === studentId); }
 function shell(content, teacher = false) {
   const student = currentStudent();
@@ -651,7 +820,7 @@ function studentHome() {
   const student = currentStudent();
   const assignments = featureEnabled("assignments") ? data.assignments.filter((assignment) => !isAssignmentCompleted(assignment)).sort(studentAssignmentSort(student.id)) : [];
   const roleApplications = featureEnabled("roles") ? todayRoleApplicationsForStudent(student.id) : [];
-  const roleSummary = featureEnabled("roles") ? `<article class="card student-home-role"><div><span class="subject-badge">오늘의 역할</span><h3>${roleApplications.length ? `${roleApplications.length}개 참여 중` : "아직 신청한 역할이 없어요"}</h3><p class="muted">${roleApplications.length ? roleApplications.map((application) => escapeHtml(roleById(application.roleId)?.name || "역할")).join(" · ") : "역할을 골라 우리 반을 함께 도와주세요."}</p></div><button class="button secondary compact" data-action="navigate" data-view="roles">역할 보기</button></article>` : "";
+  const roleSummary = featureEnabled("roles") ? `<article class="card student-home-role"><div><span class="subject-badge">오늘의 역할</span><h3>${roleApplications.length ? `${roleApplications.length}개 참여 중` : "아직 신청한 역할이 없어요"}</h3><p class="muted">${roleApplications.length ? roleApplications.map((application) => escapeHtml(roleForApplication(application)?.name || "역할")).join(" · ") : "역할을 골라 우리 반을 함께 도와주세요."}</p></div><button class="button secondary compact" data-action="navigate" data-view="roles">역할 보기</button></article>` : "";
   const assignmentSection = featureEnabled("assignments") ? `<div class="section-heading student-task-heading"><div><h2 class="section-title">진행 중 과제</h2><p class="muted">미제출 과제와 가까운 마감일을 먼저 보여 줍니다.</p></div><button class="button secondary compact" data-action="navigate" data-view="assignments">과제 전체 보기</button></div>${assignments.length ? `<div class="grid student-home-assignment-grid">${assignments.map((assignment) => studentAssignmentCard(assignment, student.id)).join("")}</div>` : `<div class="empty">진행 중인 과제가 없어요. 멋지게 완료했어요!</div>`}` : "";
   const recentPoints = featureEnabled("points") ? student.pointHistory.slice(-5).reverse() : [];
   const pointSection = featureEnabled("points") ? `<div class="section-heading student-state-heading"><div><h2 class="section-title">나의 현재 상태</h2><p class="muted">현재 ${student.points}P · 최근 포인트 내역</p></div><button class="button secondary compact" data-action="navigate" data-view="points">포인트 전체 보기</button></div>${recentPoints.length ? `<div class="list student-home-points">${recentPoints.map(pointHistoryRow).join("")}</div>` : `<div class="empty">아직 포인트 기록이 없어요.</div>`}` : "";
@@ -680,13 +849,14 @@ function studentRoles() {
   return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 ${limit}개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><section class="card role-application-limit-status"><span>오늘 신청</span><strong>${ownActive.length} / ${limit}개</strong>${ownActive.length >= limit ? `<small>오늘 신청 가능한 1인1역을 모두 신청했습니다.</small>` : `<small>${limit - ownActive.length}개 더 신청할 수 있어요.</small>`}</section><div class="grid">${data.currentRoles.map((role) => {
     const applications = todayRoleApplications().filter((item) => item.roleId === role.id);
     const mine = applications.find((item) => item.studentId === student.id);
+    const shownPoints = mine ? roleForApplication(mine)?.points ?? role.points : role.points;
     const full = applications.length >= role.capacity;
     const actionButton = mine?.status === "completed"
       ? `<button class="button secondary" type="button" disabled>완료</button>`
       : mine?.status === "waiting"
         ? `<button class="button danger" type="button" data-action="open-student-cancel" data-id="${mine.id}">신청 취소</button>`
         : `<button class="button" type="button" data-action="apply-role" data-id="${role.id}" ${full || ownActive.length >= limit ? "disabled" : ""}>${full ? "모집 완료" : ownActive.length >= limit ? "오늘 신청 완료" : "신청하기"}</button>`;
-    return `<article class="card quest-card"><div class="quest-top"><h3>${escapeHtml(role.name)}</h3><span class="points">+${role.points}P</span></div>${role.description ? `<p class="role-description">${escapeHtml(role.description)}</p>` : ""}<div><span class="pill">모집 ${applications.length} / ${role.capacity}명</span></div><div class="progress"><span style="width:${Math.min(100, applications.length / role.capacity * 100)}%"></span></div><div class="applicants">현재 신청: ${applications.length ? applications.map((item) => studentById(item.studentId).name).join(", ") : "아직 없음"}</div>${actionButton}</article>`;
+    return `<article class="card quest-card"><div class="quest-top"><h3>${escapeHtml(role.name)}</h3><span class="points">+${shownPoints}P</span></div>${role.description ? `<p class="role-description">${escapeHtml(role.description)}</p>` : ""}<div><span class="pill">모집 ${applications.length} / ${role.capacity}명</span></div><div class="progress"><span style="width:${Math.min(100, applications.length / role.capacity * 100)}%"></span></div><div class="applicants">현재 신청: ${applications.length ? applications.map((item) => studentById(item.studentId).name).join(", ") : "아직 없음"}</div>${actionButton}</article>`;
   }).join("")}</div>`;
 }
 
@@ -774,7 +944,7 @@ function todayIssuedPoints() {
 function localDateKey(value) { if (!value) return ""; const text = String(value); if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text; if (/^\d{4}-\d{2}-\d{2}T/.test(text)) { const isoDate = new Date(text); return Number.isNaN(isoDate.getTime()) ? "" : `${isoDate.getFullYear()}-${String(isoDate.getMonth() + 1).padStart(2, "0")}-${String(isoDate.getDate()).padStart(2, "0")}`; } const parsed = historyDateKey(text); if (parsed) return parsed; const date = new Date(text); return Number.isNaN(date.getTime()) ? "" : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
 function assignmentDateKeys(assignment) { return new Set([localDateKey(assignment.createdAt), localDateKey(assignment.dueDate), localDateKey(assignment.completedAt)].filter(Boolean)); }
 function assignmentsForDate(dateKey) { return data.assignments.filter((assignment) => assignmentDateKeys(assignment).has(dateKey)); }
-function rolesForDate(dateKey) { return data.roleApplications.filter((application) => application.status !== "cancelled" && [localDateKey(application.appliedAt), localDateKey(application.completedAt)].includes(dateKey)); }
+function rolesForDate(dateKey) { return data.roleApplications.filter((application) => application.status !== "cancelled" && [roleApplicationDate(application), localDateKey(application.completedAt)].includes(dateKey)); }
 function observationsForDate(dateKey) { return data.observations.filter((observation) => localDateKey(observation.date || observation.createdAt) === dateKey).sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)); }
 function pointTransactionsForDate(dateKey) { return data.students.flatMap((student) => (student.pointHistory || []).filter((item) => localDateKey(item.createdAt || item.date) === dateKey).map((item) => ({ ...item, studentName: student.name }))); }
 function assignmentStatusCounts(assignment) { const statuses = assignmentStatusesForStudents(assignment); return { submitted: statuses.filter((status) => status === "submitted").length, review: statuses.filter((status) => status === "review").length, missing: statuses.filter((status) => status === "missing").length }; }
@@ -823,7 +993,7 @@ function dashboardRoleList(roles) {
   const waiting = roles.filter((application) => application.status === "waiting");
   const completed = roles.filter((application) => application.status === "completed").sort((first, second) => new Date(second.completedAt || 0) - new Date(first.completedAt || 0));
   const shown = [...waiting, ...completed.slice(0, 5)];
-  const rows = shown.map((application) => { const role = roleById(application.roleId); const student = studentById(application.studentId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span>${escapeHtml(student?.name || "학생 정보 없음")}</span></div><span class="pill ${application.status === "completed" ? "success" : "waiting"}">${application.status === "completed" ? "완료" : "수행 대기"}</span><b>${application.status === "completed" ? (application.awardedPoints ?? role?.points ?? 0) : (role?.points ?? 0)}P</b></article>`; }).join("");
+  const rows = shown.map((application) => { const role = roleForApplication(application); const student = studentById(application.studentId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span>${escapeHtml(student?.name || "학생 정보 없음")}</span></div><span class="pill ${application.status === "completed" ? "success" : "waiting"}">${application.status === "completed" ? "완료" : "수행 대기"}</span><b>${application.status === "completed" ? (application.awardedPoints ?? role?.points ?? 0) : (role?.points ?? 0)}P</b></article>`; }).join("");
   return `<div class="dashboard-detail-list">${rows}</div>${completed.length > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 보기</button>` : ""}`;
 }
 function teacherDashboard() {
@@ -835,7 +1005,7 @@ function teacherDashboard() {
 
 function studentNumber(student) { return Number.isInteger(Number(student?.number)) && Number(student.number) > 0 ? Number(student.number) : data.students.findIndex((item) => item.id === student?.id) + 1; }
 function activeAssignmentSummary(student) { const active = data.assignments.filter((assignment) => !isAssignmentCompleted(assignment)); return { active, missing: active.filter((assignment) => assignmentStatusForStudent(assignment, student.id) === "missing").length, review: active.filter((assignment) => assignmentStatusForStudent(assignment, student.id) === "review").length, submitted: active.filter((assignment) => assignmentStatusForStudent(assignment, student.id) === "submitted").length }; }
-function todayRoleSummary(student) { const items = data.roleApplications.filter((application) => application.studentId === student.id && application.status !== "cancelled" && [localDateKey(application.appliedAt), localDateKey(application.completedAt)].includes(todayString())); return { items, completed: items.filter((item) => item.status === "completed").length, waiting: items.filter((item) => item.status === "waiting").length }; }
+function todayRoleSummary(student) { const items = data.roleApplications.filter((application) => application.studentId === student.id && application.status !== "cancelled" && [roleApplicationDate(application), localDateKey(application.completedAt)].includes(todayString())); return { items, completed: items.filter((item) => item.status === "completed").length, waiting: items.filter((item) => item.status === "waiting").length }; }
 function studentObservations(student) { return data.observations.filter((observation) => observation.studentId === student.id).sort((first, second) => String(second.date).localeCompare(String(first.date)) || new Date(second.createdAt) - new Date(first.createdAt)); }
 function compactDate(value) { const key = localDateKey(value); if (!key) return "날짜 없음"; const [, month, day] = key.split("-"); return `${Number(month)}/${Number(day)}`; }
 function studentRepresentativeLabel(student) { const representative = representativeCardInfo(student); return representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}<br><small>${representative.ability?.name || "특수능력 없음"}</small>` : "대표 카드 없음"; }
@@ -861,7 +1031,7 @@ function studentRoleFourWeekStats(student) {
 function studentRoleHistory(student, completed) {
   const recent = [...completed].sort((first, second) => new Date(second.completedAt || 0) - new Date(first.completedAt || 0)).slice(0, 5);
   if (!recent.length) return `<div class="empty">완료된 1인1역 기록이 없습니다.</div>`;
-  return `<div class="student-detail-list">${recent.map((application) => { const role = roleById(application.roleId); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span class="pill success">완료</span></div><small>${compactDate(application.completedAt)} · 기본 ${application.awardedBasePoints ?? role?.points ?? 0}P</small></article>`; }).join("")}</div>`;
+  return `<div class="student-detail-list">${recent.map((application) => { const role = roleForApplication(application); return `<article><div><strong>${escapeHtml(role?.name || "삭제된 역할")}</strong><span class="pill success">완료</span></div><small>${compactDate(application.completedAt)} · 기본 ${application.awardedBasePoints ?? role?.points ?? 0}P</small></article>`; }).join("")}</div>`;
 }
 function studentRoleTrend(student) {
   const stats = studentRoleFourWeekStats(student); const max = Math.max(1, ...stats.weeks.map((week) => week.count));
@@ -897,7 +1067,8 @@ function cloudStudentSettings() { if (!firebaseActiveClassId) return ""; if (!fi
 function cloudAssignmentSettings() { if (!firebaseStudentsConnected) return ""; if (firebaseAssignmentsConnected) return `<div><button class="button secondary" disabled>과제 기본정보 연결됨</button><p class="muted">과제 기본정보가 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-assignments">현재 과제를 클라우드에 연결</button><p class="muted">과제 제목, 내용, 마감일, 지급 포인트 설정 등 과제 기본정보만 클라우드에 저장합니다.</p></div>`; }
 function cloudPointSettings() { if (!firebaseStudentsConnected) return ""; if (firebasePointsConnected) return `<div><button class="button secondary" disabled>포인트 및 포인트 기록 연결됨</button><p class="muted">학생 포인트와 포인트 기록이 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-points">현재 포인트를 클라우드에 연결</button><p class="muted">학생의 현재 포인트와 기존 포인트 기록을 클라우드에 저장합니다.</p></div>`; }
 function cloudAssignmentStudentStateSettings() { if (!firebaseActiveClassId) return ""; if (firebaseAssignmentStudentStatesConnected) return `<div><button class="button secondary" disabled>과제 제출 상태 연결됨</button><p class="muted">과제의 학생별 제출 상태와 포인트 지급 snapshot이 클라우드와 연결되어 있습니다.</p></div>`; if (firebaseAssignmentStudentStatesConnecting) return `<div><button class="button secondary" disabled>과제 제출 상태 연결 중</button><p class="muted">현재 상태를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected && firebaseAssignmentsConnected && firebasePointsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-assignment-states" ${ready ? "" : "disabled"}>과제 제출 상태를 클라우드에 연결</button><p class="muted">과제 제출 상태 클라우드 미연결 · ${ready ? "학생별 제출 상태와 기존 포인트 지급 snapshot만 저장합니다." : "학생 명단, 과제 기본정보, 포인트를 먼저 연결해 주세요."}</p></div>`; }
-function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
+function cloudRoleSettings() { if (!firebaseActiveClassId) return ""; if (firebaseRolesConnected) return `<div><button class="button secondary" disabled>1인1역 연결됨</button><p class="muted">1인1역 설정, 템플릿, 신청 및 완료 기록이 클라우드와 연결되어 있습니다.</p></div>`; if (firebaseRolesConnecting) return `<div><button class="button secondary" disabled>1인1역 연결 중</button><p class="muted">현재 1인1역 데이터를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected && firebasePointsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-roles" ${ready ? "" : "disabled"}>1인1역을 클라우드에 연결</button><p class="muted">1인1역 클라우드 미연결 · ${ready ? "현재 설정, 템플릿, 기존 신청 기록만 저장합니다." : "학생 명단과 포인트를 먼저 연결해 주세요."}</p></div>`; }
+function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}${cloudRoleSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
 function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions">${cloudClassSettings()}<div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
 function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}${dataManagementSettings()}`; }
 function openRestoreBackupModal(payload) { const className = payload.data.classSettings?.className || payload.className || "이름 없음"; const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "날짜 정보 없음"; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>백업 파일 복원</h2><p>현재 학급 데이터를 백업 파일의 내용으로 교체합니다.</p><dl class="backup-summary"><div><dt>학급 이름</dt><dd>${escapeHtml(className)}</dd></div><div><dt>학생 수</dt><dd>${payload.data.students.length}명</dd></div><div><dt>백업 날짜</dt><dd>${escapeHtml(exportedAt)}</dd></div></dl><div class="button-row"><button class="button danger" data-action="confirm-restore-backup">복원하기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
@@ -905,7 +1076,7 @@ function openResetDataModal() { app.insertAdjacentHTML("beforeend", `<div class=
 
 function teacherRoleList(items = todayRoleApplications()) {
   if (!items.length) return `<div class="empty">역할 신청이 아직 없습니다.</div>`;
-  return `<div class="list">${items.map((item) => { const student = studentById(item.studentId); const role = roleById(item.roleId); if (!student || !role) return ""; const shownPoints = item.status === "completed" ? (item.awardedPoints ?? role.points) : role.points; const actions = item.status === "completed" ? `<button class="button danger" data-action="undo-complete" data-id="${item.id}">완료 취소</button>` : `<button class="button success" data-action="complete-role" data-id="${item.id}">완료</button><button class="button danger" data-action="cancel-role" data-id="${item.id}">취소</button>`; return `<div class="list-row"><div class="list-main"><strong>${student.name} / ${escapeHtml(role.name)}</strong><span class="pill ${item.status === "completed" ? "success" : "waiting"}">${item.status === "completed" ? "수행 완료" : "수행 대기"}</span> <span class="points">${shownPoints}P</span></div><div class="list-actions">${actions}</div></div>`; }).join("")}</div>`;
+  return `<div class="list">${items.map((item) => { const student = studentById(item.studentId); const role = roleForApplication(item); if (!student || !role) return ""; const shownPoints = item.status === "completed" ? (item.awardedPoints ?? role.points) : role.points; const actions = item.status === "completed" ? `<button class="button danger" data-action="undo-complete" data-id="${item.id}">완료 취소</button>` : `<button class="button success" data-action="complete-role" data-id="${item.id}">완료</button><button class="button danger" data-action="cancel-role" data-id="${item.id}">취소</button>`; return `<div class="list-row"><div class="list-main"><strong>${student.name} / ${escapeHtml(role.name)}</strong><span class="pill ${item.status === "completed" ? "success" : "waiting"}">${item.status === "completed" ? "수행 완료" : "수행 대기"}</span> <span class="points">${shownPoints}P</span></div><div class="list-actions">${actions}</div></div>`; }).join("")}</div>`;
 }
 
 function roleEditorList(roles, scope, templateId = "") {
@@ -1116,48 +1287,127 @@ function renderTeacher() {
 }
 function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
 
-function applyRole(roleId) {
+function roleCloudConnectionLocked() { if (!firebaseRolesConnecting) return false; toast("1인1역 데이터를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
+function roleConfigurationCloudLocked() { if (!firebaseRoleConfigurationSaving) return false; toast("1인1역 설정을 클라우드에 저장 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
+function roleApplicationCloudLocked() { if (!firebaseRoleApplicationMutating && !firebaseRoleDailyUsageInitializing) return false; toast("역할 신청 상태를 클라우드에 반영 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
+async function handleRoleApplicationCloudError(error, userUid) {
+  console.error("Firestore atomic role application failed", error);
+  if (error?.code === "role/limit-reached") { await reloadFirebaseRoleApplicationsAndUsage(userUid); return toast("오늘 신청할 수 있는 역할 수를 모두 사용했습니다."); }
+  if (error?.code === "role/capacity-reached") { await reloadFirebaseRoleApplicationsAndUsage(userUid); return toast("다른 학생이 먼저 신청해 역할 정원이 찼습니다."); }
+  if (error?.code === "role/already-applied") { await reloadFirebaseRoleApplicationsAndUsage(userUid); return toast("이미 신청된 역할입니다."); }
+  if (error?.code === "role/not-found") return toast("현재 사용할 수 없는 역할입니다. 역할 목록을 다시 확인해 주세요.");
+  if (["role/status-conflict", "role/usage-conflict", "role/usage-missing"].includes(error?.code)) {
+    const loaded = await reloadFirebaseRoleApplicationsAndUsage(userUid);
+    return toast(loaded ? "다른 화면에서 역할 상태가 변경되어 최신 상태를 불러왔습니다." : "최신 역할 상태를 불러오지 못했습니다. 연결을 확인해 주세요.");
+  }
+  toast("역할 신청을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
+}
+async function applyRole(roleId) {
+  if (roleCloudConnectionLocked() || roleApplicationCloudLocked()) return;
   const active = todayRoleApplicationsForStudent(session.studentId); const limit = data.dailyRoleApplicationLimit;
   const roleApplicants = todayRoleApplications().filter((item) => item.roleId === roleId);
   const role = roleById(roleId);
-  if (active.length >= limit) return toast(`오늘 신청 가능한 1인1역을 모두 신청했습니다. (최대 ${limit}개)`);
-  if (roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
-  if (roleApplicants.some((item) => item.studentId === session.studentId)) return;
-  data.roleApplications.push({ id: crypto.randomUUID(), studentId: session.studentId, roleId, status: "waiting", appliedAt: new Date().toISOString() }); saveData(); render(); toast("역할 신청이 완료됐어요!");
+  if (!role) return;
+  if (!firebaseRolesConnected && active.length >= limit) return toast(`오늘 신청 가능한 1인1역을 모두 신청했습니다. (최대 ${limit}개)`);
+  if (!firebaseRolesConnected && roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
+  if (!firebaseRolesConnected && roleApplicants.some((item) => item.studentId === session.studentId)) return;
+  const appliedAt = new Date().toISOString(); const cancelled = data.roleApplications.find((item) => item.studentId === session.studentId && item.roleId === roleId && item.status === "cancelled" && roleApplicationDate(item) === todayString());
+  if (firebaseRolesConnected) {
+    const userUid = firebaseTeacherUser?.uid;
+    if (!firebaseRoleDailyUsageReady || firebaseRoleDailyUsageDate !== todayString()) {
+      if (!await ensureFirebaseRoleDailyUsage(userUid)) return;
+    }
+    const proposed = cancelled
+      ? { ...initialRoleApplicationSnapshot(cancelled), expectedStatus: "cancelled", status: "waiting", date: todayString(), appliedAt, roleSnapshot: roleSnapshot(role), cancelledAt: null, cancelledBy: null }
+      : { id: crypto.randomUUID(), expectedStatus: null, studentId: session.studentId, roleId, status: "waiting", date: todayString(), appliedAt, roleSnapshot: roleSnapshot(role), pointAward: {}, completedAt: null, cancelledAt: null, cancelledBy: null };
+    firebaseRoleApplicationMutating = true;
+    try {
+      const savedApplication = await window.ourClassFirebase.applyDailyRoleApplicationTransaction(proposed);
+      const index = data.roleApplications.findIndex((item) => item.id === savedApplication.id);
+      if (index >= 0) data.roleApplications[index] = savedApplication; else data.roleApplications.push(savedApplication);
+      saveData(); render(); toast("역할 신청이 완료됐어요!");
+    } catch (error) { await handleRoleApplicationCloudError(error, userUid); }
+    finally { firebaseRoleApplicationMutating = false; }
+    return;
+  }
+  if (cancelled) {
+    Object.assign(cancelled, { status: "waiting", date: todayString(), appliedAt, roleSnapshot: roleSnapshot(role), cancelledAt: null, cancelledBy: null });
+    if (storedRolePointAward(cancelled)) cancelled.pointAward = { ...cancelled.pointAward, awarded: false };
+  } else data.roleApplications.push({ id: crypto.randomUUID(), studentId: session.studentId, roleId, status: "waiting", date: todayString(), appliedAt, roleSnapshot: roleSnapshot(role), cancelledAt: null, cancelledBy: null });
+  saveData(); render(); toast("역할 신청이 완료됐어요!");
 }
 
 function openStudentCancelModal(applicationId) {
   const application = data.roleApplications.find((item) => item.id === applicationId && item.studentId === session.studentId && item.status === "waiting");
   if (!application) return;
-  const role = roleById(application.roleId); if (!role) return;
+  const role = roleForApplication(application); if (!role) return;
   app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>역할 신청 취소</h2><p><strong>${escapeHtml(role.name)}</strong></p><p>이 역할 신청을 취소하시겠습니까?</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-student-cancel" data-id="${application.id}">확인</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
 }
 
-function cancelOwnRole(applicationId) {
+async function cancelOwnRole(applicationId) {
+  if (roleCloudConnectionLocked() || roleApplicationCloudLocked()) return;
   const application = data.roleApplications.find((item) => item.id === applicationId);
   if (!application || application.studentId !== session.studentId || application.status !== "waiting") return;
-  data.roleApplications = data.roleApplications.filter((item) => item.id !== application.id);
+  if (firebaseRolesConnected) {
+    const userUid = firebaseTeacherUser?.uid;
+    if (!firebaseRoleDailyUsageReady || firebaseRoleDailyUsageDate !== todayString()) { if (!await ensureFirebaseRoleDailyUsage(userUid)) return; }
+    firebaseRoleApplicationMutating = true;
+    try {
+      const savedApplication = await window.ourClassFirebase.cancelDailyRoleApplicationTransaction({ id: application.id, date: roleApplicationDate(application), cancelledAt: new Date().toISOString(), cancelledBy: "student" });
+      data.roleApplications[data.roleApplications.findIndex((item) => item.id === application.id)] = savedApplication;
+      saveData(); render(); toast("역할 신청을 취소했습니다. 다시 신청할 수도 있어요.");
+    } catch (error) { await handleRoleApplicationCloudError(error, userUid); }
+    finally { firebaseRoleApplicationMutating = false; }
+    return;
+  }
+  application.status = "cancelled"; application.cancelledAt = new Date().toISOString(); application.cancelledBy = "student";
   saveData(); render(); toast("역할 신청을 취소했습니다. 다시 신청할 수도 있어요.");
 }
 
+async function cancelRoleAsTeacher(applicationId) {
+  if (roleCloudConnectionLocked() || roleApplicationCloudLocked()) return;
+  const application = data.roleApplications.find((item) => item.id === applicationId);
+  if (!application || application.status !== "waiting") return;
+  if (firebaseRolesConnected) {
+    const userUid = firebaseTeacherUser?.uid;
+    if (!firebaseRoleDailyUsageReady || firebaseRoleDailyUsageDate !== todayString()) { if (!await ensureFirebaseRoleDailyUsage(userUid)) return; }
+    firebaseRoleApplicationMutating = true;
+    try {
+      const savedApplication = await window.ourClassFirebase.cancelDailyRoleApplicationTransaction({ id: application.id, date: roleApplicationDate(application), cancelledAt: new Date().toISOString(), cancelledBy: "teacher" });
+      data.roleApplications[data.roleApplications.findIndex((item) => item.id === application.id)] = savedApplication;
+      saveData(); render(); toast("역할 신청을 취소했습니다.");
+    } catch (error) { await handleRoleApplicationCloudError(error, userUid); }
+    finally { firebaseRoleApplicationMutating = false; }
+    return;
+  }
+  application.status = "cancelled"; application.cancelledAt = new Date().toISOString(); application.cancelledBy = "teacher";
+  saveData(); render(); toast("역할 신청을 취소했습니다.");
+}
+
 function completeRole(id) {
+  if (roleCloudConnectionLocked()) return;
   const application = data.roleApplications.find((item) => item.id === id);
   if (!application || application.status !== "waiting") return;
-  const student = studentById(application.studentId); const role = roleById(application.roleId);
+  const student = studentById(application.studentId); const role = roleForApplication(application);
   if (!student || !role) return;
   const baseAmount = role.points; const cardAbilityResult = cardBonusAward(student, baseAmount, "1인1역", role.id); const { historyEntry: cardBonusHistoryEntry, ...cardAbilityAward } = cardAbilityResult; const bonusAmount = cardAbilityAward.amount || 0;
-  const historyEntries = [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${role.name} 완료`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, cardBonusHistoryEntry];
-  if (!applyStudentPointChange(student, baseAmount + bonusAmount, historyEntries)) return;
-  application.status = "completed"; application.completedAt = new Date().toISOString(); application.awardedBasePoints = baseAmount; application.awardedBonusPoints = bonusAmount; application.cardAbilityAward = cardAbilityAward; application.awardedPoints = baseAmount + bonusAmount;
-  saveData(); render(); toast(`${student.name}에게 ${baseAmount + bonusAmount}P를 지급했습니다.${bonusAmount ? ` (카드 보너스 +${bonusAmount}P)` : ""}`);
+  const amount = baseAmount + bonusAmount; const awardedAt = new Date().toISOString();
+  const historyEntries = baseAmount > 0 ? [{ id: crypto.randomUUID(), amount: baseAmount, reason: `${role.name} 완료`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: awardedAt }, cardBonusHistoryEntry] : [];
+  const expectedPointAward = storedRolePointAward(application) || {};
+  const pointAward = { awarded: true, amount, baseAmount, bonusAmount, cardAbilityAward: structuredClone(cardAbilityAward), awardedAt, revokedAt: null };
+  const dailyRoleAssignment = { ...initialRoleApplicationSnapshot(application), expectedStatus: "waiting", expectedPointAward, status: "completed", pointAward, completedAt: awardedAt, cancelledAt: null, cancelledBy: null };
+  if (!applyStudentPointChange(student, amount, historyEntries, { roleApplication: application, dailyRoleAssignment })) return;
+  application.awardedBasePoints = baseAmount; application.awardedBonusPoints = bonusAmount; application.cardAbilityAward = cardAbilityAward; application.awardedPoints = amount;
+  saveData(); render(); toast(`${student.name}에게 ${amount}P를 지급했습니다.${bonusAmount ? ` (카드 보너스 +${bonusAmount}P)` : ""}`);
 }
 
 function undoCompleteRole(id) {
+  if (roleCloudConnectionLocked()) return;
   const application = data.roleApplications.find((item) => item.id === id);
   if (!application || application.status !== "completed") return;
-  const student = studentById(application.studentId); const role = roleById(application.roleId);
+  const student = studentById(application.studentId); const role = roleForApplication(application);
   if (!student || !role) return;
-  const baseToRecover = application.awardedBasePoints ?? application.awardedPoints ?? role.points; const bonusToRecover = application.awardedBonusPoints ?? 0; const pointsToRecover = baseToRecover + bonusToRecover;
+  const pointAward = rolePointAward(application, role); const baseToRecover = pointAward.awarded ? Number(pointAward.baseAmount) || 0 : 0; const pointsToRecover = pointAward.awarded ? Number(pointAward.amount) || 0 : 0;
 
   if (!confirm("이 역할의 완료 처리를 취소하시겠습니까?\n지급된 포인트도 함께 회수됩니다.")) return;
   if (application.status !== "completed") return;
@@ -1166,9 +1416,11 @@ function undoCompleteRole(id) {
     return;
   }
 
-  const historyEntries = [{ id: crypto.randomUUID(), amount: -baseToRecover, reason: `${role.name} 완료 취소`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() }, reverseCardBonus(student, application.cardAbilityAward, `${role.name} 완료 카드 보너스 취소`)];
-  if (!applyStudentPointChange(student, -pointsToRecover, historyEntries)) return;
-  application.status = "waiting"; application.completedAt = null;
+  const revokedAt = new Date().toISOString(); const historyEntries = [baseToRecover > 0 ? { id: crypto.randomUUID(), amount: -baseToRecover, reason: `${role.name} 완료 취소`, source: "1인1역", relatedId: role.id, date: new Date().toLocaleDateString("ko-KR"), createdAt: revokedAt } : null, reverseCardBonus(student, pointAward.cardAbilityAward, `${role.name} 완료 카드 보너스 취소`)];
+  const expectedPointAward = storedRolePointAward(application) || pointAward;
+  const revokedPointAward = { ...pointAward, awarded: false, revokedAt };
+  const dailyRoleAssignment = { ...initialRoleApplicationSnapshot(application), expectedStatus: "completed", expectedPointAward, status: "waiting", pointAward: revokedPointAward, completedAt: null, cancelledAt: null, cancelledBy: null };
+  if (!applyStudentPointChange(student, -pointsToRecover, historyEntries, { roleApplication: application, dailyRoleAssignment })) return;
   application.awardedPoints = 0; application.awardedBasePoints = 0; application.awardedBonusPoints = 0;
   application.cardAbilityAward = null;
   saveData(); render(); toast(`${student.name}의 역할 완료를 취소하고 ${pointsToRecover}P를 회수했습니다.`);
@@ -1423,16 +1675,20 @@ function openRoleModal(scope, templateId = "", roleId = "") {
 }
 
 function loadTemplateForToday(templateId) {
+  if (roleCloudConnectionLocked() || roleConfigurationCloudLocked()) return;
   const template = data.roleTemplates.find((item) => item.id === templateId); if (!template) return;
-  const hasApplications = data.roleApplications.some((item) => item.status !== "cancelled");
-  if (hasApplications && !confirm("현재 신청 기록이 있습니다.\n새 역할을 불러오면 오늘의 신청 상태가 초기화됩니다.\n계속하시겠습니까?")) return;
+  if (todayRoleApplications().some((item) => item.status === "waiting")) return toast("오늘 수행 대기 중인 신청을 먼저 완료하거나 취소해 주세요.");
+  const previousSettings = roleSettingsSnapshot();
+  preserveCurrentRoleApplicationSnapshots();
   data.currentRoles = template.roles.map((role) => ({ ...role, id: crypto.randomUUID() }));
-  data.roleApplications = [];
-  saveData(); render(); toast(`‘${template.name}’을 오늘의 역할로 불러왔습니다.`);
+  persistRoleSettings(previousSettings, `‘${template.name}’을 오늘의 역할로 불러왔습니다.`);
 }
 
 app.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
+  const roleChangeActions = new Set(["apply-role", "confirm-student-cancel", "complete-role", "undo-complete", "cancel-role", "add-role", "edit-role", "move-role", "delete-role", "load-template", "rename-template", "duplicate-template", "delete-template"]);
+  if (firebaseRolesConnecting && roleChangeActions.has(action)) return roleCloudConnectionLocked();
+  if (firebaseRoleConfigurationSaving && roleChangeActions.has(action)) return roleConfigurationCloudLocked();
   if (action === "show-students") return renderWelcome(true);
   if (action === "enter-student") { studentAssignmentFilter = "todo"; showAllStudentCompletedAssignments = false; showAllStudentPoints = false; session = { mode: "student", studentId: target.dataset.id, view: "home" }; return render(); }
   if (action === "enter-teacher") { const actualUser = window.ourClassFirebase?.getCurrentUser?.(); firebaseTeacherSession = Boolean(firebaseTeacherUser?.uid && actualUser?.uid === firebaseTeacherUser.uid); session = { mode: "teacher", studentId: null, view: "dashboard" }; return render(); }
@@ -1497,7 +1753,7 @@ app.addEventListener("click", (event) => {
   if (action === "confirm-student-cancel") return cancelOwnRole(target.dataset.id);
   if (action === "complete-role") return completeRole(target.dataset.id);
   if (action === "undo-complete") return undoCompleteRole(target.dataset.id);
-  if (action === "cancel-role") { const item = data.roleApplications.find((entry) => entry.id === target.dataset.id); if (item && item.status === "waiting") { item.status = "cancelled"; saveData(); render(); toast("역할 신청을 취소했습니다."); } return; }
+  if (action === "cancel-role") return cancelRoleAsTeacher(target.dataset.id);
   if (action === "draw-option") return drawCard(target.dataset.id);
   if (action === "open-assignment-request") return openAssignmentRequestModal(target.dataset.id);
   if (action === "confirm-assignment-request") return requestAssignmentReview(target.dataset.id);
@@ -1666,17 +1922,23 @@ app.addEventListener("click", (event) => {
     const roles = rolesForScope(target.dataset.scope, target.dataset.template); if (!roles) return;
     const index = roles.findIndex((role) => role.id === target.dataset.id); const nextIndex = index + (target.dataset.direction === "up" ? -1 : 1);
     if (index < 0 || nextIndex < 0 || nextIndex >= roles.length) return;
-    [roles[index], roles[nextIndex]] = [roles[nextIndex], roles[index]]; saveData(); render(); return;
+    const previous = target.dataset.scope === "today" ? roleSettingsSnapshot() : structuredClone(data.roleTemplates);
+    [roles[index], roles[nextIndex]] = [roles[nextIndex], roles[index]];
+    if (target.dataset.scope === "today") persistRoleSettings(previous, "역할 순서를 변경했습니다.");
+    else { const template = structuredClone(data.roleTemplates.find((item) => item.id === target.dataset.template)); persistRoleTemplateChange(previous, () => window.ourClassFirebase.saveRoleTemplate(template), "템플릿 역할 순서를 변경했습니다."); }
+    return;
   }
   if (action === "delete-role") {
     const roles = rolesForScope(target.dataset.scope, target.dataset.template); if (!roles) return;
     const role = roles.find((item) => item.id === target.dataset.id); if (!role) return;
-    const related = target.dataset.scope === "today" && data.roleApplications.some((item) => item.roleId === role.id && item.status !== "cancelled");
-    const message = related ? `‘${role.name}’에 신청 기록이 있습니다.\n역할을 삭제하면 해당 신청 상태도 지워집니다.\n계속하시겠습니까?` : `‘${role.name}’ 역할을 삭제할까요?`;
-    if (!confirm(message)) return;
+    if (target.dataset.scope === "today" && todayRoleApplications().some((item) => item.roleId === role.id && item.status === "waiting")) return toast("이 역할의 오늘 수행 대기 신청을 먼저 완료하거나 취소해 주세요.");
+    if (!confirm(`‘${role.name}’ 역할을 삭제할까요?\n기존 신청과 완료 기록은 유지됩니다.`)) return;
+    const previous = target.dataset.scope === "today" ? roleSettingsSnapshot() : structuredClone(data.roleTemplates);
+    if (target.dataset.scope === "today") preserveCurrentRoleApplicationSnapshots();
     roles.splice(roles.indexOf(role), 1);
-    if (target.dataset.scope === "today") data.roleApplications = data.roleApplications.filter((item) => item.roleId !== role.id);
-    saveData(); render(); toast("역할을 삭제했습니다."); return;
+    if (target.dataset.scope === "today") persistRoleSettings(previous, "역할을 삭제했습니다.");
+    else { const template = structuredClone(data.roleTemplates.find((item) => item.id === target.dataset.template)); persistRoleTemplateChange(previous, () => window.ourClassFirebase.saveRoleTemplate(template), "역할을 삭제했습니다."); }
+    return;
   }
   if (action === "load-template") return loadTemplateForToday(target.dataset.id);
   if (action === "edit-template") { editingTemplateId = target.dataset.id; render(); document.querySelector(".template-editor")?.scrollIntoView({ behavior: "smooth" }); return; }
@@ -1685,16 +1947,20 @@ app.addEventListener("click", (event) => {
   if (action === "rename-template") {
     const template = data.roleTemplates.find((item) => item.id === target.dataset.id); if (!template) return;
     const name = prompt("새 템플릿 이름을 입력해 주세요.", template.name)?.trim(); if (!name) return;
-    template.name = name.slice(0, 40); saveData(); render(); toast("템플릿 이름을 변경했습니다."); return;
+    const previousTemplates = structuredClone(data.roleTemplates);
+    template.name = name.slice(0, 40); const savedTemplate = structuredClone(template);
+    persistRoleTemplateChange(previousTemplates, () => window.ourClassFirebase.saveRoleTemplate(savedTemplate), "템플릿 이름을 변경했습니다."); return;
   }
   if (action === "duplicate-template") {
     const template = data.roleTemplates.find((item) => item.id === target.dataset.id); if (!template) return;
-    data.roleTemplates.push({ id: crypto.randomUUID(), name: `${template.name} 복사본`, roles: structuredClone(template.roles) }); saveData(); render(); toast("템플릿을 복제했습니다."); return;
+    const previousTemplates = structuredClone(data.roleTemplates); const copiedTemplate = { id: crypto.randomUUID(), name: `${template.name} 복사본`, roles: structuredClone(template.roles) };
+    data.roleTemplates.push(copiedTemplate); persistRoleTemplateChange(previousTemplates, () => window.ourClassFirebase.saveRoleTemplate(copiedTemplate), "템플릿을 복제했습니다."); return;
   }
   if (action === "delete-template") {
     const template = data.roleTemplates.find((item) => item.id === target.dataset.id); if (!template || !confirm(`‘${template.name}’ 템플릿을 삭제할까요?`)) return;
-    data.roleTemplates = data.roleTemplates.filter((item) => item.id !== template.id); if (editingTemplateId === template.id) editingTemplateId = null;
-    saveData(); render(); toast("템플릿을 삭제했습니다."); return;
+    const previousTemplates = structuredClone(data.roleTemplates);
+    data.roleTemplates = data.roleTemplates.filter((item) => item.id !== template.id);
+    persistRoleTemplateChange(previousTemplates, () => window.ourClassFirebase.deleteRoleTemplate(template.id), "템플릿을 삭제했습니다.").then((saved) => { if (saved && editingTemplateId === template.id) editingTemplateId = null; }); return;
   }
   if (action === "download-backup") { downloadBackup(); return; }
   if (action === "connect-cloud-class") { connectCurrentClassToFirebase(); return; }
@@ -1702,6 +1968,7 @@ app.addEventListener("click", (event) => {
   if (action === "connect-cloud-assignments") { connectAssignmentsToFirebase(); return; }
   if (action === "connect-cloud-points") { connectPointsToFirebase(); return; }
   if (action === "connect-cloud-assignment-states") { connectAssignmentStudentStatesToFirebase(); return; }
+  if (action === "connect-cloud-roles") { connectRolesToFirebase(); return; }
   if (action === "choose-backup-file") { document.querySelector("#backup-file-input")?.click(); return; }
   if (action === "confirm-restore-backup") { if (!pendingBackupPayload) return; target.closest(".modal")?.remove(); restoreBackup(pendingBackupPayload); return; }
   if (action === "open-reset-data") { openResetDataModal(); return; }
@@ -1716,8 +1983,8 @@ app.addEventListener("click", (event) => {
 window.addEventListener("our-class-firebase-auth", (event) => {
   firebaseAuthPending = false; clearTimeout(firebaseAuthFallbackTimer);
   firebaseTeacherUser = event.detail || null;
-  if (!firebaseTeacherUser) { firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); if (firebaseTeacherSession) { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; } if (session.mode === "welcome") render(); return; }
-  firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState();
+  if (!firebaseTeacherUser) { firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (firebaseTeacherSession) { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; } if (session.mode === "welcome") render(); return; }
+  firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState();
   if (session.mode === "welcome") { firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); }
   loadFirebaseClassSettings(firebaseTeacherUser.uid);
 });
@@ -1778,6 +2045,8 @@ document.addEventListener("keydown", (event) => {
 
 app.addEventListener("submit", (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
+  if (firebaseRolesConnecting && ["role-limit-form", "template-save-form", "role-form"].includes(form.id)) return roleCloudConnectionLocked();
+  if (firebaseRoleConfigurationSaving && ["role-limit-form", "template-save-form", "role-form"].includes(form.id)) return roleConfigurationCloudLocked();
   if (form.id === "class-info-form") {
     const appName = String(formData.get("appName") || "").trim(); const className = String(formData.get("className") || "").trim(); const teacherName = String(formData.get("teacherName") || "").trim(); if (!appName || !className || !teacherName) return;
     data.classSettings = { ...data.classSettings, appName: appName.slice(0, 50), className: className.slice(0, 50), teacherName: teacherName.slice(0, 30) }; saveData(); render(); toast("학급 정보를 저장했습니다."); saveFirebaseClassSettings(); return;
@@ -1898,20 +2167,25 @@ app.addEventListener("submit", (event) => {
   }
   if (form.id === "role-limit-form") {
     const limit = Number(formData.get("limit")); if (!Number.isInteger(limit) || limit < 1 || limit > 5) { toast("하루 최대 신청 개수는 1~5 사이의 정수로 입력해 주세요."); return; }
-    data.dailyRoleApplicationLimit = limit; saveData(); render(); toast(`하루 최대 신청 개수를 ${limit}개로 저장했습니다.`);
+    const previousSettings = roleSettingsSnapshot();
+    data.dailyRoleApplicationLimit = limit; persistRoleSettings(previousSettings, `하루 최대 신청 개수를 ${limit}개로 저장했습니다.`);
   }
   if (form.id === "template-save-form") {
     const name = formData.get("name").trim(); if (!name) return;
-    data.roleTemplates.push({ id: crypto.randomUUID(), name: name.slice(0, 40), roles: structuredClone(data.currentRoles) }); saveData(); render(); toast("새 템플릿을 저장했습니다.");
+    const previousTemplates = structuredClone(data.roleTemplates); const template = { id: crypto.randomUUID(), name: name.slice(0, 40), roles: structuredClone(data.currentRoles) };
+    data.roleTemplates.push(template); persistRoleTemplateChange(previousTemplates, () => window.ourClassFirebase.saveRoleTemplate(template), "새 템플릿을 저장했습니다.");
   }
   if (form.id === "role-form") {
     const roles = rolesForScope(form.dataset.scope, form.dataset.template); if (!roles) return;
     const name = formData.get("name").trim(); const capacity = Number(formData.get("capacity")); const points = Number(formData.get("points")); const description = formData.get("description").trim();
     if (!name || !Number.isInteger(capacity) || capacity < 1 || !Number.isInteger(points) || points < 0) return;
+    const previous = form.dataset.scope === "today" ? roleSettingsSnapshot() : structuredClone(data.roleTemplates);
     const existing = roles.find((role) => role.id === form.dataset.id);
-    if (existing) Object.assign(existing, { name, capacity, points, description });
+    if (existing) { if (form.dataset.scope === "today") preserveCurrentRoleApplicationSnapshots(); Object.assign(existing, { name, capacity, points, description }); }
     else roles.push({ id: crypto.randomUUID(), name, capacity, points, description });
-    saveData(); render(); toast(existing ? "역할을 수정했습니다." : "새 역할을 추가했습니다.");
+    const successMessage = existing ? "역할을 수정했습니다." : "새 역할을 추가했습니다.";
+    if (form.dataset.scope === "today") persistRoleSettings(previous, successMessage);
+    else { const template = structuredClone(data.roleTemplates.find((item) => item.id === form.dataset.template)); persistRoleTemplateChange(previous, () => window.ourClassFirebase.saveRoleTemplate(template), successMessage); }
   }
   if (form.id === "assignment-form") {
     const title = formData.get("title").trim(); const customSubject = formData.get("subjectCustom").trim();

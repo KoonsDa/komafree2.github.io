@@ -92,6 +92,83 @@ service cloud.firestore {
         && request.resource.data.entry is map;
     }
 
+    match /classes/{classId}/roleSettings/{settingsId} {
+      allow read: if isClassOwner(classId) && settingsId == 'current';
+      allow create, update: if isClassOwner(classId)
+        && settingsId == 'current'
+        && request.resource.data.keys().hasOnly([
+          'dailyRoleApplicationLimit', 'currentRoles', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'dailyRoleApplicationLimit', 'currentRoles', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.dailyRoleApplicationLimit is int
+        && request.resource.data.dailyRoleApplicationLimit >= 1
+        && request.resource.data.dailyRoleApplicationLimit <= 5
+        && request.resource.data.currentRoles is list;
+      allow delete: if false;
+    }
+
+    match /classes/{classId}/roleTemplates/{templateId} {
+      allow read, delete: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'id', 'name', 'roles', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'id', 'name', 'roles', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.id == templateId
+        && request.resource.data.id is string
+        && request.resource.data.name is string
+        && request.resource.data.roles is list;
+    }
+
+    match /classes/{classId}/dailyRoleAssignments/{applicationId} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'id', 'date', 'studentId', 'roleId', 'status', 'roleSnapshot',
+          'pointAward', 'appliedAt', 'completedAt', 'cancelledAt',
+          'cancelledBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'id', 'date', 'studentId', 'roleId', 'status', 'roleSnapshot',
+          'pointAward', 'appliedAt', 'completedAt', 'cancelledAt',
+          'cancelledBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.id == applicationId
+        && request.resource.data.id is string
+        && request.resource.data.date is string
+        && request.resource.data.studentId is string
+        && request.resource.data.roleId is string
+        && request.resource.data.status in ['waiting', 'completed', 'cancelled']
+        && request.resource.data.roleSnapshot is map
+        && request.resource.data.pointAward is map
+        && request.resource.data.appliedAt is string
+        && (request.resource.data.completedAt == null || request.resource.data.completedAt is string)
+        && (request.resource.data.cancelledAt == null || request.resource.data.cancelledAt is string)
+        && (request.resource.data.cancelledBy == null || request.resource.data.cancelledBy in ['student', 'teacher']);
+      allow delete: if false;
+    }
+
+    match /classes/{classId}/roleDailyUsage/{date} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'date', 'roleCounts', 'studentCounts', 'activeClaims', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'date', 'roleCounts', 'studentCounts', 'activeClaims', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.date is string
+        && request.resource.data.date == date
+        && request.resource.data.roleCounts is map
+        && request.resource.data.studentCounts is map
+        && request.resource.data.activeClaims is map;
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
