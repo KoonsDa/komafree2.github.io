@@ -1,5 +1,5 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import { getFirestore, doc, collection, getDoc, getDocs, setDoc, deleteDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
@@ -144,9 +144,15 @@ try {
   const auth = getAuth(firebaseApp);
   const db = getFirestore(firebaseApp);
   const functions = getFunctions(firebaseApp, "asia-northeast3");
+  const studentFirebaseApp = getApps().find((app) => app.name === "student-auth") || initializeApp(firebaseConfig, "student-auth");
+  const studentAuth = getAuth(studentFirebaseApp);
+  const studentFunctions = getFunctions(studentFirebaseApp, "asia-northeast3");
   const createStudentAccountCallable = httpsCallable(functions, "createStudentAccount");
   const getStudentAccountStatusesCallable = httpsCallable(functions, "getStudentAccountStatuses");
   const resetStudentPasswordCallable = httpsCallable(functions, "resetStudentPassword");
+  const resolveStudentLoginCallable = httpsCallable(studentFunctions, "resolveStudentLogin");
+  const getStudentSessionCallable = httpsCallable(studentFunctions, "getStudentSession");
+  const getStudentHomeDataCallable = httpsCallable(studentFunctions, "getStudentHomeData");
   const provider = new GoogleAuthProvider();
   let activeClassId = "";
   window.ourClassFirebase = {
@@ -154,7 +160,50 @@ try {
     signInTeacher: async () => publicUser((await signInWithPopup(auth, provider)).user),
     signOutTeacher: () => signOut(auth),
     getCurrentUser: () => publicUser(auth.currentUser),
+    getStudentCurrentUser: () => publicUser(studentAuth.currentUser),
     getActiveClassId: () => activeClassId,
+    resolveStudentLogin: async ({classId, loginId}) => {
+      const result = await resolveStudentLoginCallable({classId: String(classId || ""), loginId: String(loginId || "")});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      return {ok: value.ok === true, internalEmail: String(value.internalEmail || "")};
+    },
+    getStudentSession: async () => {
+      const result = await getStudentSessionCallable({});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      const student = value.student && typeof value.student === "object" ? value.student : {};
+      return {ok: value.ok === true, student: {classId: String(student.classId || ""), studentId: String(student.studentId || ""), name: String(student.name || ""), number: Number(student.number) || 0, loginId: String(student.loginId || "")}, className: String(value.className || "")};
+    },
+    getStudentHomeData: async () => {
+      const result = await getStudentHomeDataCallable({});
+      const value = result?.data && typeof result.data === "object" ? result.data : {};
+      const profile = value.profile && typeof value.profile === "object" ? value.profile : {};
+      const classInfo = value.classInfo && typeof value.classInfo === "object" ? value.classInfo : {};
+      const features = classInfo.features && typeof classInfo.features === "object" ? classInfo.features : {};
+      const roleSettings = value.roleSettings && typeof value.roleSettings === "object" ? value.roleSettings : {};
+      return {
+        ok: value.ok === true,
+        profile: {studentId: String(profile.studentId || ""), name: String(profile.name || ""), number: Number(profile.number) || 0, loginId: String(profile.loginId || "")},
+        classInfo: {className: String(classInfo.className || ""), appName: String(classInfo.appName || ""), features: {assignments: features.assignments !== false, roles: features.roles !== false, points: features.points !== false}},
+        points: Number(value.points) || 0,
+        assignments: (Array.isArray(value.assignments) ? value.assignments : []).map((assignment) => ({id: String(assignment?.id || ""), title: String(assignment?.title || ""), subject: String(assignment?.subject || ""), description: String(assignment?.description || ""), dueDate: String(assignment?.dueDate || ""), points: Number(assignment?.points) || 0, important: assignment?.important === true, assignmentState: assignment?.assignmentState === "completed" ? "completed" : "active", status: ["missing", "review", "submitted"].includes(assignment?.status) ? assignment.status : "missing"})),
+        roleSettings: {dailyLimit: Number(roleSettings.dailyLimit) || 1, roles: (Array.isArray(roleSettings.roles) ? roleSettings.roles : []).map((role) => ({id: String(role?.id || ""), name: String(role?.name || ""), points: Number(role?.points) || 0, capacity: Number(role?.capacity) || 1, description: String(role?.description || ""), currentCount: Number(role?.currentCount) || 0}))},
+        myRoleApplications: (Array.isArray(value.myRoleApplications) ? value.myRoleApplications : []).map((application) => ({id: String(application?.id || ""), roleId: String(application?.roleId || ""), status: ["waiting", "completed", "cancelled"].includes(application?.status) ? application.status : "waiting", date: String(application?.date || "")})),
+      };
+    },
+    studentSignIn: async ({classId, loginId, password}) => {
+      const resolved = await window.ourClassFirebase.resolveStudentLogin({classId, loginId});
+      if (!resolved.ok || !resolved.internalEmail) throw new Error("Student login could not be resolved.");
+      await signInWithEmailAndPassword(studentAuth, resolved.internalEmail, password);
+      try {
+        const verified = await window.ourClassFirebase.getStudentSession();
+        if (!verified.ok) throw new Error("Student session could not be verified.");
+        return verified;
+      } catch (error) {
+        await signOut(studentAuth);
+        throw error;
+      }
+    },
+    signOutStudent: () => signOut(studentAuth),
     createStudentAccount: async ({classId, studentId, password}) => {
       const result = await createStudentAccountCallable({
         classId: String(classId || ""),
@@ -722,6 +771,17 @@ try {
   };
   window.dispatchEvent(new CustomEvent("our-class-firebase-ready"));
   onAuthStateChanged(auth, (user) => { if (!user) activeClassId = ""; window.dispatchEvent(new CustomEvent("our-class-firebase-auth", { detail: publicUser(user) })); });
+  onAuthStateChanged(studentAuth, async (user) => {
+    if (!user) { window.dispatchEvent(new CustomEvent("our-class-firebase-student-auth", {detail: {user: null, session: null, ready: true}})); return; }
+    try {
+      const verifiedSession = await window.ourClassFirebase.getStudentSession();
+      if (!verifiedSession.ok) throw new Error("Student session could not be verified.");
+      window.dispatchEvent(new CustomEvent("our-class-firebase-student-auth", {detail: {user: publicUser(user), session: verifiedSession, ready: true}}));
+    } catch (error) {
+      console.error("Firebase student session verification failed", {code: error?.code, message: error?.message});
+      await signOut(studentAuth);
+    }
+  });
 }
 catch (error) {
   console.error("Firebase initialization failed", error);

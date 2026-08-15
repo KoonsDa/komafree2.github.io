@@ -31,6 +31,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .role-choice.google { grid-column: 1 / -1; background: #fff; color: #344054; border: 2px solid #d0d5dd; box-shadow: 0 6px 0 rgba(35, 41, 100, .12); }
 .student-picker { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 24px; }
 .student-pick { padding: 14px 8px; border: 2px solid #c9cbff; border-radius: 14px; color: #4047b5; background: #f2f2ff; font-weight: 800; }
+.student-login-form { display: grid; gap: 14px; margin-top: 24px; padding: 22px; text-align: left; background: #f7f8ff; border: 2px solid #dfe1ff; border-radius: 20px; }
+.student-login-form h2, .student-login-form p { margin: 0; text-align: center; }
+.student-login-form label { display: grid; gap: 7px; color: #4c5670; font-weight: 800; }
+.student-login-form input { width: 100%; padding: 12px 14px; border: 1px solid #cbd0e1; border-radius: 12px; background: #fff; }
+.student-login-context-error { padding: 14px; color: #9b403c !important; background: #fff0ee; border-radius: 12px; font-weight: 800; }
+.student-auth-landing h1 { font-size: clamp(2rem, 7vw, 3.8rem); }
+.student-auth-landing h2 { margin: 16px 0 0; color: #4a52c8; }
+.student-auth-kicker { margin-bottom: 10px !important; color: #777be9 !important; font-weight: 900; }
+.student-auth-notice { margin: 20px 0; padding: 16px; color: #176b58; background: #e2f8f1; border-radius: 14px; font-weight: 900; }
+.cloud-student-error-actions { justify-content: center; }
+.cloud-student-home { width: min(1180px, 100%); margin: auto; padding: 28px clamp(16px, 4vw, 40px) 60px; }
+.cloud-student-home .student-home-hero h1 { position: relative; z-index: 1; margin: 0 0 6px; font-size: clamp(1.8rem, 5vw, 2.8rem); }
+.cloud-student-points { display: grid; place-items: center; min-height: 140px; margin-top: 22px; text-align: center; }
+.cloud-student-points span { color: #6b748b; font-weight: 800; }
+.cloud-student-points strong { color: #444bc2; font-size: clamp(2.6rem, 7vw, 4.5rem); }
+.cloud-student-section { margin-top: 30px; }
+.cloud-my-roles { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.cloud-student-section .student-assignment-card > .button, .cloud-student-section .quest-card > .button { width: 100%; margin-top: 12px; }
 
 .app-shell { min-height: 100vh; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px clamp(16px, 4vw, 40px); color: #fff; background: #4c53ca; box-shadow: 0 4px 16px rgba(40, 45, 120, .18); }

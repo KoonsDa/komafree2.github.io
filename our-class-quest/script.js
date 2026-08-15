@@ -384,6 +384,13 @@ let pendingCardImageData = "";
 let pendingBackupPayload = null;
 let firebaseTeacherUser = null;
 let firebaseTeacherSession = false;
+let firebaseStudentAuthUser = null;
+let firebaseVerifiedStudentSession = null;
+let firebaseStudentAuthReady = false;
+let firebaseStudentSigningIn = false;
+let firebaseStudentHomeData = null;
+let firebaseStudentHomeLoading = false;
+let firebaseStudentHomeError = false;
 let firebaseAuthPending = true;
 let firebaseAuthFallbackTimer;
 let firebaseClassChecked = false;
@@ -561,6 +568,26 @@ function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRole
 function resetFirebaseObservationState() { firebaseObservationsConnected = false; firebaseObservationsConnecting = false; firebaseObservationMutating = false; firebaseObservationSettingsSaving = false; }
 function resetFirebaseGroupState() { firebaseGroupsConnected = false; firebaseGroupsConnecting = false; firebaseGroupsLoadReady = false; firebaseGroupAssignmentsSaving = false; firebaseGroupScoreMutating = false; firebaseGroupConfigurationSaving = false; firebaseClassMissionSaving = false; }
 async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
+function resetFirebaseStudentHomeState() { firebaseStudentHomeData = null; firebaseStudentHomeLoading = false; firebaseStudentHomeError = false; }
+async function loadFirebaseStudentHomeData() {
+  const userUid = firebaseStudentAuthUser?.uid; const verifiedStudentId = firebaseVerifiedStudentSession?.student?.studentId;
+  if (!userUid || !verifiedStudentId || !window.ourClassFirebase?.getStudentHomeData) return false;
+  if (firebaseStudentHomeLoading) { session = {mode: "firebase-student", studentId: null, view: "home"}; render(); return false; }
+  firebaseStudentHomeLoading = true; firebaseStudentHomeError = false; firebaseStudentHomeData = null;
+  session = {mode: "firebase-student", studentId: null, view: "home"}; render();
+  try {
+    const homeData = await window.ourClassFirebase.getStudentHomeData();
+    if (firebaseStudentAuthUser?.uid !== userUid || firebaseVerifiedStudentSession?.student?.studentId !== verifiedStudentId) return false;
+    if (!homeData?.ok || homeData.profile?.studentId !== verifiedStudentId) throw new Error("Student home data could not be verified.");
+    firebaseStudentHomeData = homeData; firebaseStudentHomeError = false; return true;
+  } catch (error) {
+    if (firebaseStudentAuthUser?.uid !== userUid) return false;
+    console.error("Firebase student home load failed", {code: error?.code, message: error?.message});
+    firebaseStudentHomeData = null; firebaseStudentHomeError = true; return false;
+  } finally {
+    if (firebaseStudentAuthUser?.uid === userUid) { firebaseStudentHomeLoading = false; render(); }
+  }
+}
 function appendCloudStudent(student) { const added = { id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] }; data.students.push(added); data.assignments.forEach((assignment) => setAssignmentStatusForStudent(assignment, added.id, "missing")); return added; }
 async function loadFirebaseStudents(userUid, commit = true) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseLoadedCloudStudents = students.map((student) => ({ ...student })); firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); } if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseLoadedCloudStudents = []; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (commit && session.view === "class-settings") render(); return false; } }
 async function loadFirebaseStudentAccountStatuses(userUid, classId) {
@@ -952,9 +979,15 @@ async function saveFirebaseStudent(student, isNew = false) { if (!firebaseStuden
 async function saveFirebaseStudentsBatch(students) { if (!firebaseStudentsConnected || !students.length) return; try { await window.ourClassFirebase.saveStudentsBatch(students.map((student) => ({ student, orderIndex: data.students.findIndex((item) => item.id === student.id) }))); if (firebasePointsConnected) await window.ourClassFirebase.createPointStates(students); } catch (error) { console.error("Firestore students batch save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 saveData();
 
-function renderWelcome(showStudents = false) {
+function studentClassContext() {
+  const urlClassId = new URLSearchParams(location.search).get("class")?.trim() || "";
+  return urlClassId || firebaseActiveClassId || "";
+}
+function renderWelcome(showStudentLogin = false) {
   document.title = data.classSettings.appName;
-  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생으로 체험하기</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button><button class="role-choice google" data-action="firebase-teacher-login">🔵 Google로 선생님 로그인</button></div>${showStudents ? `<div class="student-picker" aria-label="체험할 학생 선택">${activeStudents().map((student) => `<button class="student-pick" data-action="enter-student" data-id="${student.id}">${student.name}</button>`).join("")}</div>` : ""}</section></main>`;
+  const classId = studentClassContext();
+  const studentLogin = showStudentLogin ? `<form id="firebase-student-login-form" class="student-login-form"><h2>학생 로그인</h2>${classId ? `<p class="muted">선생님이 안내한 로그인 ID와 비밀번호를 입력하세요.</p><label>로그인 ID<input name="loginId" autocomplete="username" required></label><label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label><button class="button" type="submit" ${!firebaseStudentAuthReady || firebaseStudentSigningIn ? "disabled" : ""}>${firebaseStudentSigningIn ? "로그인 중..." : "로그인"}</button>` : `<p class="student-login-context-error">학생 로그인 링크를 확인해 주세요.</p>`}</form>` : "";
+  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생 로그인</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button><button class="role-choice google" data-action="firebase-teacher-login">🔵 Google로 선생님 로그인</button></div>${studentLogin}</section></main>`;
 }
 function renderAuthLoading() { document.title = data.classSettings.appName; app.innerHTML = `<main class="welcome"><section class="welcome-card auth-loading"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>로그인 상태 확인 중...</p></section></main>`; }
 
@@ -1652,12 +1685,28 @@ function renderStudent() {
   if (!studentNavItems().some(([view]) => view === session.view)) session.view = "home";
   app.innerHTML = shell((views[session.view] || studentHome)());
 }
+function renderFirebaseStudentLanding() {
+  if (firebaseStudentHomeLoading) { document.title = "우리반 퀘스트"; app.innerHTML = `<main class="welcome"><section class="welcome-card auth-loading"><div class="brand-mark">⚔</div><h1>우리반 퀘스트</h1><p>학생 정보를 불러오는 중...</p></section></main>`; return; }
+  if (firebaseStudentHomeError || !firebaseStudentHomeData) { document.title = "우리반 퀘스트"; app.innerHTML = `<main class="welcome"><section class="welcome-card student-auth-landing"><div class="brand-mark">⚔</div><h1>우리반 퀘스트</h1><p>학생 정보를 불러오지 못했습니다. 다시 시도해 주세요.</p><div class="button-row cloud-student-error-actions"><button class="button" data-action="retry-student-home">다시 시도</button><button class="button secondary" data-action="firebase-student-logout">로그아웃</button></div></section></main>`; return; }
+  const home = firebaseStudentHomeData; const profile = home.profile; const classInfo = home.classInfo; const features = classInfo.features || {};
+  const statusLabels = {missing: "미제출", review: "확인 대기", submitted: "제출 완료"};
+  const assignmentOrder = {missing: 0, review: 1, submitted: 2};
+  const assignments = [...home.assignments].sort((first, second) => (assignmentOrder[first.status] - assignmentOrder[second.status]) || String(first.dueDate || "9999-12-31").localeCompare(String(second.dueDate || "9999-12-31")));
+  const assignmentSection = features.assignments === false ? "" : `<section class="cloud-student-section"><div class="section-heading"><div><h2>진행 중 과제</h2><p class="muted">나의 과제 상태만 표시됩니다.</p></div></div>${assignments.length ? `<div class="grid student-home-assignment-grid">${assignments.map((assignment) => `<article class="card student-assignment-card ${assignment.important ? "important" : ""}"><div class="assignment-labels"><span class="subject-badge">${escapeHtml(assignment.subject)}</span>${assignment.important ? `<span class="important-mark">★ 중요</span>` : ""}${assignment.points > 0 ? `<span class="pill assignment-points-badge">완료 시 +${assignment.points}P</span>` : ""}</div><h3>${escapeHtml(assignment.title)}</h3>${assignment.description ? `<p class="muted">${escapeHtml(assignment.description)}</p>` : ""}<div class="assignment-meta"><span>📅 ${formatDueDate(assignment.dueDate)}</span></div><span class="pill ${assignmentStatusClass(assignment.status)}">${statusLabels[assignment.status]}</span>${assignment.status === "missing" ? `<button class="button secondary" type="button" disabled>확인 요청 기능 연결 중</button>` : ""}</article>`).join("")}</div>` : `<div class="empty">진행 중인 과제가 없습니다.</div>`}</section>`;
+  const activeApplications = home.myRoleApplications.filter((application) => application.status !== "cancelled");
+  const roleStatusLabels = {waiting: "신청 대기", completed: "완료", cancelled: "취소됨"};
+  const roleNameById = new Map(home.roleSettings.roles.map((role) => [role.id, role.name]));
+  const myRoles = activeApplications.length ? `<div class="cloud-my-roles"><strong>나의 오늘 신청 ${activeApplications.length} / ${home.roleSettings.dailyLimit}개</strong>${activeApplications.map((application) => `<span class="pill ${application.status === "completed" ? "success" : "waiting"}">${escapeHtml(roleNameById.get(application.roleId) || "역할")} · ${roleStatusLabels[application.status]}</span>`).join("")}</div>` : `<p class="muted">오늘 신청한 역할이 없습니다.</p>`;
+  const roleSection = features.roles === false ? "" : `<section class="cloud-student-section"><div class="section-heading"><div><h2>오늘의 1인1역</h2><p class="muted">현재 역할 신청 현황입니다.</p></div></div>${myRoles}<div class="grid">${home.roleSettings.roles.map((role) => `<article class="card quest-card"><div class="quest-top"><h3>${escapeHtml(role.name)}</h3><span class="points">+${role.points}P</span></div>${role.description ? `<p class="role-description">${escapeHtml(role.description)}</p>` : ""}<span class="pill">현재 ${role.currentCount} / ${role.capacity}명</span><div class="progress"><span style="width:${Math.min(100, role.currentCount / role.capacity * 100)}%"></span></div><button class="button secondary" type="button" disabled>신청 기능 연결 중</button></article>`).join("") || `<div class="empty">현재 신청 가능한 역할이 없습니다.</div>`}</div></section>`;
+  document.title = classInfo.appName || "우리반 퀘스트";
+  app.innerHTML = `<div class="app-shell student-shell cloud-student-shell"><header class="topbar"><div class="brand"><span class="brand-icon">⚔</span>${escapeHtml(classInfo.appName || "우리반 퀘스트")}</div><div class="user-area"><span>${escapeHtml(profile.name)}</span><button class="ghost-button" data-action="firebase-student-logout">로그아웃</button></div></header><main class="cloud-student-home"><section class="hero student-home-hero"><h1>${escapeHtml(profile.name)}님, 반가워요!</h1><p>${escapeHtml(classInfo.className || "우리 반")}</p></section>${features.points === false ? "" : `<section class="card cloud-student-points"><span>현재 포인트</span><strong>${home.points}P</strong></section>`}${assignmentSection}${roleSection}</main></div>`;
+}
 function renderTeacher() {
   const views = { dashboard: teacherDashboard, students: teacherStudents, groups: teacherGroups, roles: teacherRoles, assignments: teacherAssignments, observations: teacherObservations, points: teacherPoints, cards: teacherCardsV2, ranking: teacherRanking, "class-settings": teacherClassSettings };
   if (!teacherNavItems().some(([view]) => view === session.view)) session.view = "class-settings";
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
-function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
+function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "firebase-student" ? renderFirebaseStudentLanding() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
 
 function roleCloudConnectionLocked() { if (!firebaseRolesConnecting) return false; toast("1인1역 데이터를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
 function groupCloudConnectionLocked() { if (!firebaseGroupsConnecting) return false; toast("모둠활동을 클라우드에 연결하는 중입니다."); return true; }
@@ -2157,6 +2206,8 @@ app.addEventListener("click", async (event) => {
   if (action === "firebase-teacher-login") { enterFirebaseTeacher(); return; }
   if (action === "go-home") { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; return render(); }
   if (action === "firebase-logout") { if (window.ourClassFirebase?.ready) exitFirebaseTeacher(); return; }
+  if (action === "retry-student-home") { loadFirebaseStudentHomeData(); return; }
+  if (action === "firebase-student-logout") { if (window.ourClassFirebase?.ready) { await window.ourClassFirebase.signOutStudent(); firebaseStudentAuthUser = null; firebaseVerifiedStudentSession = null; resetFirebaseStudentHomeState(); session = {mode: "welcome", studentId: null, view: "home"}; render(); } return; }
   if (action === "navigate") { session.view = target.dataset.view; return render(); }
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
@@ -2490,7 +2541,14 @@ window.addEventListener("our-class-firebase-auth", (event) => {
   if (session.mode === "welcome") { firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); }
   loadFirebaseClassSettings(firebaseTeacherUser.uid);
 });
-window.addEventListener("our-class-firebase-error", () => { firebaseAuthPending = false; clearTimeout(firebaseAuthFallbackTimer); if (session.mode === "welcome") { render(); toast("Firebase 초기화에 실패했습니다. 기존 체험 기능은 계속 사용할 수 있습니다."); } });
+window.addEventListener("our-class-firebase-student-auth", async (event) => {
+  firebaseStudentAuthReady = event.detail?.ready === true;
+  firebaseStudentAuthUser = event.detail?.user || null;
+  firebaseVerifiedStudentSession = event.detail?.session || null;
+  if (firebaseStudentAuthUser && firebaseVerifiedStudentSession?.ok) { await loadFirebaseStudentHomeData(); return; }
+  resetFirebaseStudentHomeState(); if (session.mode === "firebase-student") session = {mode: "welcome", studentId: null, view: "home"}; render();
+});
+window.addEventListener("our-class-firebase-error", () => { firebaseAuthPending = false; firebaseStudentAuthReady = true; clearTimeout(firebaseAuthFallbackTimer); if (session.mode === "welcome") { render(); toast("Firebase 초기화에 실패했습니다. 기존 체험 기능은 계속 사용할 수 있습니다."); } });
 
 app.addEventListener("change", async (event) => {
   if (firebaseGroupsConnecting && event.target.dataset.action === "assign-student-group") return groupCloudConnectionLocked();
@@ -2565,6 +2623,25 @@ document.addEventListener("keydown", (event) => {
 
 app.addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
+  if (form.id === "firebase-student-login-form") {
+    if (firebaseStudentSigningIn) return;
+    const classId = studentClassContext(); const loginId = String(formData.get("loginId") || "").trim(); const passwordInput = form.elements.password; const password = String(formData.get("password") || "");
+    if (!classId) return toast("학생 로그인 링크를 확인해 주세요.");
+    if (!loginId || !password) return toast("로그인 ID와 비밀번호를 입력해 주세요.");
+    firebaseStudentSigningIn = true; const submitButton = form.querySelector('[type="submit"]'); if (submitButton) submitButton.disabled = true;
+    try {
+      const verified = await window.ourClassFirebase.studentSignIn({classId, loginId, password});
+      if (!verified?.ok) throw new Error("Student session could not be verified.");
+      firebaseStudentAuthUser = window.ourClassFirebase.getStudentCurrentUser(); firebaseVerifiedStudentSession = verified;
+      await loadFirebaseStudentHomeData();
+    } catch (error) {
+      console.error("Firebase student sign-in failed", {code: error?.code, message: error?.message});
+      toast("아이디 또는 비밀번호를 확인해 주세요.");
+    } finally {
+      if (passwordInput) passwordInput.value = ""; firebaseStudentSigningIn = false; if (submitButton?.isConnected) submitButton.disabled = false;
+    }
+    return;
+  }
   if (firebaseGroupsConnecting && (["group-settings-form", "group-count-form", "selected-group-score-form", "class-mission-form"].includes(form.id) || form.classList.contains("group-name-form") || form.classList.contains("group-direct-score-form"))) return groupCloudConnectionLocked();
   if (firebaseObservationsConnecting && form.id === "observation-form") return observationCloudConnectionLocked();
   if (firebaseObservationMutating && form.id === "observation-form") return observationCloudMutationLocked();

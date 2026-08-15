@@ -381,3 +381,230 @@ exports.resetStudentPassword = onCall(
       return {ok: true, studentId};
     },
 );
+
+function studentLoginFailed() {
+  return new HttpsError(
+      "invalid-argument",
+      "Student login could not be verified.",
+  );
+}
+
+async function getVerifiedStudentContext(request) {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Student authentication is required.");
+  }
+  const uid = request.auth.uid;
+  const db = getFirestore();
+  const accountSnapshot = await db.doc(`studentAccounts/${uid}`).get();
+  const account = accountSnapshot.exists ? accountSnapshot.data() : null;
+  const classId = typeof account?.classId === "string" ? account.classId : "";
+  const studentId = typeof account?.studentId === "string" ?
+    account.studentId : "";
+  if (!account || account.uid !== uid || account.active !== true ||
+      !classId || !studentId) {
+    throw new HttpsError("permission-denied", "Student session is not active.");
+  }
+
+  const [classSnapshot, studentSnapshot] = await Promise.all([
+    db.doc(`classes/${classId}`).get(),
+    db.doc(`classes/${classId}/students/${studentId}`).get(),
+  ]);
+  const student = studentSnapshot.exists ? studentSnapshot.data() : null;
+  if (!classSnapshot.exists || !student || student.id !== studentId ||
+      student.active === false) {
+    throw new HttpsError("permission-denied", "Student session is not active.");
+  }
+  return {
+    uid,
+    classId,
+    studentId,
+    account,
+    classData: classSnapshot.data(),
+    student,
+  };
+}
+
+function seoulDateKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+exports.resolveStudentLogin = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const classId = requiredInputString(request.data?.classId, "classId");
+      const loginId = requiredInputString(request.data?.loginId, "loginId");
+      const loginIdNormalized = loginId.toLocaleLowerCase("en-US");
+      const db = getFirestore();
+      const loginIndexSnapshot = await db.doc(
+          `studentLoginIndex/${studentLoginKey(classId, loginIdNormalized)}`,
+      ).get();
+      if (!loginIndexSnapshot.exists) throw studentLoginFailed();
+
+      const loginIndex = loginIndexSnapshot.data();
+      const uid = typeof loginIndex?.uid === "string" ? loginIndex.uid : "";
+      const studentId = typeof loginIndex?.studentId === "string" ?
+        loginIndex.studentId : "";
+      const internalEmail = typeof loginIndex?.internalEmail === "string" ?
+        loginIndex.internalEmail : "";
+      if (loginIndex?.classId !== classId ||
+          loginIndex?.loginIdNormalized !== loginIdNormalized ||
+          loginIndex?.active !== true || !uid || !studentId || !internalEmail) {
+        throw studentLoginFailed();
+      }
+
+      const [accountSnapshot, studentSnapshot] = await Promise.all([
+        db.doc(`studentAccounts/${uid}`).get(),
+        db.doc(`classes/${classId}/students/${studentId}`).get(),
+      ]);
+      const account = accountSnapshot.exists ? accountSnapshot.data() : null;
+      const student = studentSnapshot.exists ? studentSnapshot.data() : null;
+      const currentLoginIdNormalized = typeof student?.loginId === "string" ?
+        student.loginId.trim().toLocaleLowerCase("en-US") : "";
+      if (!account || account.uid !== uid || account.classId !== classId ||
+          account.studentId !== studentId || account.active !== true ||
+          !student || student.id !== studentId || student.active === false ||
+          currentLoginIdNormalized !== loginIdNormalized) {
+        throw studentLoginFailed();
+      }
+
+      return {ok: true, internalEmail};
+    },
+);
+
+exports.getStudentSession = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const {classId, studentId, classData, student} =
+        await getVerifiedStudentContext(request);
+
+      return {
+        ok: true,
+        student: {
+          classId,
+          studentId,
+          name: typeof student.name === "string" ? student.name : "",
+          number: Number(student.number) || 0,
+          loginId: typeof student.loginId === "string" ? student.loginId : "",
+        },
+        className: typeof classData?.className === "string" ?
+          classData.className : "",
+      };
+    },
+);
+
+exports.getStudentHomeData = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      const {classId, studentId, classData, student} =
+        await getVerifiedStudentContext(request);
+      const db = getFirestore();
+      const today = seoulDateKey();
+      const classRef = db.doc(`classes/${classId}`);
+      const [pointSnapshot, assignmentsSnapshot, statesSnapshot,
+        roleSettingsSnapshot, roleUsageSnapshot, roleApplicationsSnapshot] =
+        await Promise.all([
+          classRef.collection("studentPointStates").doc(studentId).get(),
+          classRef.collection("assignments").get(),
+          classRef.collection("assignmentStudentStates")
+              .where("studentId", "==", studentId).get(),
+          classRef.collection("roleSettings").doc("current").get(),
+          classRef.collection("roleDailyUsage").doc(today).get(),
+          classRef.collection("dailyRoleAssignments")
+              .where("studentId", "==", studentId).get(),
+        ]);
+
+      const statusByAssignmentId = new Map();
+      statesSnapshot.forEach((snapshot) => {
+        const value = snapshot.data();
+        if (value?.studentId !== studentId ||
+            typeof value.assignmentId !== "string") return;
+        const status = ["missing", "review", "submitted"].includes(value.status) ?
+          value.status : "missing";
+        statusByAssignmentId.set(value.assignmentId, status);
+      });
+      const assignments = assignmentsSnapshot.docs.map((snapshot) => {
+        const value = snapshot.data();
+        const id = snapshot.id;
+        return {
+          id,
+          title: typeof value?.title === "string" ? value.title : "",
+          subject: typeof value?.subject === "string" ? value.subject : "",
+          description: typeof value?.description === "string" ?
+            value.description : "",
+          dueDate: typeof value?.dueDate === "string" ? value.dueDate : "",
+          points: Number(value?.points) || 0,
+          important: value?.important === true,
+          assignmentState: value?.assignmentState === "completed" ?
+            "completed" : "active",
+          status: statusByAssignmentId.get(id) || "missing",
+          deleted: value?.deleted === true,
+        };
+      }).filter((assignment) =>
+        !assignment.deleted && assignment.assignmentState === "active",
+      ).map(({deleted, ...assignment}) => assignment);
+
+      const roleSettings = roleSettingsSnapshot.exists ?
+        roleSettingsSnapshot.data() : {};
+      const usage = roleUsageSnapshot.exists ? roleUsageSnapshot.data() : {};
+      const roleCounts = usage?.roleCounts &&
+        typeof usage.roleCounts === "object" &&
+        !Array.isArray(usage.roleCounts) ? usage.roleCounts : {};
+      const roles = (Array.isArray(roleSettings?.currentRoles) ?
+        roleSettings.currentRoles : []).map((role) => ({
+        id: typeof role?.id === "string" ? role.id : "",
+        name: typeof role?.name === "string" ? role.name : "",
+        points: Number(role?.points) || 0,
+        capacity: Math.max(1, Number(role?.capacity) || 1),
+        description: typeof role?.description === "string" ?
+          role.description : "",
+        currentCount: Math.max(0, Number(roleCounts[role?.id]) || 0),
+      })).filter((role) => role.id && role.name);
+      const myRoleApplications = roleApplicationsSnapshot.docs.map((snapshot) => {
+        const value = snapshot.data();
+        return {
+          id: snapshot.id,
+          roleId: typeof value?.roleId === "string" ? value.roleId : "",
+          status: ["waiting", "completed", "cancelled"].includes(value?.status) ?
+            value.status : "waiting",
+          date: typeof value?.date === "string" ? value.date : "",
+        };
+      }).filter((application) => application.date === today && application.roleId);
+      const rawLimit = Number(roleSettings?.dailyRoleApplicationLimit);
+      const dailyLimit = Number.isInteger(rawLimit) && rawLimit >= 1 &&
+        rawLimit <= 5 ? rawLimit : 1;
+      const pointValue = Number(pointSnapshot.data()?.points);
+      const featureSource = classData?.features &&
+        typeof classData.features === "object" &&
+        !Array.isArray(classData.features) ? classData.features : {};
+
+      return {
+        ok: true,
+        profile: {
+          studentId,
+          name: typeof student.name === "string" ? student.name : "",
+          number: Number(student.number) || 0,
+          loginId: typeof student.loginId === "string" ? student.loginId : "",
+        },
+        classInfo: {
+          className: typeof classData?.className === "string" ?
+            classData.className : "",
+          appName: typeof classData?.appName === "string" ?
+            classData.appName : "",
+          features: {
+            assignments: featureSource.assignments !== false,
+            roles: featureSource.roles !== false,
+            points: featureSource.points !== false,
+          },
+        },
+        points: Number.isFinite(pointValue) ? pointValue : 0,
+        assignments,
+        roleSettings: {dailyLimit, roles},
+        myRoleApplications,
+      };
+    },
+);
