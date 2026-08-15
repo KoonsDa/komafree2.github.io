@@ -169,6 +169,54 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /classes/{classId}/observations/{observationId} {
+      allow read, delete: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'id', 'studentId', 'date', 'category', 'content', 'quickItems', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'id', 'studentId', 'date', 'category', 'content', 'quickItems', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.id == observationId
+        && request.resource.data.id is string
+        && request.resource.data.id.size() > 0
+        && request.resource.data.studentId is string
+        && request.resource.data.date is string
+        && request.resource.data.category in ['수업', '생활', '관계', '성장', '기타']
+        && request.resource.data.content is string
+        && request.resource.data.quickItems is list
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+    }
+
+    match /classes/{classId}/observationSettings/{settingsId} {
+      allow read: if isClassOwner(classId) && settingsId == 'current';
+      allow create, update: if isClassOwner(classId)
+        && settingsId == 'current'
+        && request.resource.data.keys().hasOnly([
+          'quickItems', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'quickItems', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.quickItems is map
+        && request.resource.data.quickItems.keys().hasOnly([
+          '수업', '생활', '관계', '성장', '기타'
+        ])
+        && request.resource.data.quickItems.keys().hasAll([
+          '수업', '생활', '관계', '성장', '기타'
+        ])
+        && request.resource.data.quickItems['수업'] is list
+        && request.resource.data.quickItems['생활'] is list
+        && request.resource.data.quickItems['관계'] is list
+        && request.resource.data.quickItems['성장'] is list
+        && request.resource.data.quickItems['기타'] is list
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

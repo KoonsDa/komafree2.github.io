@@ -151,6 +151,35 @@ function createDemoData() {
   };
 }
 
+function isValidObservationDate(value) {
+  const match = typeof value === "string" ? value.match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
+  if (!match) return false;
+  const [, year, month, day] = match.map(Number);
+  const parsed = new Date(year, month - 1, day);
+  return parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day;
+}
+
+function isValidObservationTimestamp(value) {
+  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
+}
+
+function normalizeObservation(value) {
+  const observation = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const createdAtDate = isValidObservationTimestamp(observation.createdAt) ? localDateKey(observation.createdAt) : "";
+  const date = isValidObservationDate(observation.date) ? observation.date : (isValidObservationDate(createdAtDate) ? createdAtDate : todayString());
+  const createdAt = isValidObservationTimestamp(observation.createdAt) ? observation.createdAt : `${date}T00:00:00.000Z`;
+  return {
+    id: observation.id || crypto.randomUUID(),
+    studentId: observation.studentId || "",
+    date,
+    category: OBSERVATION_CATEGORIES.includes(observation.category) ? observation.category : "기타",
+    content: typeof observation.content === "string" ? observation.content : "",
+    quickItems: Array.isArray(observation.quickItems) ? observation.quickItems.filter((item) => typeof item === "string") : [],
+    createdAt,
+    updatedAt: isValidObservationTimestamp(observation.updatedAt) ? observation.updatedAt : createdAt
+  };
+}
+
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -262,16 +291,7 @@ function loadData() {
       return migrated;
     });
     saved.localOnlyAssignmentArchive = (Array.isArray(saved.localOnlyAssignmentArchive) ? saved.localOnlyAssignmentArchive : []).filter((assignment) => assignment && typeof assignment === "object" && !Array.isArray(assignment) && String(assignment.id || ""));
-    saved.observations = (Array.isArray(saved.observations) ? saved.observations : []).map((observation) => ({
-      id: observation.id || crypto.randomUUID(),
-      studentId: observation.studentId || "",
-      date: observation.date || todayString(),
-      category: OBSERVATION_CATEGORIES.includes(observation.category) ? observation.category : "기타",
-      content: observation.content || "",
-      quickItems: Array.isArray(observation.quickItems) ? observation.quickItems.filter((item) => typeof item === "string") : [],
-      createdAt: observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`,
-      updatedAt: observation.updatedAt || observation.createdAt || `${observation.date || todayString()}T00:00:00.000Z`
-    }));
+    saved.observations = (Array.isArray(saved.observations) ? saved.observations : []).map(normalizeObservation);
     const savedQuickItems = saved.observationQuickItems && typeof saved.observationQuickItems === "object" ? saved.observationQuickItems : {};
     saved.observationQuickItems = Object.fromEntries(OBSERVATION_CATEGORIES.map((category) => [category,
       Array.isArray(savedQuickItems[category]) ? [...new Set(savedQuickItems[category].filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 30)))] : [...DEFAULT_OBSERVATION_QUICK_ITEMS[category]]
@@ -354,6 +374,10 @@ let firebasePointsConnected = false;
 let firebasePointsLoadFailed = false;
 let firebaseRolesConnected = false;
 let firebaseRolesConnecting = false;
+let firebaseObservationsConnected = false;
+let firebaseObservationsConnecting = false;
+let firebaseObservationMutating = false;
+let firebaseObservationSettingsSaving = false;
 let firebaseRoleConfigurationSaving = false;
 let firebaseRoleDailyUsageReady = false;
 let firebaseRoleDailyUsageInitializing = false;
@@ -492,7 +516,8 @@ function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebase
 function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
 function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRolesConnecting = false; firebaseRoleConfigurationSaving = false; firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageInitializing = false; firebaseRoleDailyUsageDate = ""; firebaseRoleApplicationMutating = false; }
-async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
+function resetFirebaseObservationState() { firebaseObservationsConnected = false; firebaseObservationsConnecting = false; firebaseObservationMutating = false; firebaseObservationSettingsSaving = false; }
+async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
 function appendCloudStudent(student) { const added = { id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] }; data.students.push(added); data.assignments.forEach((assignment) => setAssignmentStatusForStudent(assignment, added.id, "missing")); return added; }
 async function loadFirebaseStudents(userUid, commit = true) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); } if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (commit && session.view === "class-settings") render(); return false; } }
 function mergeFirebaseAssignments(cloudAssignments) {
@@ -558,6 +583,24 @@ async function loadFirebaseRoles(userUid, commit = true) {
     return false;
   }
 }
+async function loadFirebaseObservations(userUid, commit = true) {
+  if (!firebaseObservationsConnected) return false;
+  try {
+    const [observations, settings] = await Promise.all([window.ourClassFirebase.loadObservations(), window.ourClassFirebase.loadObservationSettings()]);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    if (!settings) throw new Error("Connected observation settings were not found.");
+    data.observations = observations.map(normalizeObservation);
+    data.observationQuickItems = structuredClone(settings.quickItems);
+    if (commit) { saveData(); render(); }
+    return true;
+  } catch (error) {
+    console.error("Firestore observations load failed", error);
+    if (firebaseTeacherUser?.uid !== userUid) return false;
+    toast("관찰기록을 클라우드에서 불러오지 못했습니다. 연결을 확인해 주세요.");
+    if (commit && session.view === "class-settings") render();
+    return false;
+  }
+}
 async function loadFirebaseRoleApplications(userUid, commit = true) {
   if (!firebaseRolesConnected) return false;
   try {
@@ -599,8 +642,8 @@ async function reloadFirebaseRoleApplicationsAndUsage(userUid) {
   if (!applicationsLoaded || !usage) return false;
   saveData(); render(); return true;
 }
-async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; firebaseRolesConnected = result.rolesConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); if (firebaseRolesConnected) await loadFirebaseRoles(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (session.view === "class-settings") render(); } }
-async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
+async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; firebaseRolesConnected = result.rolesConnected === true; firebaseObservationsConnected = result.observationsConnected === true; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); if (firebaseRolesConnected) await loadFirebaseRoles(userUid, false); if (firebaseObservationsConnected) await loadFirebaseObservations(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); if (session.view === "class-settings") render(); } }
+async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
 async function saveFirebaseClassSettings() { if (!firebaseTeacherSession || !firebaseActiveClassId || !window.ourClassFirebase?.ready) return; try { await window.ourClassFirebase.saveClassSettings({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); } catch (error) { console.error("Firestore class settings save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectStudentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsChecked || firebaseStudentsConnected || firebaseStudentsLoadFailed) return; if (!confirm("현재 브라우저의 학생 명단을 클라우드 학급의 기준 명단으로 등록할까요?")) return; try { await window.ourClassFirebase.uploadInitialStudents(data.students); firebaseStudentsConnected = true; render(); toast("학생 명단을 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial students upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectAssignmentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsConnected || firebaseAssignmentsConnected) return; if (!confirm("현재 브라우저의 과제 기본정보를\n클라우드 학급의 기준 과제로 등록할까요?")) return; try { await window.ourClassFirebase.connectInitialAssignments(data.assignments); firebaseAssignmentsConnected = true; firebaseAssignmentsChecked = true; firebaseAssignmentsLoadFailed = false; render(); toast("과제 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial assignments upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
@@ -677,6 +720,31 @@ async function connectRolesToFirebase() {
     toast("1인1역을 클라우드에 연결하지 못했습니다. 연결을 확인해 주세요.");
   } finally {
     firebaseRolesConnecting = false;
+    render();
+  }
+}
+async function connectObservationsToFirebase() {
+  if (!firebaseTeacherSession || !firebaseTeacherUser || !firebaseActiveClassId || !window.ourClassFirebase?.ready || !firebaseStudentsConnected || firebaseObservationsConnected || firebaseObservationsConnecting) return;
+  if (!confirm("현재 관찰기록과 빠른 선택 항목을\n클라우드 학급의 기준 데이터로 등록할까요?")) return;
+  const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId;
+  data.observations = data.observations.map(normalizeObservation);
+  saveData();
+  const snapshot = { observations: structuredClone(data.observations), settings: { quickItems: structuredClone(data.observationQuickItems) } };
+  firebaseObservationsConnecting = true; render();
+  try {
+    await window.ourClassFirebase.connectInitialObservations(snapshot);
+    if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during observations connection.");
+    firebaseObservationsConnected = true;
+    const observationsLoaded = await loadFirebaseObservations(userUid, false);
+    if (!observationsLoaded) throw new Error("Connected observations could not be loaded.");
+    saveData();
+    toast("관찰기록을 클라우드에 연결했습니다.");
+  } catch (error) {
+    console.error("Firestore initial observations upload failed", error);
+    firebaseObservationsConnected = false;
+    toast("관찰기록을 클라우드에 연결하지 못했습니다. 연결을 확인해 주세요.");
+  } finally {
+    firebaseObservationsConnecting = false;
     render();
   }
 }
@@ -1068,7 +1136,8 @@ function cloudAssignmentSettings() { if (!firebaseStudentsConnected) return ""; 
 function cloudPointSettings() { if (!firebaseStudentsConnected) return ""; if (firebasePointsConnected) return `<div><button class="button secondary" disabled>포인트 및 포인트 기록 연결됨</button><p class="muted">학생 포인트와 포인트 기록이 클라우드 학급과 연결되어 있습니다.</p></div>`; return `<div><button class="button success" data-action="connect-cloud-points">현재 포인트를 클라우드에 연결</button><p class="muted">학생의 현재 포인트와 기존 포인트 기록을 클라우드에 저장합니다.</p></div>`; }
 function cloudAssignmentStudentStateSettings() { if (!firebaseActiveClassId) return ""; if (firebaseAssignmentStudentStatesConnected) return `<div><button class="button secondary" disabled>과제 제출 상태 연결됨</button><p class="muted">과제의 학생별 제출 상태와 포인트 지급 snapshot이 클라우드와 연결되어 있습니다.</p></div>`; if (firebaseAssignmentStudentStatesConnecting) return `<div><button class="button secondary" disabled>과제 제출 상태 연결 중</button><p class="muted">현재 상태를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected && firebaseAssignmentsConnected && firebasePointsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-assignment-states" ${ready ? "" : "disabled"}>과제 제출 상태를 클라우드에 연결</button><p class="muted">과제 제출 상태 클라우드 미연결 · ${ready ? "학생별 제출 상태와 기존 포인트 지급 snapshot만 저장합니다." : "학생 명단, 과제 기본정보, 포인트를 먼저 연결해 주세요."}</p></div>`; }
 function cloudRoleSettings() { if (!firebaseActiveClassId) return ""; if (firebaseRolesConnected) return `<div><button class="button secondary" disabled>1인1역 연결됨</button><p class="muted">1인1역 설정, 템플릿, 신청 및 완료 기록이 클라우드와 연결되어 있습니다.</p></div>`; if (firebaseRolesConnecting) return `<div><button class="button secondary" disabled>1인1역 연결 중</button><p class="muted">현재 1인1역 데이터를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected && firebasePointsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-roles" ${ready ? "" : "disabled"}>1인1역을 클라우드에 연결</button><p class="muted">1인1역 클라우드 미연결 · ${ready ? "현재 설정, 템플릿, 기존 신청 기록만 저장합니다." : "학생 명단과 포인트를 먼저 연결해 주세요."}</p></div>`; }
-function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}${cloudRoleSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
+function cloudObservationSettings() { if (!firebaseActiveClassId) return ""; if (firebaseObservationsConnected) return `<div><button class="button secondary" disabled>관찰기록 연결됨</button><p class="muted">관찰기록과 빠른 선택 항목이 클라우드 학급과 연결되어 있습니다.</p></div>`; if (firebaseObservationsConnecting) return `<div><button class="button secondary" disabled>관찰기록 연결 중</button><p class="muted">현재 관찰기록 데이터를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-observations" ${ready ? "" : "disabled"}>관찰기록을 클라우드에 연결</button><p class="muted">관찰기록 클라우드 미연결 · ${ready ? "현재 관찰기록과 빠른 선택 항목을 저장합니다." : "학생 명단을 먼저 연결해 주세요."}</p></div>`; }
+function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}${cloudRoleSettings()}${cloudObservationSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
 function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions">${cloudClassSettings()}<div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
 function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}${dataManagementSettings()}`; }
 function openRestoreBackupModal(payload) { const className = payload.data.classSettings?.className || payload.className || "이름 없음"; const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "날짜 정보 없음"; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>백업 파일 복원</h2><p>현재 학급 데이터를 백업 파일의 내용으로 교체합니다.</p><dl class="backup-summary"><div><dt>학급 이름</dt><dd>${escapeHtml(className)}</dd></div><div><dt>학생 수</dt><dd>${payload.data.students.length}명</dd></div><div><dt>백업 날짜</dt><dd>${escapeHtml(exportedAt)}</dd></div></dl><div class="button-row"><button class="button danger" data-action="confirm-restore-backup">복원하기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
@@ -1288,6 +1357,32 @@ function renderTeacher() {
 function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
 
 function roleCloudConnectionLocked() { if (!firebaseRolesConnecting) return false; toast("1인1역 데이터를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
+function observationCloudConnectionLocked() { if (!firebaseObservationsConnecting) return false; toast("관찰기록을 클라우드에 연결하는 중입니다."); return true; }
+function observationCloudMutationLocked() { if (!firebaseObservationMutating) return false; toast("관찰기록을 클라우드에 저장하는 중입니다."); return true; }
+function observationSettingsCloudLocked() { if (!firebaseObservationSettingsSaving) return false; toast("빠른 선택 항목을 클라우드에 저장하는 중입니다."); return true; }
+async function persistObservationQuickItems(proposedQuickItems) {
+  if (firebaseTeacherUser && (!firebaseClassChecked || firebaseClassLoadFailed)) {
+    toast("클라우드 연결 확인이 끝난 후 다시 시도해 주세요.");
+    return false;
+  }
+  if (firebaseObservationsConnected) {
+    const userUid = firebaseTeacherUser?.uid; const classId = firebaseActiveClassId;
+    firebaseObservationSettingsSaving = true;
+    try {
+      await window.ourClassFirebase.saveObservationSettings({ quickItems: proposedQuickItems });
+      if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during observation settings save.");
+    } catch (error) {
+      console.error("Firestore observation settings save failed", error);
+      toast("빠른 선택 항목을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
+      return false;
+    } finally {
+      firebaseObservationSettingsSaving = false;
+    }
+  }
+  data.observationQuickItems = proposedQuickItems;
+  saveData();
+  return true;
+}
 function roleConfigurationCloudLocked() { if (!firebaseRoleConfigurationSaving) return false; toast("1인1역 설정을 클라우드에 저장 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
 function roleApplicationCloudLocked() { if (!firebaseRoleApplicationMutating && !firebaseRoleDailyUsageInitializing) return false; toast("역할 신청 상태를 클라우드에 반영 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
 async function handleRoleApplicationCloudError(error, userUid) {
@@ -1519,10 +1614,14 @@ function refreshObservationQuickSection(category, selected = selectedObservation
 
 function openObservationModal(observationId = "", presets = {}) {
   const observation = data.observations.find((item) => item.id === observationId);
-  const selectedStudentId = observation?.studentId || presets.studentId || observationFilters.studentId || data.students[0]?.id || "";
+  const selectableStudents = activeStudents();
+  const existingStudent = observation ? studentById(observation.studentId) : null;
+  if (existingStudent && !selectableStudents.some((student) => student.id === existingStudent.id)) selectableStudents.push(existingStudent);
+  const preferredStudentId = observation?.studentId || presets.studentId || observationFilters.studentId || "";
+  const selectedStudentId = selectableStudents.some((student) => student.id === preferredStudentId) ? preferredStudentId : selectableStudents[0]?.id || "";
   const selectedDate = observation?.date || presets.date || todayString();
   const selectedCategory = observation?.category || presets.category || "수업";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="observation-form" class="modal-card form observation-modal-card" data-id="${observationId}"><h2>${observation ? "관찰 기록 수정" : "새 관찰 기록"}</h2><label>학생 검색<input id="observation-student-search" type="search" placeholder="이름 또는 번호 입력 (예: 학생12)" autocomplete="off"></label><fieldset class="observation-student-picker"><legend>학생 선택</legend>${data.students.map((student, index) => `<label data-student-search="${escapeHtml(`${student.name} ${student.number || index + 1}`.toLocaleLowerCase("ko-KR"))}"><input type="radio" name="studentId" value="${student.id}" ${student.id === selectedStudentId ? "checked" : ""} required><span>${escapeHtml(student.name)}</span></label>`).join("")}</fieldset><label>날짜<input name="date" type="date" value="${selectedDate}" required></label><label>분류<select id="observation-category" name="category">${OBSERVATION_CATEGORIES.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${category}</option>`).join("")}</select></label><section id="observation-quick-section" class="observation-quick-section">${observationQuickSectionHtml(selectedCategory, observation?.quickItems || [])}</section><label>내용<textarea name="content" maxlength="1000" required placeholder="빠른 항목을 참고해 관찰 내용을 자유롭게 적어 주세요.">${observation ? escapeHtml(observation.content) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${observation ? "" : `<button class="button" type="submit" data-continue="true">저장 후 계속 기록</button>`}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="observation-form" class="modal-card form observation-modal-card" data-id="${observationId}"><h2>${observation ? "관찰 기록 수정" : "새 관찰 기록"}</h2><label>학생 검색<input id="observation-student-search" type="search" placeholder="이름 또는 번호 입력 (예: 학생12)" autocomplete="off"></label><fieldset class="observation-student-picker"><legend>학생 선택</legend>${selectableStudents.map((student) => `<label data-student-search="${escapeHtml(`${student.name} ${studentNumber(student)}`.toLocaleLowerCase("ko-KR"))}"><input type="radio" name="studentId" value="${student.id}" ${student.id === selectedStudentId ? "checked" : ""} required><span>${escapeHtml(student.name)}</span></label>`).join("")}</fieldset><label>날짜<input name="date" type="date" value="${selectedDate}" required></label><label>분류<select id="observation-category" name="category">${OBSERVATION_CATEGORIES.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${category}</option>`).join("")}</select></label><section id="observation-quick-section" class="observation-quick-section">${observationQuickSectionHtml(selectedCategory, observation?.quickItems || [])}</section><label>내용<textarea name="content" maxlength="1000" required placeholder="빠른 항목을 참고해 관찰 내용을 자유롭게 적어 주세요.">${observation ? escapeHtml(observation.content) : ""}</textarea></label><div class="button-row"><button class="button success" type="submit">저장</button>${observation ? "" : `<button class="button" type="submit" data-continue="true">저장 후 계속 기록</button>`}<button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
   document.querySelector("#observation-student-search")?.focus();
 }
 
@@ -1684,9 +1783,14 @@ function loadTemplateForToday(templateId) {
   persistRoleSettings(previousSettings, `‘${template.name}’을 오늘의 역할로 불러왔습니다.`);
 }
 
-app.addEventListener("click", (event) => {
+app.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
   const roleChangeActions = new Set(["apply-role", "confirm-student-cancel", "complete-role", "undo-complete", "cancel-role", "add-role", "edit-role", "move-role", "delete-role", "load-template", "rename-template", "duplicate-template", "delete-template"]);
+  const observationChangeActions = new Set(["new-observation", "edit-observation", "add-observation-quick", "save-observation-quick", "delete-observation-quick", "confirm-delete-observation-quick", "ask-delete-observation", "confirm-delete-observation"]);
+  const observationSettingsActions = new Set(["add-observation-quick", "save-observation-quick", "delete-observation-quick", "confirm-delete-observation-quick"]);
+  if (firebaseObservationsConnecting && observationChangeActions.has(action)) return observationCloudConnectionLocked();
+  if (firebaseObservationMutating && ["new-observation", "edit-observation", "ask-delete-observation", "confirm-delete-observation"].includes(action)) return observationCloudMutationLocked();
+  if (firebaseObservationSettingsSaving && observationSettingsActions.has(action)) return observationSettingsCloudLocked();
   if (firebaseRolesConnecting && roleChangeActions.has(action)) return roleCloudConnectionLocked();
   if (firebaseRoleConfigurationSaving && roleChangeActions.has(action)) return roleConfigurationCloudLocked();
   if (action === "show-students") return renderWelcome(true);
@@ -1895,12 +1999,17 @@ app.addEventListener("click", (event) => {
     const category = document.querySelector("#observation-category")?.value; if (!category) return;
     const name = document.querySelector("#observation-quick-new")?.value.trim().slice(0, 30); if (!name) return;
     if (data.observationQuickItems[category].includes(name)) { alert("이미 같은 항목이 있습니다."); return; }
-    data.observationQuickItems[category].push(name); saveData(); refreshObservationQuickSection(category, selectedObservationQuickItems()); toast("빠른 선택 항목을 추가했습니다."); return;
+    const proposedQuickItems = structuredClone(data.observationQuickItems); proposedQuickItems[category].push(name);
+    if (!await persistObservationQuickItems(proposedQuickItems)) return;
+    refreshObservationQuickSection(category, selectedObservationQuickItems()); toast("빠른 선택 항목을 추가했습니다."); return;
   }
   if (action === "save-observation-quick") {
     const category = document.querySelector("#observation-category")?.value; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const previous = items[index]; if (!previous) return;
     const name = document.querySelector(`[data-quick-edit-index="${index}"]`)?.value.trim().slice(0, 30); if (!name || (name !== previous && items.includes(name))) return;
-    const selected = selectedObservationQuickItems().map((item) => item === previous ? name : item); items[index] = name; saveData(); refreshObservationQuickSection(category, selected, true); toast("빠른 선택 항목을 수정했습니다."); return;
+    const selected = selectedObservationQuickItems().map((item) => item === previous ? name : item);
+    const proposedQuickItems = structuredClone(data.observationQuickItems); proposedQuickItems[category][index] = name;
+    if (!await persistObservationQuickItems(proposedQuickItems)) return;
+    refreshObservationQuickSection(category, selected, true); toast("빠른 선택 항목을 수정했습니다."); return;
   }
   if (action === "delete-observation-quick") {
     const category = document.querySelector("#observation-category")?.value; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const name = items[index]; if (!name) return;
@@ -1908,10 +2017,28 @@ app.addEventListener("click", (event) => {
   }
   if (action === "confirm-delete-observation-quick") {
     const category = target.dataset.category; const items = data.observationQuickItems[category] || []; const index = Number(target.dataset.index); const name = items[index]; if (!name) return;
-    items.splice(index, 1); target.closest(".modal")?.remove(); saveData(); refreshObservationQuickSection(category, selectedObservationQuickItems().filter((item) => item !== name), true); toast("빠른 선택 항목을 삭제했습니다."); return;
+    const proposedQuickItems = structuredClone(data.observationQuickItems); proposedQuickItems[category].splice(index, 1);
+    if (!await persistObservationQuickItems(proposedQuickItems)) return;
+    target.closest(".modal")?.remove(); refreshObservationQuickSection(category, selectedObservationQuickItems().filter((item) => item !== name), true); toast("빠른 선택 항목을 삭제했습니다."); return;
   }
   if (action === "ask-delete-observation") return openDeleteObservationModal(target.dataset.id);
   if (action === "confirm-delete-observation") {
+    if (firebaseObservationsConnected) {
+      const observationId = target.dataset.id; const userUid = firebaseTeacherUser?.uid; const classId = firebaseActiveClassId;
+      firebaseObservationMutating = true;
+      try {
+        await window.ourClassFirebase.deleteObservation(observationId);
+        if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during observation deletion.");
+        data.observations = data.observations.filter((observation) => observation.id !== observationId);
+        saveData(); render(); toast("관찰 기록을 삭제했습니다.");
+      } catch (error) {
+        console.error("Firestore observation delete failed", error);
+        toast("관찰기록을 클라우드에서 삭제하지 못했습니다. 다시 시도해 주세요.");
+      } finally {
+        firebaseObservationMutating = false;
+      }
+      return;
+    }
     data.observations = data.observations.filter((observation) => observation.id !== target.dataset.id);
     saveData(); render(); toast("관찰 기록을 삭제했습니다."); return;
   }
@@ -1969,6 +2096,7 @@ app.addEventListener("click", (event) => {
   if (action === "connect-cloud-points") { connectPointsToFirebase(); return; }
   if (action === "connect-cloud-assignment-states") { connectAssignmentStudentStatesToFirebase(); return; }
   if (action === "connect-cloud-roles") { connectRolesToFirebase(); return; }
+  if (action === "connect-cloud-observations") { connectObservationsToFirebase(); return; }
   if (action === "choose-backup-file") { document.querySelector("#backup-file-input")?.click(); return; }
   if (action === "confirm-restore-backup") { if (!pendingBackupPayload) return; target.closest(".modal")?.remove(); restoreBackup(pendingBackupPayload); return; }
   if (action === "open-reset-data") { openResetDataModal(); return; }
@@ -1983,8 +2111,8 @@ app.addEventListener("click", (event) => {
 window.addEventListener("our-class-firebase-auth", (event) => {
   firebaseAuthPending = false; clearTimeout(firebaseAuthFallbackTimer);
   firebaseTeacherUser = event.detail || null;
-  if (!firebaseTeacherUser) { firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); if (firebaseTeacherSession) { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; } if (session.mode === "welcome") render(); return; }
-  firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState();
+  if (!firebaseTeacherUser) { firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); if (firebaseTeacherSession) { firebaseTeacherSession = false; session = { mode: "welcome", studentId: null, view: "home" }; } if (session.mode === "welcome") render(); return; }
+  firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState();
   if (session.mode === "welcome") { firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); }
   loadFirebaseClassSettings(firebaseTeacherUser.uid);
 });
@@ -2043,8 +2171,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") [...document.querySelectorAll(".modal")].at(-1)?.remove();
 });
 
-app.addEventListener("submit", (event) => {
+app.addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.target; const formData = new FormData(form);
+  if (firebaseObservationsConnecting && form.id === "observation-form") return observationCloudConnectionLocked();
+  if (firebaseObservationMutating && form.id === "observation-form") return observationCloudMutationLocked();
   if (firebaseRolesConnecting && ["role-limit-form", "template-save-form", "role-form"].includes(form.id)) return roleCloudConnectionLocked();
   if (firebaseRoleConfigurationSaving && ["role-limit-form", "template-save-form", "role-form"].includes(form.id)) return roleConfigurationCloudLocked();
   if (form.id === "class-info-form") {
@@ -2107,8 +2237,23 @@ app.addEventListener("submit", (event) => {
     const studentId = formData.get("studentId"); const date = formData.get("date"); const category = formData.get("category"); const content = formData.get("content").trim(); const quickItems = selectedObservationQuickItems();
     if (!studentById(studentId) || !date || !OBSERVATION_CATEGORIES.includes(category) || !content) return;
     const now = new Date().toISOString(); const existing = data.observations.find((item) => item.id === form.dataset.id);
-    if (existing) Object.assign(existing, { studentId, date, category, content, quickItems, updatedAt: now });
-    else data.observations.push({ id: crypto.randomUUID(), studentId, date, category, content, quickItems, createdAt: now, updatedAt: now });
+    const observation = normalizeObservation(existing ? { ...existing, studentId, date, category, content, quickItems, updatedAt: now } : { id: crypto.randomUUID(), studentId, date, category, content, quickItems, createdAt: now, updatedAt: now });
+    if (firebaseObservationsConnected) {
+      const userUid = firebaseTeacherUser?.uid; const classId = firebaseActiveClassId;
+      firebaseObservationMutating = true;
+      try {
+        await window.ourClassFirebase.saveObservation(observation);
+        if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Firebase class changed during observation save.");
+      } catch (error) {
+        console.error("Firestore observation save failed", error);
+        toast("관찰기록을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
+        return;
+      } finally {
+        firebaseObservationMutating = false;
+      }
+    }
+    if (existing) Object.assign(existing, observation);
+    else data.observations.push(observation);
     saveData();
     if (!existing && event.submitter?.dataset.continue === "true") {
       form.querySelectorAll('[name="studentId"]').forEach((input) => { input.checked = false; });

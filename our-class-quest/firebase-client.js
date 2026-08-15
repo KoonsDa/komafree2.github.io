@@ -11,6 +11,8 @@ const firebaseConfig = {
   appId: "1:230522950190:web:ae08e1aa6bd8ef617845bf"
 };
 
+const OBSERVATION_CATEGORIES = ["수업", "생활", "관계", "성장", "기타"];
+
 function publicUser(user) {
   return user ? { uid: user.uid, displayName: user.displayName || "", email: user.email || "", photoURL: user.photoURL || "" } : null;
 }
@@ -79,6 +81,16 @@ function roleDailyUsageFields(value) {
   return { date: String(value?.date || ""), roleCounts: countMap(value?.roleCounts), studentCounts: countMap(value?.studentCounts), activeClaims: jsonSafeMap(value?.activeClaims) };
 }
 
+function observationFields(value) {
+  const category = OBSERVATION_CATEGORIES.includes(value?.category) ? value.category : "기타";
+  return { id: String(value?.id || ""), studentId: String(value?.studentId || ""), date: String(value?.date || ""), category, content: String(value?.content || ""), quickItems: (Array.isArray(value?.quickItems) ? value.quickItems : []).filter((item) => typeof item === "string"), createdAt: String(value?.createdAt || ""), updatedAt: String(value?.updatedAt || "") };
+}
+
+function observationSettingsFields(value) {
+  const quickItems = value?.quickItems && typeof value.quickItems === "object" && !Array.isArray(value.quickItems) ? value.quickItems : {};
+  return { quickItems: Object.fromEntries(OBSERVATION_CATEGORIES.map((category) => [category, (Array.isArray(quickItems[category]) ? quickItems[category] : []).filter((item) => typeof item === "string")])) };
+}
+
 function roleError(code, message, details = {}) {
   const error = new Error(message); error.code = code; error.details = details; return error;
 }
@@ -118,7 +130,7 @@ try {
       if (!activeClassId) return { connected: false, activeClassId: "", classSettings: null };
       const classSnapshot = await getDoc(doc(db, "classes", activeClassId));
       if (!classSnapshot.exists()) { activeClassId = ""; return { connected: false, activeClassId: "", classSettings: null }; }
-      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true, rolesConnected: classSnapshot.data()?.rolesConnected === true };
+      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true, rolesConnected: classSnapshot.data()?.rolesConnected === true, observationsConnected: classSnapshot.data()?.observationsConnected === true };
     },
     connectCurrentClass: async (value) => {
       const user = auth.currentUser;
@@ -148,6 +160,44 @@ try {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       const snapshot = await getDoc(doc(db, "classes", activeClassId, "roleSettings", "current")); if (!snapshot.exists()) return null; const value = snapshot.data();
       return { ...roleSettingsFields(value), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) };
+    },
+    saveObservation: async (observation) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = observationFields(observation); if (!fields.id) throw new Error("Observation id is required.");
+      await setDoc(doc(db, "classes", activeClassId, "observations", fields.id), fields);
+    },
+    loadObservations: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "observations"));
+      return snapshot.docs.map((observationDoc) => { const value = observationDoc.data(); return observationFields({ ...value, id: observationDoc.id, createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }); });
+    },
+    deleteObservation: async (observationId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(observationId || ""); if (!id) throw new Error("Observation id is required.");
+      await deleteDoc(doc(db, "classes", activeClassId, "observations", id));
+    },
+    saveObservationSettings: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const settingsRef = doc(db, "classes", activeClassId, "observationSettings", "current"); const snapshot = await getDoc(settingsRef); const timestamp = serverTimestamp();
+      await setDoc(settingsRef, { ...observationSettingsFields(value), createdAt: snapshot.exists() && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp, updatedAt: timestamp });
+    },
+    loadObservationSettings: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDoc(doc(db, "classes", activeClassId, "observationSettings", "current")); if (!snapshot.exists()) return null; const value = snapshot.data();
+      return { ...observationSettingsFields(value), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) };
+    },
+    connectInitialObservations: async ({ observations, settings }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const normalizedObservations = (Array.isArray(observations) ? observations : []).map(observationFields);
+      if (normalizedObservations.some((observation) => !observation.id)) throw new Error("Observation id is required.");
+      for (let index = 0; index < normalizedObservations.length; index += 425) {
+        const batch = writeBatch(db);
+        normalizedObservations.slice(index, index + 425).forEach((observation) => batch.set(doc(db, "classes", activeClassId, "observations", observation.id), observation));
+        await batch.commit();
+      }
+      const settingsRef = doc(db, "classes", activeClassId, "observationSettings", "current"); const settingsSnapshot = await getDoc(settingsRef); const timestamp = serverTimestamp();
+      await setDoc(settingsRef, { ...observationSettingsFields(settings), createdAt: settingsSnapshot.exists() && settingsSnapshot.data()?.createdAt ? settingsSnapshot.data().createdAt : timestamp, updatedAt: timestamp });
+      await setDoc(doc(db, "classes", activeClassId), { observationsConnected: true, updatedAt: serverTimestamp() }, { merge: true });
     },
     saveRoleTemplate: async (template) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
