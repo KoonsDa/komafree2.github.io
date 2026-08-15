@@ -91,6 +91,34 @@ function observationSettingsFields(value) {
   return { quickItems: Object.fromEntries(OBSERVATION_CATEGORIES.map((category) => [category, (Array.isArray(quickItems[category]) ? quickItems[category] : []).filter((item) => typeof item === "string")])) };
 }
 
+function groupDefinitionFields(value) {
+  const order = Number(value?.order);
+  return { id: String(value?.id || ""), name: String(value?.name || ""), active: value?.active !== false, order: Number.isInteger(order) ? order : 0 };
+}
+
+function groupScoreStateFields(value) {
+  const score = Number(value?.score);
+  return { groupId: String(value?.groupId || ""), score: Number.isInteger(score) && score >= 0 ? score : 0 };
+}
+
+function groupScoreTransactionFields(value) {
+  const amount = Number(value?.amount); const scoreBefore = Number(value?.scoreBefore); const scoreAfter = Number(value?.scoreAfter);
+  return { id: String(value?.id || ""), groupId: String(value?.groupId || ""), groupName: String(value?.groupName || ""), amount: Number.isInteger(amount) ? amount : 0, scoreBefore: Number.isInteger(scoreBefore) && scoreBefore >= 0 ? scoreBefore : 0, scoreAfter: Number.isInteger(scoreAfter) && scoreAfter >= 0 ? scoreAfter : 0, type: String(value?.type || "manual"), createdAt: String(value?.createdAt || "") };
+}
+
+function groupAssignmentFields(value) {
+  return { studentId: String(value?.studentId || ""), groupId: String(value?.groupId || "") };
+}
+
+function classMissionFields(value) {
+  const target = Number(value?.target);
+  return { id: String(value?.id || ""), target: Number.isInteger(target) && target > 0 ? target : 1, reward: String(value?.reward || ""), confirmed: value?.confirmed === true, confirmedAt: value?.confirmedAt == null ? null : String(value.confirmedAt) };
+}
+
+function groupScoreError(code, message, details = {}) {
+  const error = new Error(message); error.code = code; error.details = details; return error;
+}
+
 function roleError(code, message, details = {}) {
   const error = new Error(message); error.code = code; error.details = details; return error;
 }
@@ -130,7 +158,7 @@ try {
       if (!activeClassId) return { connected: false, activeClassId: "", classSettings: null };
       const classSnapshot = await getDoc(doc(db, "classes", activeClassId));
       if (!classSnapshot.exists()) { activeClassId = ""; return { connected: false, activeClassId: "", classSettings: null }; }
-      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true, rolesConnected: classSnapshot.data()?.rolesConnected === true, observationsConnected: classSnapshot.data()?.observationsConnected === true };
+      return { connected: true, activeClassId, classSettings: classSettings(classSnapshot.data()), assignmentsConnected: classSnapshot.data()?.assignmentsConnected === true, assignmentStudentStatesConnected: classSnapshot.data()?.assignmentStudentStatesConnected === true, pointsConnected: classSnapshot.data()?.pointsConnected === true, rolesConnected: classSnapshot.data()?.rolesConnected === true, observationsConnected: classSnapshot.data()?.observationsConnected === true, groupsConnected: classSnapshot.data()?.groupsConnected === true };
     },
     connectCurrentClass: async (value) => {
       const user = auth.currentUser;
@@ -185,6 +213,182 @@ try {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       const snapshot = await getDoc(doc(db, "classes", activeClassId, "observationSettings", "current")); if (!snapshot.exists()) return null; const value = snapshot.data();
       return { ...observationSettingsFields(value), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) };
+    },
+    saveGroupDefinition: async (group) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = groupDefinitionFields(group); if (!fields.id) throw new Error("Group id is required.");
+      const groupRef = doc(db, "classes", activeClassId, "groups", fields.id); const snapshot = await getDoc(groupRef); const timestamp = serverTimestamp();
+      await setDoc(groupRef, { ...fields, createdAt: snapshot.exists() && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp, updatedAt: timestamp });
+    },
+    loadGroupDefinitions: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "groups"));
+      return snapshot.docs.map((groupDoc) => { const value = groupDoc.data(); return { ...groupDefinitionFields({ ...value, id: groupDoc.id }), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
+    saveGroupScoreState: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = groupScoreStateFields(value); if (!fields.groupId) throw new Error("Group id is required.");
+      const stateRef = doc(db, "classes", activeClassId, "groupScoreStates", fields.groupId); const snapshot = await getDoc(stateRef); const timestamp = serverTimestamp();
+      await setDoc(stateRef, { ...fields, createdAt: snapshot.exists() && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp, updatedAt: timestamp });
+    },
+    loadGroupScoreStates: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "groupScoreStates"));
+      return snapshot.docs.map((stateDoc) => { const value = stateDoc.data(); return { ...groupScoreStateFields({ ...value, groupId: stateDoc.id }), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
+    saveGroupScoreTransaction: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = groupScoreTransactionFields(value); if (!fields.id) throw new Error("Group score transaction id is required.");
+      await setDoc(doc(db, "classes", activeClassId, "groupScoreTransactions", fields.id), fields);
+    },
+    loadGroupScoreTransactions: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "groupScoreTransactions"));
+      return snapshot.docs.map((transactionDoc) => groupScoreTransactionFields({ ...transactionDoc.data(), id: transactionDoc.id }));
+    },
+    applyGroupScoreChange: async ({ groupId, amount, expectedScore, transaction: transactionValue }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(groupId || ""); const delta = Number(amount); const expected = Number(expectedScore); const history = groupScoreTransactionFields(transactionValue);
+      if (!id || !history.id || !Number.isInteger(delta) || delta === 0 || !Number.isInteger(expected) || expected < 0) throw groupScoreError("group-score/invalid", "Group score mutation is invalid.", { groupId: id });
+      const stateRef = doc(db, "classes", activeClassId, "groupScoreStates", id);
+      const historyRef = doc(db, "classes", activeClassId, "groupScoreTransactions", history.id);
+      return runTransaction(db, async (firestoreTransaction) => {
+        const stateSnapshot = await firestoreTransaction.get(stateRef);
+        if (!stateSnapshot.exists()) throw groupScoreError("group-score/missing", "Group score state was not found.", { groupId: id });
+        const cloudScore = Number(stateSnapshot.data()?.score);
+        if (!Number.isInteger(cloudScore) || cloudScore < 0) throw groupScoreError("group-score/invalid-state", "Cloud group score is invalid.", { groupId: id, cloudScore });
+        if (cloudScore !== expected) throw groupScoreError("group-score/conflict", "Cloud group score changed.", { groupId: id, expectedScore: expected, cloudScore });
+        const scoreAfter = cloudScore + delta;
+        if (scoreAfter < 0) throw groupScoreError("group-score/insufficient", "Group score cannot be negative.", { groupId: id, scoreBefore: cloudScore, amount: delta });
+        const entry = groupScoreTransactionFields({ ...history, groupId: id, amount: delta, scoreBefore: cloudScore, scoreAfter });
+        const timestamp = serverTimestamp();
+        firestoreTransaction.set(historyRef, entry);
+        firestoreTransaction.set(stateRef, { groupId: id, score: scoreAfter, createdAt: stateSnapshot.data()?.createdAt || timestamp, updatedAt: timestamp });
+        return entry;
+      });
+    },
+    resetGroupScores: async ({ groups }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const targets = (Array.isArray(groups) ? groups : []).map((group) => ({ groupId: String(group?.groupId || ""), groupName: String(group?.groupName || ""), expectedScore: Number(group?.expectedScore), transactionId: String(group?.transactionId || ""), createdAt: String(group?.createdAt || "") }));
+      if (!targets.length || targets.length > 8 || targets.some((target) => !target.groupId || !target.groupName || !target.transactionId || !target.createdAt || !Number.isInteger(target.expectedScore) || target.expectedScore < 0) || new Set(targets.map((target) => target.groupId)).size !== targets.length || new Set(targets.map((target) => target.transactionId)).size !== targets.length) throw groupScoreError("group-score/invalid", "Group score reset is invalid.");
+      const stateRefs = targets.map((target) => doc(db, "classes", activeClassId, "groupScoreStates", target.groupId));
+      return runTransaction(db, async (firestoreTransaction) => {
+        const stateSnapshots = await Promise.all(stateRefs.map((stateRef) => firestoreTransaction.get(stateRef)));
+        const cloudScores = stateSnapshots.map((snapshot, index) => {
+          const target = targets[index];
+          if (!snapshot.exists()) throw groupScoreError("group-score/missing", "Group score state was not found.", { groupId: target.groupId });
+          const cloudScore = Number(snapshot.data()?.score);
+          if (!Number.isInteger(cloudScore) || cloudScore < 0) throw groupScoreError("group-score/invalid-state", "Cloud group score is invalid.", { groupId: target.groupId, cloudScore });
+          if (cloudScore !== target.expectedScore) throw groupScoreError("group-score/conflict", "Cloud group score changed.", { groupId: target.groupId, expectedScore: target.expectedScore, cloudScore });
+          return cloudScore;
+        });
+        const entries = targets.flatMap((target, index) => cloudScores[index] > 0 ? [groupScoreTransactionFields({ id: target.transactionId, groupId: target.groupId, groupName: target.groupName, amount: -cloudScores[index], scoreBefore: cloudScores[index], scoreAfter: 0, type: "reset", createdAt: target.createdAt })] : []);
+        const timestamp = serverTimestamp();
+        targets.forEach((target, index) => {
+          if (cloudScores[index] <= 0) return;
+          const entry = entries.find((item) => item.groupId === target.groupId);
+          firestoreTransaction.set(doc(db, "classes", activeClassId, "groupScoreTransactions", entry.id), entry);
+          firestoreTransaction.set(stateRefs[index], { groupId: target.groupId, score: 0, createdAt: stateSnapshots[index].data()?.createdAt || timestamp, updatedAt: timestamp });
+        });
+        return { scores: Object.fromEntries(targets.map((target) => [target.groupId, 0])), transactions: entries };
+      });
+    },
+    saveGroupAssignment: async (value) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = groupAssignmentFields(value); if (!fields.studentId || !fields.groupId) throw new Error("Student id and group id are required.");
+      const assignmentRef = doc(db, "classes", activeClassId, "groupAssignments", fields.studentId); const snapshot = await getDoc(assignmentRef); const timestamp = serverTimestamp();
+      await setDoc(assignmentRef, { ...fields, createdAt: snapshot.exists() && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp, updatedAt: timestamp });
+    },
+    loadGroupAssignments: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "groupAssignments"));
+      return Object.fromEntries(snapshot.docs.map((assignmentDoc) => { const fields = groupAssignmentFields({ ...assignmentDoc.data(), studentId: assignmentDoc.id }); return [fields.studentId, fields.groupId]; }));
+    },
+    deleteGroupAssignment: async (studentId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(studentId || ""); if (!id) throw new Error("Student id is required.");
+      await deleteDoc(doc(db, "classes", activeClassId, "groupAssignments", id));
+    },
+    saveGroupAssignmentsBatch: async (changes) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const normalized = (Array.isArray(changes) ? changes : []).map((change) => ({ studentId: String(change?.studentId || ""), groupId: String(change?.groupId || "") }));
+      if (!normalized.length || normalized.length > 450 || normalized.some((change) => !change.studentId) || new Set(normalized.map((change) => change.studentId)).size !== normalized.length) throw new Error("Group assignment batch is invalid.");
+      const refs = normalized.map((change) => doc(db, "classes", activeClassId, "groupAssignments", change.studentId));
+      const snapshots = await Promise.all(refs.map((ref) => getDoc(ref)));
+      const batch = writeBatch(db); const timestamp = serverTimestamp();
+      normalized.forEach((change, index) => {
+        if (!change.groupId) batch.delete(refs[index]);
+        else batch.set(refs[index], { studentId: change.studentId, groupId: change.groupId, createdAt: snapshots[index].exists() && snapshots[index].data()?.createdAt ? snapshots[index].data().createdAt : timestamp, updatedAt: timestamp });
+      });
+      await batch.commit();
+    },
+    saveGroupConfiguration: async ({ groups, newScoreStates, deletedAssignmentStudentIds }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const definitions = (Array.isArray(groups) ? groups : []).map(groupDefinitionFields);
+      const states = (Array.isArray(newScoreStates) ? newScoreStates : []).map(groupScoreStateFields);
+      const deletedStudentIds = [...new Set((Array.isArray(deletedAssignmentStudentIds) ? deletedAssignmentStudentIds : []).map((studentId) => String(studentId || "")).filter(Boolean))];
+      const operationCount = definitions.length + states.length + deletedStudentIds.length;
+      if (!operationCount || operationCount > 450 || definitions.some((group) => !group.id) || states.some((state) => !state.groupId || state.score !== 0) || new Set(definitions.map((group) => group.id)).size !== definitions.length || new Set(states.map((state) => state.groupId)).size !== states.length) throw new Error("Group configuration batch is invalid.");
+      const groupRefs = definitions.map((group) => doc(db, "classes", activeClassId, "groups", group.id));
+      const stateRefs = states.map((state) => doc(db, "classes", activeClassId, "groupScoreStates", state.groupId));
+      const [groupSnapshots, stateSnapshots] = await Promise.all([Promise.all(groupRefs.map((ref) => getDoc(ref))), Promise.all(stateRefs.map((ref) => getDoc(ref)))]);
+      const batch = writeBatch(db); const timestamp = serverTimestamp();
+      definitions.forEach((group, index) => batch.set(groupRefs[index], { ...group, createdAt: groupSnapshots[index].exists() && groupSnapshots[index].data()?.createdAt ? groupSnapshots[index].data().createdAt : timestamp, updatedAt: timestamp }));
+      states.forEach((state, index) => { if (!stateSnapshots[index].exists()) batch.set(stateRefs[index], { ...state, createdAt: timestamp, updatedAt: timestamp }); });
+      deletedStudentIds.forEach((studentId) => batch.delete(doc(db, "classes", activeClassId, "groupAssignments", studentId)));
+      await batch.commit();
+    },
+    saveClassMission: async (mission) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const fields = classMissionFields(mission); if (!fields.id) throw new Error("Class mission id is required.");
+      const missionRef = doc(db, "classes", activeClassId, "classMissions", fields.id); const snapshot = await getDoc(missionRef); const timestamp = serverTimestamp();
+      await setDoc(missionRef, { ...fields, createdAt: snapshot.exists() && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp, updatedAt: timestamp });
+    },
+    loadClassMissions: async () => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const snapshot = await getDocs(collection(db, "classes", activeClassId, "classMissions"));
+      return snapshot.docs.map((missionDoc) => { const value = missionDoc.data(); return { ...classMissionFields({ ...value, id: missionDoc.id }), createdAt: timestampIso(value?.createdAt), updatedAt: timestampIso(value?.updatedAt) }; });
+    },
+    deleteClassMission: async (missionId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(missionId || ""); if (!id) throw new Error("Class mission id is required.");
+      await deleteDoc(doc(db, "classes", activeClassId, "classMissions", id));
+    },
+    connectInitialGroups: async ({ groups, scoreStates, transactions, assignments, missions }) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const definitions = (Array.isArray(groups) ? groups : []).map(groupDefinitionFields);
+      const states = (Array.isArray(scoreStates) ? scoreStates : []).map(groupScoreStateFields);
+      const history = (Array.isArray(transactions) ? transactions : []).map(groupScoreTransactionFields);
+      const assignmentValues = (Array.isArray(assignments) ? assignments : []).map(groupAssignmentFields);
+      const missionValues = (Array.isArray(missions) ? missions : []).map(classMissionFields);
+      if (!definitions.length || definitions.some((group) => !group.id)) throw new Error("Group definitions are required.");
+      if (states.some((state) => !state.groupId) || history.some((entry) => !entry.id) || assignmentValues.some((assignment) => !assignment.studentId || !assignment.groupId) || missionValues.some((mission) => !mission.id)) throw new Error("Initial group snapshot contains an invalid id.");
+      const definitionIds = new Set(definitions.map((group) => group.id)); const stateIds = new Set(states.map((state) => state.groupId));
+      if (definitionIds.size !== definitions.length || stateIds.size !== states.length || definitionIds.size !== stateIds.size || [...definitionIds].some((groupId) => !stateIds.has(groupId))) throw new Error("Each group requires exactly one score state.");
+      const saveTimestamped = async (values, collectionName, idForValue, fieldsForValue) => {
+        for (let index = 0; index < values.length; index += 425) {
+          const chunk = values.slice(index, index + 425);
+          const refs = chunk.map((value) => doc(db, "classes", activeClassId, collectionName, idForValue(value)));
+          const snapshots = await Promise.all(refs.map((ref) => getDoc(ref)));
+          const batch = writeBatch(db); const timestamp = serverTimestamp();
+          chunk.forEach((value, itemIndex) => batch.set(refs[itemIndex], { ...fieldsForValue(value), createdAt: snapshots[itemIndex].exists() && snapshots[itemIndex].data()?.createdAt ? snapshots[itemIndex].data().createdAt : timestamp, updatedAt: timestamp }));
+          await batch.commit();
+        }
+      };
+      await saveTimestamped(definitions, "groups", (group) => group.id, (group) => group);
+      await saveTimestamped(states, "groupScoreStates", (state) => state.groupId, (state) => state);
+      for (let index = 0; index < history.length; index += 425) {
+        const batch = writeBatch(db);
+        history.slice(index, index + 425).forEach((entry) => batch.set(doc(db, "classes", activeClassId, "groupScoreTransactions", entry.id), entry));
+        await batch.commit();
+      }
+      await saveTimestamped(assignmentValues, "groupAssignments", (assignment) => assignment.studentId, (assignment) => assignment);
+      await saveTimestamped(missionValues, "classMissions", (mission) => mission.id, (mission) => mission);
+      await setDoc(doc(db, "classes", activeClassId), { groupsConnected: true, updatedAt: serverTimestamp() }, { merge: true });
+    },
+    setGroupsConnected: async (connected) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      await setDoc(doc(db, "classes", activeClassId), { groupsConnected: connected === true, updatedAt: serverTimestamp() }, { merge: true });
     },
     connectInitialObservations: async ({ observations, settings }) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
