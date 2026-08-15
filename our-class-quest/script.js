@@ -392,6 +392,12 @@ let firebaseClassLoadFailed = false;
 let firebaseStudentsChecked = false;
 let firebaseStudentsConnected = false;
 let firebaseStudentsLoadFailed = false;
+let firebaseStudentAccountCreating = false;
+let firebaseStudentAccountStatuses = {};
+let firebaseStudentAccountStatusesLoaded = false;
+let firebaseStudentAccountStatusesLoading = false;
+let firebaseStudentAccountStatusesLoadFailed = false;
+let firebaseStudentPasswordResetting = false;
 let firebaseLoadedCloudStudents = [];
 let firebaseAssignmentsChecked = false;
 let firebaseAssignmentsConnected = false;
@@ -548,7 +554,7 @@ function toast(message) { const element = document.querySelector("#toast"); elem
 function firebaseAuthMessage(error) { const code = error?.code || ""; if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return "Google 로그인 창이 닫혔습니다."; if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요."; if (code === "auth/unauthorized-domain") return "현재 도메인은 Google 로그인 허용 목록에 없습니다."; if (code === "auth/network-request-failed") return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."; return "Google 로그인 중 오류가 발생했습니다."; }
 function logFirebaseAuthError(error) { console.error("Firebase Google sign-in error details", { code: error?.code, message: error?.message, name: error?.name, customData: error?.customData }); console.error("Firebase Google sign-in error object", error); }
 async function enterFirebaseTeacher() { const client = window.ourClassFirebase; if (!client?.ready) { toast(client?.error ? "Firebase 초기화에 실패했습니다." : "Google 로그인을 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; } try { const user = await client.signInTeacher(); if (!user) return; firebaseTeacherUser = user; firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); toast(`${user.displayName || user.email || "선생님"} 선생님, 로그인했습니다.`); } catch (error) { logFirebaseAuthError(error); const isLocalDevelopment = location.hostname === "localhost" || location.hostname === "127.0.0.1"; toast(isLocalDevelopment ? `Google 로그인 오류: ${error?.code || "unknown"}` : firebaseAuthMessage(error)); } }
-function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseLoadedCloudStudents = []; }
+function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseStudentAccountCreating = false; firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoading = false; firebaseStudentAccountStatusesLoadFailed = false; firebaseStudentPasswordResetting = false; firebaseLoadedCloudStudents = []; }
 function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
 function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRolesConnecting = false; firebaseRoleConfigurationSaving = false; firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageInitializing = false; firebaseRoleDailyUsageDate = ""; firebaseRoleApplicationMutating = false; }
@@ -557,6 +563,21 @@ function resetFirebaseGroupState() { firebaseGroupsConnected = false; firebaseGr
 async function exitFirebaseTeacher() { try { await window.ourClassFirebase.signOutTeacher(); firebaseTeacherSession = false; firebaseTeacherUser = null; firebaseClassChecked = false; firebaseActiveClassId = ""; firebaseClassLoadFailed = false; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); session = { mode: "welcome", studentId: null, view: "home" }; render(); } catch (error) { console.error("Firebase sign-out failed", error); toast("Firebase 로그아웃 중 오류가 발생했습니다."); } }
 function appendCloudStudent(student) { const added = { id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] }; data.students.push(added); data.assignments.forEach((assignment) => setAssignmentStatusForStudent(assignment, added.id, "missing")); return added; }
 async function loadFirebaseStudents(userUid, commit = true) { try { const students = await window.ourClassFirebase.loadStudents(); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseLoadedCloudStudents = students.map((student) => ({ ...student })); firebaseStudentsChecked = true; firebaseStudentsLoadFailed = false; firebaseStudentsConnected = students.length > 0; if (students.length) { const localById = new Map(data.students.map((student) => [student.id, student])); students.sort((first, second) => first.orderIndex - second.orderIndex).forEach((cloudStudent) => { const localStudent = localById.get(cloudStudent.id); if (localStudent) Object.assign(localStudent, { number: cloudStudent.number, name: cloudStudent.name, loginId: cloudStudent.loginId, active: cloudStudent.active !== false }); else appendCloudStudent(cloudStudent); }); } if (commit) { saveData(); render(); } return true; } catch (error) { console.error("Firestore students load failed", error); if (firebaseTeacherUser?.uid !== userUid) return false; firebaseLoadedCloudStudents = []; firebaseStudentsChecked = true; firebaseStudentsLoadFailed = true; firebaseStudentsConnected = false; if (commit && session.view === "class-settings") render(); return false; } }
+async function loadFirebaseStudentAccountStatuses(userUid, classId) {
+  if (firebaseStudentAccountStatusesLoading || !classId || !window.ourClassFirebase?.getStudentAccountStatuses) return false;
+  firebaseStudentAccountStatusesLoading = true; firebaseStudentAccountStatusesLoadFailed = false;
+  try {
+    const result = await window.ourClassFirebase.getStudentAccountStatuses({ classId });
+    if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) return false;
+    if (!result.ok) throw new Error("Student account statuses could not be loaded.");
+    firebaseStudentAccountStatuses = result.accounts || {}; firebaseStudentAccountStatusesLoaded = true; return true;
+  } catch (error) {
+    if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) return false;
+    firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoadFailed = true; return false;
+  } finally {
+    if (firebaseTeacherUser?.uid === userUid && firebaseActiveClassId === classId) firebaseStudentAccountStatusesLoading = false;
+  }
+}
 function mergeFirebaseAssignments(cloudAssignments) {
   const cloudById = new Map(cloudAssignments.map((assignment) => [assignment.id, assignment]));
   const localById = new Map(data.assignments.map((assignment) => [assignment.id, assignment]));
@@ -744,7 +765,7 @@ async function reloadFirebaseRoleApplicationsAndUsage(userUid) {
   if (!applicationsLoaded || !usage) return false;
   saveData(); render(); return true;
 }
-async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; firebaseRolesConnected = result.rolesConnected === true; firebaseObservationsConnected = result.observationsConnected === true; firebaseGroupsConnected = result.groupsConnected === true; firebaseGroupsLoadReady = !firebaseGroupsConnected; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { if (firebaseGroupsConnected) await loadFirebaseGroups(userUid, false); if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); if (firebaseRolesConnected) await loadFirebaseRoles(userUid, false); if (firebaseObservationsConnected) await loadFirebaseObservations(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); if (session.view === "class-settings") render(); } }
+async function loadFirebaseClassSettings(userUid) { try { const result = await window.ourClassFirebase.loadTeacherClass(); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId || ""; firebaseAssignmentsConnected = result.assignmentsConnected === true; firebaseAssignmentStudentStatesConnected = result.assignmentStudentStatesConnected === true; firebasePointsConnected = result.pointsConnected === true; firebaseRolesConnected = result.rolesConnected === true; firebaseObservationsConnected = result.observationsConnected === true; firebaseGroupsConnected = result.groupsConnected === true; firebaseGroupsLoadReady = !firebaseGroupsConnected; if (firebaseActiveClassId) saveLocalCloudConnection(firebaseActiveClassId, firebasePointsConnected); if (result.connected && result.classSettings) { data.classSettings = { ...data.classSettings, ...result.classSettings }; const studentsReady = await loadFirebaseStudents(userUid, false); if (studentsReady) { await loadFirebaseStudentAccountStatuses(userUid, firebaseActiveClassId); if (firebaseGroupsConnected) await loadFirebaseGroups(userUid, false); if (firebaseAssignmentsConnected) await loadFirebaseAssignments(userUid, false); if (firebasePointsConnected) await loadFirebasePoints(userUid, false); if (firebaseAssignmentStudentStatesConnected) await loadFirebaseAssignmentStudentStates(userUid, false); if (firebaseRolesConnected) await loadFirebaseRoles(userUid, false); if (firebaseObservationsConnected) await loadFirebaseObservations(userUid, false); } if (firebaseTeacherUser?.uid === userUid) { saveData(); render(); } } else { resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); if (session.view === "class-settings") render(); } } catch (error) { console.error("Firestore class settings load failed", error); if (firebaseTeacherUser?.uid !== userUid) return; firebaseClassChecked = true; firebaseClassLoadFailed = true; firebaseActiveClassId = ""; resetFirebaseStudentState(); resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); if (session.view === "class-settings") render(); } }
 async function connectCurrentClassToFirebase() { if (!firebaseTeacherSession || !firebaseTeacherUser || !window.ourClassFirebase?.ready) return; if (!confirm("현재 학급의 기본정보를 클라우드 학급으로 연결할까요?")) return; try { const result = await window.ourClassFirebase.connectCurrentClass({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); firebaseClassChecked = true; firebaseClassLoadFailed = false; firebaseActiveClassId = result.activeClassId; saveLocalCloudConnection(firebaseActiveClassId, false); firebaseStudentsChecked = true; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; resetFirebaseAssignmentState(); resetFirebasePointState(); resetFirebaseRoleState(); resetFirebaseObservationState(); resetFirebaseGroupState(); render(); toast("현재 학급의 기본정보를 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore class connection failed", error); toast("클라우드 학급 연결에 실패했습니다. 로컬 데이터는 유지됩니다."); } }
 async function saveFirebaseClassSettings() { if (!firebaseTeacherSession || !firebaseActiveClassId || !window.ourClassFirebase?.ready) return; try { await window.ourClassFirebase.saveClassSettings({ className: data.classSettings.className, teacherName: data.classSettings.teacherName, appName: data.classSettings.appName }); } catch (error) { console.error("Firestore class settings save failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
 async function connectStudentsToFirebase() { if (!firebaseTeacherSession || !firebaseActiveClassId || !firebaseStudentsChecked || firebaseStudentsConnected || firebaseStudentsLoadFailed) return; if (!confirm("현재 브라우저의 학생 명단을 클라우드 학급의 기준 명단으로 등록할까요?")) return; try { await window.ourClassFirebase.uploadInitialStudents(data.students); firebaseStudentsConnected = true; firebaseLoadedCloudStudents = data.students.map((student, orderIndex) => ({ id: student.id, number: student.number, name: student.name, loginId: student.loginId, active: student.active !== false, orderIndex })); render(); toast("학생 명단을 클라우드에 연결했습니다."); } catch (error) { console.error("Firestore initial students upload failed", error); toast("클라우드 저장에 실패했습니다. 로컬에는 저장되었습니다."); } }
@@ -1177,6 +1198,40 @@ function openClassStudentModal(studentId = "") {
   const student = studentById(studentId); const suggestedNumber = activeStudents().reduce((max, item) => Math.max(max, studentNumber(item)), 0) + 1;
   app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="class-student-form" class="modal-card form" data-id="${studentId}"><h2>${student ? "학생 정보 수정" : "학생 추가"}</h2><label>번호<input name="number" type="number" min="1" max="99" step="1" value="${student ? studentNumber(student) : suggestedNumber}" required></label><label>이름<input name="name" maxlength="30" value="${escapeHtml(student?.name || "")}" required></label><label>로그인 ID<input name="loginId" maxlength="40" pattern="[A-Za-z0-9._-]+" value="${escapeHtml(student?.loginId || nextStudentLoginId(suggestedNumber))}" required><small>영문, 숫자, 점(.), 밑줄(_), 하이픈(-)을 사용할 수 있습니다.</small></label><p class="muted">학생 ID는 변경되지 않아 기존 과제·포인트·카드 기록이 계속 연결됩니다.</p><div class="button-row"><button class="button success" type="submit">${student ? "저장" : "추가"}</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
+function openStudentAccountModal(studentId) {
+  const student = studentById(studentId);
+  if (!student || student.active === false) return toast("활성 학생만 계정을 만들 수 있습니다.");
+  if (!firebaseTeacherSession || !firebaseTeacherUser || !firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.ready) return toast("교사 로그인과 클라우드 학생 명단 연결을 확인해 주세요.");
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="student-account-form" class="modal-card form" data-id="${student.id}"><h2>학생 계정 만들기</h2><p><strong>${escapeHtml(student.name)}</strong> 학생의 Firebase 로그인 계정을 만듭니다.</p><dl class="backup-summary"><div><dt>학생</dt><dd>${studentNumber(student)}번 ${escapeHtml(student.name)}</dd></div><div><dt>로그인 ID</dt><dd><code>${escapeHtml(student.loginId)}</code></dd></div></dl><p class="muted">로그인 ID는 확인용입니다. 서버에서 현재 클라우드 학생 정보를 다시 확인합니다.</p><label>비밀번호<input name="password" type="password" minlength="6" autocomplete="new-password" required></label><label>비밀번호 확인<input name="passwordConfirm" type="password" minlength="6" autocomplete="new-password" required></label><div class="button-row"><button class="button success" type="submit">계정 만들기</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+function openStudentPasswordResetModal(studentId) {
+  const student = studentById(studentId); const account = firebaseStudentAccountStatuses[studentId];
+  if (!student || student.active === false) return toast("활성 학생만 비밀번호를 초기화할 수 있습니다.");
+  if (!account?.exists || account.active !== true) return toast("생성된 학생 계정을 확인할 수 없습니다.");
+  if (!firebaseTeacherSession || !firebaseTeacherUser || !firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.ready) return toast("교사 로그인과 클라우드 학생 명단 연결을 확인해 주세요.");
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="student-password-reset-form" class="modal-card form" data-id="${student.id}"><h2>학생 비밀번호 초기화</h2><p><strong>${escapeHtml(student.name)}</strong> 학생의 새 비밀번호를 설정합니다.</p><dl class="backup-summary"><div><dt>학생</dt><dd>${studentNumber(student)}번 ${escapeHtml(student.name)}</dd></div><div><dt>로그인 ID</dt><dd><code>${escapeHtml(student.loginId)}</code></dd></div></dl><label>새 비밀번호<input name="password" type="password" minlength="6" autocomplete="new-password" required></label><label>새 비밀번호 확인<input name="passwordConfirm" type="password" minlength="6" autocomplete="new-password" required></label><div class="button-row"><button class="button success" type="submit">비밀번호 초기화</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+}
+function studentAccountErrorMessage(error) {
+  const code = String(error?.code || "").replace(/^functions\//, "");
+  return {
+    unauthenticated: "학생 계정을 만들려면 교사 Google 로그인이 필요합니다.",
+    "permission-denied": "이 학급의 학생 계정을 만들 권한이 없습니다.",
+    "not-found": "학생 또는 학급 정보를 찾을 수 없습니다.",
+    "failed-precondition": "활성 상태와 학생 로그인 정보를 확인해 주세요.",
+    "already-exists": "같은 로그인 ID에 연결된 다른 학생 계정이 있습니다.",
+    "invalid-argument": "비밀번호 또는 학생 로그인 정보를 확인해 주세요."
+  }[code] || "학생 계정을 만들지 못했습니다.";
+}
+function studentPasswordResetErrorMessage(error) {
+  const code = String(error?.code || "").replace(/^functions\//, "");
+  return {
+    unauthenticated: "학생 비밀번호를 초기화하려면 교사 Google 로그인이 필요합니다.",
+    "permission-denied": "이 학급 학생의 비밀번호를 초기화할 권한이 없습니다.",
+    "not-found": "학생 또는 생성된 학생 계정을 찾을 수 없습니다.",
+    "failed-precondition": "활성 학생과 계정 연결 상태를 확인해 주세요.",
+    "invalid-argument": "새 비밀번호 입력을 확인해 주세요."
+  }[code] || "학생 비밀번호를 초기화하지 못했습니다.";
+}
 function openBulkStudentsModal() {
   app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="bulk-students-form" class="modal-card form bulk-students-modal"><h2>학생 일괄 등록</h2><p class="muted">한 줄에 <strong>번호.이름</strong> 또는 <strong>번호,이름</strong> 형식으로 입력하세요.<br>이름만 입력하면 마지막 번호 다음 번호가 자동으로 부여됩니다.</p><label>학생 목록<textarea name="students" rows="12" required placeholder="1.김민수\n2.이서연\n4.박지훈\n최유진"></textarea></label><div class="button-row"><button class="button success" type="submit">내용 확인</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
@@ -1255,14 +1310,23 @@ function teacherStudentDetail(student) {
   const assignments = activeAssignmentSummary(student); const observations = studentObservations(student); const roleStats = studentRoleFourWeekStats(student); const representative = representativeCardInfo(student); const pointCount = (student.pointHistory || []).length; const assignmentFilter = studentDetailAssignmentFilters[student.id] || "all";
   const assignmentButtons = [["all", "전체", assignments.active.length], ["missing", "미제출", assignments.missing], ["review", "확인 대기", assignments.review], ["submitted", "제출 완료", assignments.submitted]].map(([value, label, count]) => `<button class="student-assignment-filter ${assignmentFilter === value ? "active" : ""}" data-action="filter-student-detail-assignments" data-id="${student.id}" data-status="${value}">${label} ${count}</button>`).join("");
   const cardsSummary = `<p><strong>대표 카드:</strong> ${studentRepresentativeLabel(student)}</p><p><strong>수집 카드 종류:</strong> ${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장</p>`;
-  return `<div class="student-detail-page"><div class="section-heading"><div><button class="button secondary compact" data-action="close-student-detail">← 학생 목록</button><h1 class="page-heading">${studentNumber(student)}번 ${escapeHtml(student.name)}</h1><p class="page-description">학생 한 명을 중심으로 현재 상태와 최근 기록을 확인합니다.</p></div></div><section class="student-profile-summary card"><div><span>현재 포인트</span><strong>${student.points}P</strong></div><div><span>대표 카드</span><strong>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}` : "없음"}</strong><small>${representative?.ability?.name || ""}</small></div><div><span>수집 카드 종류</span><strong>${studentCollectedTypes(student)}종</strong></div></section><div class="student-recent-summary"><article class="student-assignment-summary"><span>진행 중 과제</span><div class="student-assignment-filters">${assignmentButtons}</div></article><article><span>이번 주 1인1역</span><strong>완료 ${roleStats.thisWeek}회</strong></article><article><span>이번 주 획득 포인트</span><strong>${weeklyEarnedPoints(student)}P</strong></article><article><span>학생 관찰 기록</span><strong>총 ${observations.length}건</strong></article></div><div class="student-detail-grid">${studentRecordSection("과제", `${assignments.active.length}개 중 ${assignmentFilter === "all" ? "전체" : ASSIGNMENT_STATUS_LABELS[assignmentFilter]} 보기`, studentDetailAssignments(student), `<button class="button secondary compact record-view-all" data-action="view-student-assignments" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("1인1역", `이번 주 완료 ${roleStats.thisWeek}회 · 최근 4주 ${roleStats.recentFourWeeks}회`, studentRoleTrend(student), roleStats.total > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 기록 보기</button>` : "")}${studentRecordSection("학생 관찰 기록", `총 ${observations.length}건 · 최근 최대 5건`, studentDetailObservations(student), `<button class="button secondary compact record-view-all" data-action="manage-student-observations" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("포인트", `현재 ${student.points}P · 최근 ${Math.min(5, pointCount)}건`, studentDetailPoints(student), `<button class="button secondary compact record-view-all" data-action="navigate" data-view="points">전체 보기</button>`)}${studentRecordSection("카드", `${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장`, cardsSummary, `<button class="button secondary compact record-view-all" data-action="navigate" data-view="cards">전체 보기</button>`)}</div></div>`;
+  return `<div class="student-detail-page"><div class="section-heading"><div><button class="button secondary compact" data-action="close-student-detail">← 학생 목록</button><h1 class="page-heading">${studentNumber(student)}번 ${escapeHtml(student.name)}</h1><p class="page-description">학생 한 명을 중심으로 현재 상태와 최근 기록을 확인합니다.</p></div><div class="button-row">${studentAccountButton(student)}</div></div><section class="student-profile-summary card"><div><span>현재 포인트</span><strong>${student.points}P</strong></div><div><span>대표 카드</span><strong>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}` : "없음"}</strong><small>${representative?.ability?.name || ""}</small></div><div><span>수집 카드 종류</span><strong>${studentCollectedTypes(student)}종</strong></div></section><div class="student-recent-summary"><article class="student-assignment-summary"><span>진행 중 과제</span><div class="student-assignment-filters">${assignmentButtons}</div></article><article><span>이번 주 1인1역</span><strong>완료 ${roleStats.thisWeek}회</strong></article><article><span>이번 주 획득 포인트</span><strong>${weeklyEarnedPoints(student)}P</strong></article><article><span>학생 관찰 기록</span><strong>총 ${observations.length}건</strong></article></div><div class="student-detail-grid">${studentRecordSection("과제", `${assignments.active.length}개 중 ${assignmentFilter === "all" ? "전체" : ASSIGNMENT_STATUS_LABELS[assignmentFilter]} 보기`, studentDetailAssignments(student), `<button class="button secondary compact record-view-all" data-action="view-student-assignments" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("1인1역", `이번 주 완료 ${roleStats.thisWeek}회 · 최근 4주 ${roleStats.recentFourWeeks}회`, studentRoleTrend(student), roleStats.total > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 기록 보기</button>` : "")}${studentRecordSection("학생 관찰 기록", `총 ${observations.length}건 · 최근 최대 5건`, studentDetailObservations(student), `<button class="button secondary compact record-view-all" data-action="manage-student-observations" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("포인트", `현재 ${student.points}P · 최근 ${Math.min(5, pointCount)}건`, studentDetailPoints(student), `<button class="button secondary compact record-view-all" data-action="navigate" data-view="points">전체 보기</button>`)}${studentRecordSection("카드", `${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장`, cardsSummary, `<button class="button secondary compact record-view-all" data-action="navigate" data-view="cards">전체 보기</button>`)}</div></div>`;
 }
 function teacherStudents() { const selected = studentById(studentDetailId); if (selected && selected.active !== false) return teacherStudentDetail(selected); const keyword = studentManagementSearch.trim().toLocaleLowerCase("ko-KR"); const students = activeStudents().filter((student) => !keyword || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || String(studentNumber(student)).includes(keyword)); return `<div class="section-heading"><div><h1 class="page-heading">학생 관리</h1><p class="page-description">전체 학생의 객관적인 현재 상태를 한눈에 확인하세요.</p></div></div><div class="student-management-search"><input id="student-management-search" value="${escapeHtml(studentManagementSearch)}" placeholder="학생 이름 또는 번호 검색" aria-label="학생 이름 또는 번호 검색"><button class="button secondary compact" data-action="reset-student-management-search">초기화</button><span id="student-management-count">${students.length}명</span></div><div class="student-overview-grid">${students.map(studentManagementCard).join("") || `<div class="empty">검색 결과가 없습니다.</div>`}</div>`; }
 
+function studentAccountButton(student) {
+  const ready = firebaseTeacherSession && firebaseTeacherUser && firebaseActiveClassId && firebaseStudentsConnected && window.ourClassFirebase?.ready;
+  if (!ready) return `<button class="button success compact" disabled>계정 만들기</button>`;
+  if (firebaseStudentAccountStatusesLoadFailed) return `<button class="button secondary compact" disabled>확인 실패</button>`;
+  if (!firebaseStudentAccountStatusesLoaded || firebaseStudentAccountStatusesLoading) return `<button class="button secondary compact" disabled>확인 중...</button>`;
+  const account = firebaseStudentAccountStatuses[student.id];
+  if (account?.exists) return `<span class="student-account-status">✅ 계정 생성됨</span><button class="button secondary compact" data-action="reset-student-password" data-id="${student.id}">비밀번호 초기화</button>`;
+  return `<button class="button success compact" data-action="open-student-account" data-id="${student.id}">계정 만들기</button>`;
+}
 function teacherClassSettingsBase() {
   const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR");
   const students = activeStudents().filter((student) => !keyword || String(studentNumber(student)).includes(keyword) || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || student.loginId.toLocaleLowerCase("en-US").includes(keyword));
-  const rows = students.map((student) => `<tr data-class-student-id="${student.id}"><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions"><button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button danger compact" data-action="ask-delete-class-student" data-id="${student.id}">삭제</button></div></td></tr>`).join("");
+  const rows = students.map((student) => `<tr data-class-student-id="${student.id}"><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions">${studentAccountButton(student)}<button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button danger compact" data-action="ask-delete-class-student" data-id="${student.id}">삭제</button></div></td></tr>`).join("");
   const inactiveStudents = data.students.filter((student) => student.active === false).sort((first, second) => studentNumber(first) - studentNumber(second) || first.name.localeCompare(second.name, "ko"));
   const inactiveRows = inactiveStudents.map((student) => `<tr><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions"><button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button success compact" data-action="restore-class-student" data-id="${student.id}">복구</button></div></td></tr>`).join("");
   const inactiveSection = inactiveStudents.length ? `<details class="inactive-student-section"><summary>비활성 학생 ${inactiveStudents.length}명 보기</summary><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${inactiveRows}</tbody></table></div></details>` : "";
@@ -2097,6 +2161,8 @@ app.addEventListener("click", async (event) => {
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
   if (action === "open-bulk-students") return openBulkStudentsModal();
+  if (action === "open-student-account") { if (firebaseStudentAccountCreating) return toast("학생 계정을 만드는 중입니다."); return openStudentAccountModal(target.dataset.id); }
+  if (action === "reset-student-password") { if (firebaseStudentPasswordResetting) return toast("학생 비밀번호를 초기화하는 중입니다."); return openStudentPasswordResetModal(target.dataset.id); }
   if (action === "ask-delete-class-student") {
     const student = studentById(target.dataset.id); if (!student || student.active === false) return;
     app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>학생 삭제 확인</h2><p><strong>${escapeHtml(student.name)}</strong> 학생을 삭제하시겠습니까?</p><p>이 학생에게 연결된 과제, 1인1역, 포인트, 카드 등의 기록이 있을 수 있습니다.</p><p class="muted">기록 보호를 위해 완전히 지우지 않고 명단에서만 비활성화합니다.</p><div class="button-row"><button class="button danger" data-action="confirm-delete-class-student" data-id="${student.id}">삭제</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return;
@@ -2511,6 +2577,58 @@ app.addEventListener("submit", async (event) => {
   if (form.id === "class-feature-form") {
     data.classSettings.features = Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, formData.has(key)]));
     session.view = "class-settings"; saveData(); render(); toast("기능 사용 설정을 저장했습니다."); return;
+  }
+  if (form.id === "student-account-form") {
+    if (firebaseStudentAccountCreating) return toast("학생 계정을 만드는 중입니다.");
+    const student = studentById(form.dataset.id); const passwordInput = form.elements.password; const confirmationInput = form.elements.passwordConfirm;
+    const password = String(formData.get("password") || ""); const passwordConfirm = String(formData.get("passwordConfirm") || "");
+    if (!student || student.active === false) return toast("활성 학생만 계정을 만들 수 있습니다.");
+    const actualUser = window.ourClassFirebase?.getCurrentUser?.();
+    if (!firebaseTeacherSession || !firebaseTeacherUser?.uid || actualUser?.uid !== firebaseTeacherUser.uid) return toast("학생 계정을 만들려면 교사 Google 로그인이 필요합니다.");
+    if (!firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.createStudentAccount) return toast("클라우드 학급과 학생 명단 연결을 확인해 주세요.");
+    if (password.length < 6) return toast("비밀번호는 6자 이상 입력해 주세요.");
+    if (password !== passwordConfirm) return toast("비밀번호 확인이 일치하지 않습니다.");
+    const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId; const submitButton = form.querySelector('[type="submit"]');
+    firebaseStudentAccountCreating = true; if (submitButton) submitButton.disabled = true;
+    try {
+      const result = await window.ourClassFirebase.createStudentAccount({ classId, studentId: student.id, password });
+      if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw { code: "functions/failed-precondition" };
+      if (!result.ok || result.studentId !== student.id) throw { code: "functions/failed-precondition" };
+      firebaseStudentAccountStatuses[student.id] = { exists: true, active: true, loginId: result.loginId || student.loginId }; firebaseStudentAccountStatusesLoaded = true; firebaseStudentAccountStatusesLoadFailed = false;
+      form.closest(".modal")?.remove(); render(); toast(result.created ? "학생 계정을 만들었습니다." : "이미 생성된 학생 계정입니다.");
+    } catch (error) {
+      toast(studentAccountErrorMessage(error));
+    } finally {
+      if (passwordInput) passwordInput.value = ""; if (confirmationInput) confirmationInput.value = "";
+      firebaseStudentAccountCreating = false; if (submitButton?.isConnected) submitButton.disabled = false;
+    }
+    return;
+  }
+  if (form.id === "student-password-reset-form") {
+    if (firebaseStudentPasswordResetting) return toast("학생 비밀번호를 초기화하는 중입니다.");
+    const student = studentById(form.dataset.id); const passwordInput = form.elements.password; const confirmationInput = form.elements.passwordConfirm;
+    const password = String(formData.get("password") || ""); const passwordConfirm = String(formData.get("passwordConfirm") || "");
+    if (!student || student.active === false) return toast("활성 학생만 비밀번호를 초기화할 수 있습니다.");
+    if (!firebaseStudentAccountStatuses[student.id]?.exists) return toast("생성된 학생 계정을 확인할 수 없습니다.");
+    const actualUser = window.ourClassFirebase?.getCurrentUser?.();
+    if (!firebaseTeacherSession || !firebaseTeacherUser?.uid || actualUser?.uid !== firebaseTeacherUser.uid) return toast("학생 비밀번호를 초기화하려면 교사 Google 로그인이 필요합니다.");
+    if (!firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.resetStudentPassword) return toast("클라우드 학급과 학생 명단 연결을 확인해 주세요.");
+    if (password.length < 6) return toast("비밀번호는 6자 이상 입력해 주세요.");
+    if (password !== passwordConfirm) return toast("비밀번호 확인이 일치하지 않습니다.");
+    const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId; const submitButton = form.querySelector('[type="submit"]');
+    firebaseStudentPasswordResetting = true; if (submitButton) submitButton.disabled = true;
+    try {
+      const result = await window.ourClassFirebase.resetStudentPassword({ classId, studentId: student.id, password });
+      if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw { code: "functions/failed-precondition" };
+      if (!result.ok || result.studentId !== student.id) throw { code: "functions/failed-precondition" };
+      form.closest(".modal")?.remove(); render(); toast("학생 비밀번호를 초기화했습니다.");
+    } catch (error) {
+      toast(studentPasswordResetErrorMessage(error));
+    } finally {
+      if (passwordInput) passwordInput.value = ""; if (confirmationInput) confirmationInput.value = "";
+      firebaseStudentPasswordResetting = false; if (submitButton?.isConnected) submitButton.disabled = false;
+    }
+    return;
   }
   if (form.id === "class-student-form") {
     const number = Number(formData.get("number")); const name = String(formData.get("name") || "").trim(); const loginId = String(formData.get("loginId") || "").trim(); const existing = studentById(form.dataset.id);

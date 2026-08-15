@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import { getFirestore, doc, collection, getDoc, getDocs, setDoc, deleteDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -142,6 +143,10 @@ try {
   const firebaseApp = initializeApp(firebaseConfig);
   const auth = getAuth(firebaseApp);
   const db = getFirestore(firebaseApp);
+  const functions = getFunctions(firebaseApp, "asia-northeast3");
+  const createStudentAccountCallable = httpsCallable(functions, "createStudentAccount");
+  const getStudentAccountStatusesCallable = httpsCallable(functions, "getStudentAccountStatuses");
+  const resetStudentPasswordCallable = httpsCallable(functions, "resetStudentPassword");
   const provider = new GoogleAuthProvider();
   let activeClassId = "";
   window.ourClassFirebase = {
@@ -150,6 +155,50 @@ try {
     signOutTeacher: () => signOut(auth),
     getCurrentUser: () => publicUser(auth.currentUser),
     getActiveClassId: () => activeClassId,
+    createStudentAccount: async ({classId, studentId, password}) => {
+      const result = await createStudentAccountCallable({
+        classId: String(classId || ""),
+        studentId: String(studentId || ""),
+        password,
+      });
+      const value = result?.data && typeof result.data === "object" ?
+        result.data : {};
+      return {
+        ok: value.ok === true,
+        created: value.created === true,
+        uid: String(value.uid || ""),
+        studentId: String(value.studentId || ""),
+        loginId: String(value.loginId || ""),
+      };
+    },
+    getStudentAccountStatuses: async ({classId}) => {
+      const result = await getStudentAccountStatusesCallable({
+        classId: String(classId || ""),
+      });
+      const value = result?.data && typeof result.data === "object" ?
+        result.data : {};
+      const source = value.accounts && typeof value.accounts === "object" &&
+        !Array.isArray(value.accounts) ? value.accounts : {};
+      const accounts = Object.fromEntries(Object.entries(source).map(([studentId, account]) => [String(studentId), {
+        exists: account?.exists === true,
+        active: account?.active === true,
+        loginId: String(account?.loginId || ""),
+      }]));
+      return {ok: value.ok === true, accounts};
+    },
+    resetStudentPassword: async ({classId, studentId, password}) => {
+      const result = await resetStudentPasswordCallable({
+        classId: String(classId || ""),
+        studentId: String(studentId || ""),
+        password,
+      });
+      const value = result?.data && typeof result.data === "object" ?
+        result.data : {};
+      return {
+        ok: value.ok === true,
+        studentId: String(value.studentId || ""),
+      };
+    },
     loadTeacherClass: async () => {
       const user = auth.currentUser;
       if (!user) throw new Error("Firebase teacher is not signed in.");

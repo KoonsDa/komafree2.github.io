@@ -297,13 +297,21 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .class-student-search { grid-template-columns: minmax(220px, 420px) auto; align-items: center; margin: 16px 0; }
 .class-student-search span { color: #687188; font-weight: 800; }
 .class-roster-table-wrap { overflow-x: auto; }
-.class-roster-table { width: 100%; border-collapse: collapse; }
-.class-roster-table th, .class-roster-table td { padding: 12px 14px; border-bottom: 1px solid #e5e8ef; text-align: left; vertical-align: middle; }
+.class-roster-table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
+.class-roster-table th, .class-roster-table td { padding: 10px 12px; border-bottom: 1px solid #e5e8ef; text-align: left; vertical-align: middle; }
 .class-roster-table th { background: #f6f8fc; color: #536078; font-size: .86rem; }
-.class-roster-table td:first-child { width: 80px; font-weight: 900; }
-.class-roster-table td:last-child { width: 150px; }
+.class-roster-table th:first-child, .class-roster-table td:first-child { width: 72px; }
+.class-roster-table td:first-child { font-weight: 900; }
+.class-roster-table th:nth-child(3), .class-roster-table td:nth-child(3) { width: 200px; }
+.class-roster-table th:last-child, .class-roster-table td:last-child { width: 420px; }
 .class-roster-table code { color: #536078; background: #f1f3f7; padding: 4px 7px; border-radius: 6px; }
-.class-student-actions { flex-wrap: nowrap; }
+.class-student-actions { flex-wrap: nowrap; align-items: center; gap: 8px; margin-top: 0; }
+.class-student-actions .button { flex: 0 0 auto; min-width: 60px; white-space: nowrap; }
+.class-student-actions [data-action="open-student-account"] { min-width: 110px; }
+.student-account-status { flex: 0 0 auto; color: #287052; font-size: .86rem; font-weight: 900; white-space: nowrap; }
+@media (min-width: 901px) {
+  .layout:has(.class-roster-card) { width: min(1560px, 100%); }
+}
 .class-login-note { margin: 16px 0 0; padding: 12px 14px; border-radius: 10px; background: #fff8dd; color: #675c37; }
 .inactive-student-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e1e4ee; }
 .inactive-student-section summary { color: #687188; cursor: pointer; font-weight: 900; }
@@ -334,7 +342,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .class-info-form { grid-template-columns: 1fr; }
   .class-student-search { grid-template-columns: 1fr; }
   .class-roster-card > .section-heading { gap: 12px; }
-  .class-roster-table { min-width: 620px; }
+  .class-roster-table { min-width: 680px; table-layout: auto; }
+  .class-roster-table th:nth-child(3), .class-roster-table td:nth-child(3) { width: 180px; }
+  .class-roster-table th:last-child, .class-roster-table td:last-child { width: 260px; }
+  .class-student-actions { flex-wrap: wrap; }
   .class-feature-list { grid-template-columns: 1fr; }
 }
 .teacher-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
