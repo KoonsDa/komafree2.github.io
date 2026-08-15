@@ -68,7 +68,8 @@
     "close-student-detail",
     "manage-student-observations",
     "view-student-assignments",
-    "logout"
+    "go-home",
+    "firebase-logout"
   ]);
 
   // 기존 script.js의 클릭 처리가 끝난 뒤 변경된 session 상태를 브라우저 기록에 쌓는다.

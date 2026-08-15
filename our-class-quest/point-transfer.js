@@ -58,8 +58,7 @@
       const transferId = crypto.randomUUID(); const now = new Date().toISOString();
       const fromEntry = { id: crypto.randomUUID(), amount: -amount, reason: `친구에게 선물 (${toStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now };
       const toEntry = { id: crypto.randomUUID(), amount, reason: `친구에게 선물 받음 (${fromStudent.name})`, source: "친구 포인트 선물", relatedId: transferId, date: new Date().toLocaleDateString("ko-KR"), createdAt: now };
-      if (!applyStudentPointChange(fromStudent, -amount, fromEntry)) { toast("현재 보유 포인트가 부족합니다."); return; }
-      applyStudentPointChange(toStudent, amount, toEntry);
+      if (!applyStudentPointChanges([{ student: fromStudent, balanceDelta: -amount, historyEntries: fromEntry }, { student: toStudent, balanceDelta: amount, historyEntries: toEntry }])) { if (pointChangeFailureReason !== "cloud-unavailable") toast("현재 보유 포인트가 부족합니다."); return; }
       data.pointTransfers.push({ id: transferId, fromStudentId: fromStudent.id, toStudentId: toStudent.id, amount, date: todayString(), createdAt: now });
       saveData(); render(); toast(`${toStudent.name}에게 ${amount}P를 선물했습니다.`);
     } finally { processingTransfer = false; }

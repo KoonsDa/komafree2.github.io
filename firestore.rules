@@ -55,6 +55,26 @@ service cloud.firestore {
         ]);
     }
 
+    match /classes/{classId}/studentPointStates/{studentId} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.id == studentId
+        && request.resource.data.keys().hasOnly([
+          'id', 'points', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.points is int
+        && request.resource.data.points >= 0;
+    }
+
+    match /classes/{classId}/pointHistory/{historyId} {
+      allow read: if isClassOwner(classId);
+      allow create, update: if isClassOwner(classId)
+        && request.resource.data.keys().hasOnly([
+          'id', 'studentId', 'entry', 'createdAt'
+        ])
+        && request.resource.data.entry is map;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
