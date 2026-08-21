@@ -11,6 +11,8 @@
   let studentRankingExpanded = false;
   let studentCollectionCardSetFilter = "all";
   let studentRepresentativeMutating = false;
+  let studentCharacterDraftId = "";
+  let studentCharacterMutating = false;
 
   const studentDrawRarityMeta = {
     "일반": { className: "student-v158-rarity-common", stars: "★★", frame: "assets/card-ui/초록빛_황금_장식_카드_프레임.png" },
@@ -23,6 +25,24 @@
     return window.ourClassStudentCustomization && typeof window.ourClassStudentCustomization === "object"
       ? window.ourClassStudentCustomization
       : {};
+  }
+
+  function characterRegistry() {
+    const registry = window.ourClassStudentCustomizationApi?.registry || window.ourClassCharacterRegistry;
+    return Array.isArray(registry) && registry.length ? registry : [{ id: "character-01", displayName: "캐릭터 1", imagePath: "assets/home-ui/characters/character-01.png", scale: 1, offsetX: 0, offsetY: 0 }];
+  }
+
+  function selectedCharacter(characterId = studentCustomization().characterId) {
+    const registry = characterRegistry();
+    return registry.find((character) => character.id === characterId) || registry[0];
+  }
+
+  function characterImage(character, className = "") {
+    const fallback = characterRegistry()[0];
+    const scale = Number(character?.scale) || 1;
+    const offsetX = Number(character?.offsetX) || 0;
+    const offsetY = Number(character?.offsetY) || 0;
+    return `<img${className ? ` class="${className}"` : ""} src="${escapeHtml(character?.imagePath || fallback.imagePath)}" alt="${escapeHtml(character?.displayName || fallback.displayName)}" style="--character-scale:${scale};--character-offset-x:${offsetX}px;--character-offset-y:${offsetY}px" onerror="this.onerror=null;this.src='${fallback.imagePath}'">`;
   }
 
   function pointUnit() {
@@ -189,17 +209,44 @@
     const pointValue = pointText(home.points);
     const pointLength = Math.max(4, String(Number(home.points) || 0).length + String(pointUnit()).length);
     const pointFit = Math.max(32, 80 - (pointLength * 5));
+    const character = selectedCharacter();
     return `<section class="student-v15-hero-grid">
       <article class="student-v15-welcome student-v15-welcome-separated" aria-label="학생 환영 영역">
         <div class="student-home-hero-background student-v15-welcome-background" aria-hidden="true"></div>
-        <div class="student-home-hero-character student-v15-welcome-character" aria-hidden="true"><img src="assets/student-wizard-foreground.png" alt=""></div>
+        <div class="student-home-hero-character student-v15-welcome-character">${characterImage(character)}</div>
         <div class="student-v15-welcome-copy">
           <h1><strong>${escapeHtml(profile.name)}</strong>님, 반가워요!</h1>
           <p>${escapeHtml(classInfo.className || "우리 반")}</p>
+          <button class="student-character-change-button" type="button" data-student-character-open>캐릭터 변경</button>
         </div>
       </article>
       ${features.points === false ? "" : `<button class="student-v15-points-card student-v155-point-link" type="button" data-student-cloud-view="points" aria-label="${escapeHtml(pointLabel)} 화면 열기"><div class="student-v15-coin" aria-hidden="true"><span>★</span></div><div class="student-v15-points-copy"><span>현재 ${escapeHtml(pointLabel)}</span><strong class="student-v15-points-value" style="--point-fit:${pointFit}px">${pointValue}</strong><small>내역 보기 →</small></div><i class="student-v15-spark one">✦</i><i class="student-v15-spark two">✦</i></button>`}
     </section>`;
+  }
+
+  function characterModalMarkup() {
+    const registry = characterRegistry();
+    const draft = selectedCharacter(studentCharacterDraftId || studentCustomization().characterId);
+    return `<div class="student-v157-modal student-character-modal" role="presentation"><section class="student-v157-modal-card student-character-modal-card" role="dialog" aria-modal="true" aria-labelledby="student-character-modal-title">
+      <button class="student-v157-modal-close" type="button" data-student-character-close aria-label="캐릭터 선택 닫기">×</button><span class="student-v157-modal-label">나만의 홈 꾸미기</span><h2 id="student-character-modal-title">캐릭터를 선택해요</h2>
+      <div class="student-character-preview">${characterImage(draft, "student-character-preview-image")}<div><small>선택한 캐릭터</small><strong>${escapeHtml(draft.displayName)}</strong></div></div>
+      <div class="student-character-grid" role="listbox" aria-label="캐릭터 목록">${registry.map((character) => { const chosen = character.id === draft.id; return `<button class="student-character-option ${chosen ? "is-selected" : ""}" type="button" role="option" aria-selected="${chosen}" data-student-character-id="${character.id}">${characterImage(character)}<strong>${escapeHtml(character.displayName)}</strong><span>${chosen ? "✓ 선택됨" : "선택"}</span></button>`; }).join("")}</div>
+      <div class="student-character-modal-actions"><button type="button" class="button secondary" data-student-character-close>취소</button><button type="button" class="button success" data-student-character-save ${studentCharacterMutating ? "disabled" : ""}>${studentCharacterMutating ? "저장 중…" : "이 캐릭터 사용하기"}</button></div>
+    </section></div>`;
+  }
+
+  function openCharacterModal() {
+    studentCharacterDraftId = selectedCharacter().id;
+    document.querySelector(".student-character-modal")?.remove();
+    app.insertAdjacentHTML("beforeend", characterModalMarkup());
+  }
+
+  function refreshCharacterModal() {
+    const modal = document.querySelector(".student-character-modal");
+    if (!modal) return;
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = characterModalMarkup();
+    modal.replaceWith(wrapper.firstElementChild);
   }
 
   function homeContent(home) {
@@ -698,6 +745,40 @@
     const stage = event.target.closest?.(".collection-detail-stage[data-student-collection-flip]");
     if (!stage || !["Enter", " "].includes(event.key) || typeof session === "undefined" || session.mode !== "firebase-student") return;
     event.preventDefault(); stage.click();
+  }, true);
+
+  document.addEventListener("click", async (event) => {
+    if (typeof session === "undefined" || session.mode !== "firebase-student") return;
+    const open = event.target.closest?.("[data-student-character-open]");
+    const option = event.target.closest?.("[data-student-character-id]");
+    const close = event.target.closest?.("[data-student-character-close]");
+    const save = event.target.closest?.("[data-student-character-save]");
+    if (open) { openCharacterModal(); return; }
+    if (option) { studentCharacterDraftId = selectedCharacter(option.dataset.studentCharacterId).id; refreshCharacterModal(); return; }
+    if (close && !studentCharacterMutating) { close.closest(".student-character-modal")?.remove(); return; }
+    if (!save || studentCharacterMutating) return;
+    const previousId = selectedCharacter().id;
+    studentCharacterMutating = true;
+    refreshCharacterModal();
+    try {
+      const saveCharacter = window.ourClassStudentCustomizationApi?.setStudentCharacter;
+      if (typeof saveCharacter !== "function") throw new Error("캐릭터 저장 기능을 불러오지 못했습니다.");
+      await saveCharacter(studentCharacterDraftId);
+      document.querySelector(".student-character-modal")?.remove();
+      if (typeof toast === "function") toast("캐릭터를 변경했습니다.");
+    } catch (error) {
+      window.ourClassStudentCustomization.characterId = previousId;
+      studentCharacterMutating = false;
+      refreshCharacterModal();
+      console.error("Student character save failed", error);
+      if (typeof toast === "function") toast("캐릭터를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    studentCharacterMutating = false;
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !studentCharacterMutating) document.querySelector(".student-character-modal")?.remove();
   }, true);
 
   renderFirebaseStudentLanding = function renderFirebaseStudentLandingV155() {

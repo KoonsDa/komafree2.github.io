@@ -4,16 +4,28 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const DEFAULT_POINT_NAME = "P";
+const DEFAULT_CHARACTER_ID = "character-01";
+const CHARACTER_REGISTRY = Object.freeze(Array.from({ length: 16 }, (_, index) => {
+  const number = index + 1;
+  const id = `character-${String(number).padStart(2, "0")}`;
+  return Object.freeze({ id, displayName: `캐릭터 ${number}`, imagePath: `assets/home-ui/characters/${id}.png`, scale: 1, offsetX: 0, offsetY: 0 });
+}));
+const CHARACTER_BY_ID = new Map(CHARACTER_REGISTRY.map((character) => [character.id, character]));
 let teacherPointNameLoadedFor = "";
 let studentPointNameLoadedFor = "";
 let studentPointNameLoading = false;
 let renderRefreshTimer = null;
 
-window.ourClassStudentCustomization = window.ourClassStudentCustomization || { pointName: DEFAULT_POINT_NAME };
+window.ourClassCharacterRegistry = CHARACTER_REGISTRY;
+window.ourClassStudentCustomization = { pointName: DEFAULT_POINT_NAME, characterId: DEFAULT_CHARACTER_ID, ...(window.ourClassStudentCustomization || {}) };
 
 function normalizePointName(value) {
   const text = String(value || "").trim().replace(/\s+/g, " ").slice(0, 12);
   return text || DEFAULT_POINT_NAME;
+}
+
+function normalizeCharacterId(value) {
+  return CHARACTER_BY_ID.has(value) ? value : DEFAULT_CHARACTER_ID;
 }
 
 function classIdFromContext() {
@@ -121,16 +133,31 @@ async function loadStudentPointName() {
   try {
     const result = await httpsCallable(getFunctions(app, "asia-northeast3"), "getStudentCustomization")({});
     pointName = normalizePointName(result?.data?.pointName || pointName);
+    window.ourClassStudentCustomization.characterId = normalizeCharacterId(result?.data?.characterId);
   } catch (error) {
     console.warn("Student point name load failed", error);
   } finally {
     localStorage.setItem(pointStorageKey(classId), pointName);
-    window.ourClassStudentCustomization = { pointName };
+    window.ourClassStudentCustomization = { ...window.ourClassStudentCustomization, pointName, characterId: normalizeCharacterId(window.ourClassStudentCustomization.characterId) };
     studentPointNameLoadedFor = key;
     studentPointNameLoading = false;
     scheduleRender();
   }
 }
+
+async function setStudentCharacter(characterId) {
+  const normalized = normalizeCharacterId(characterId);
+  if (normalized !== characterId) throw new Error("선택할 수 없는 캐릭터입니다.");
+  const app = studentApp();
+  if (!app || !getAuth(app).currentUser) throw new Error("학생 로그인이 필요합니다.");
+  const result = await httpsCallable(getFunctions(app, "asia-northeast3"), "setStudentCharacter")({ characterId: normalized });
+  const savedId = normalizeCharacterId(result?.data?.characterId);
+  window.ourClassStudentCustomization = { ...window.ourClassStudentCustomization, characterId: savedId };
+  scheduleRender();
+  return savedId;
+}
+
+window.ourClassStudentCustomizationApi = Object.freeze({ registry: CHARACTER_REGISTRY, defaultCharacterId: DEFAULT_CHARACTER_ID, normalizeCharacterId, setStudentCharacter });
 
 document.addEventListener("submit", (event) => {
   const form = event.target;
