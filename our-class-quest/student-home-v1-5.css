@@ -2316,3 +2316,29 @@
 .student-v1511-gift-off { margin: 10px 0 0; color: #756980; font-weight: 800; }
 .student-v1511-gift-panel.is-disabled select,.student-v1511-gift-panel.is-disabled input { color: #8b8492; background: #f2eff5; cursor: not-allowed; }
 @media (max-width:700px) { .student-v1511-gift-form { grid-template-columns: 1fr; } .student-v1511-gift-heading { align-items: flex-start; flex-direction: column; } }
+
+/* Character picker: keep this after the shared v1.5.7 modal rule so the
+   character panel, rather than the generic 430px dialog, controls its size. */
+@media (min-width:641px) {
+  .student-character-modal > .student-v157-modal-card.student-character-modal-card {
+    box-sizing:border-box;
+    width:min(820px,calc(100vw - 64px));
+    max-width:820px;
+    max-height:86vh;
+  }
+  .student-character-modal .student-character-option strong {
+    overflow:visible;
+    white-space:normal;
+    text-overflow:clip;
+    line-height:1.25;
+    text-align:center;
+  }
+}
+@media (max-width:640px) {
+  .student-character-modal > .student-v157-modal-card.student-character-modal-card {
+    box-sizing:border-box;
+    width:94vw;
+    max-width:94vw;
+    max-height:90vh;
+  }
+}
