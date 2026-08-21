@@ -1413,21 +1413,21 @@
 .student-v15-welcome-separated .student-v15-welcome-copy { z-index:1; left:31%; right:8%; width:auto; border:0; background:linear-gradient(90deg,rgba(255,255,255,.74),rgba(255,255,255,.5) 68%,rgba(255,255,255,.16)); box-shadow:none; backdrop-filter:blur(3px); }
 .student-character-change-button { width:max-content; min-height:34px; margin-top:10px; padding:7px 13px; border:1px solid rgba(83,75,188,.22); border-radius:999px; color:#4c47a4; background:rgba(255,255,255,.86); font:inherit; font-size:.82rem; font-weight:900; cursor:pointer; box-shadow:0 5px 13px rgba(47,43,130,.1); }
 .student-character-change-button:hover { background:#fff; transform:translateY(-1px); }
-.student-character-modal-card { width:min(920px,94vw); max-height:min(820px,92vh); overflow:auto; }
-.student-character-preview { display:flex; align-items:center; gap:18px; min-height:150px; margin:18px 0; padding:16px 22px; border:1px solid #dddfff; border-radius:22px; background:linear-gradient(135deg,#f6f5ff,#eef7ff); }
-.student-character-preview-image { width:128px; height:128px; object-fit:contain; }
+.student-character-modal-card { display:grid; grid-template-rows:auto auto auto minmax(0,1fr) auto; width:820px; max-width:calc(100vw - 64px); max-height:86vh; overflow:hidden; }
+.student-character-preview { display:flex; align-items:center; gap:26px; min-height:174px; margin:18px 0; padding:18px 28px; border:1px solid #dddfff; border-radius:22px; background:linear-gradient(135deg,#f6f5ff,#eef7ff); }
+.student-character-preview-image { width:156px; height:156px; flex:0 0 156px; object-fit:contain; }
 .student-character-preview div { display:grid; gap:4px; }
 .student-character-preview small { color:#7774a5; font-weight:800; }
-.student-character-preview strong { color:#36317f; font-size:1.3rem; }
-.student-character-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
-.student-character-option { position:relative; display:grid; justify-items:center; gap:5px; min-width:0; padding:10px 8px; border:2px solid #e4e5f5; border-radius:18px; color:#4a4772; background:#fff; cursor:pointer; }
+.student-character-preview strong { color:#36317f; font-size:1.45rem; }
+.student-character-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; min-height:0; padding:2px 4px 4px 2px; overflow-y:auto; overscroll-behavior:contain; }
+.student-character-option { position:relative; display:grid; justify-items:center; gap:6px; min-width:0; min-height:178px; padding:12px 10px; border:2px solid #e4e5f5; border-radius:18px; color:#4a4772; background:#fff; cursor:pointer; }
 .student-character-option:hover { border-color:#aaa8ed; background:#fafaff; }
 .student-character-option.is-selected { border-color:#625cdf; background:#f0efff; box-shadow:0 0 0 3px rgba(98,92,223,.11); }
-.student-character-option img { width:min(100%,116px); aspect-ratio:1; object-fit:contain; transform:translate(var(--character-offset-x,0),var(--character-offset-y,0)) scale(var(--character-scale,1)); }
-.student-character-option strong { overflow:hidden; max-width:100%; font-size:.88rem; text-overflow:ellipsis; white-space:nowrap; }
+.student-character-option img { width:min(100%,132px); aspect-ratio:1; object-fit:contain; transform:translate(var(--character-offset-x,0),var(--character-offset-y,0)) scale(var(--character-scale,1)); }
+.student-character-option strong { overflow:hidden; max-width:100%; font-size:.95rem; text-overflow:ellipsis; white-space:nowrap; }
 .student-character-option span { min-height:20px; color:#7976a2; font-size:.74rem; font-weight:800; }
 .student-character-option.is-selected span { color:#514bc8; }
-.student-character-modal-actions { position:sticky; bottom:-1px; display:flex; justify-content:flex-end; gap:10px; margin-top:18px; padding:14px 0 2px; background:linear-gradient(180deg,rgba(255,255,255,0),#fff 28%); }
+.student-character-modal-actions { position:relative; z-index:2; display:flex; justify-content:flex-end; gap:10px; margin-top:14px; padding:14px 0 2px; background:#fff; }
 .student-v15-points-card { container-type:inline-size; display:grid; grid-template-columns:clamp(76px,28%,118px) minmax(0,1fr); align-items:center; justify-content:stretch; column-gap:clamp(12px,4cqw,24px); }
 .student-v15-points-card .student-v15-coin { width:min(100%,118px); align-self:center; justify-self:center; }
 .student-v15-points-card > .student-v15-points-copy { width:100%; min-width:0; align-self:center; justify-self:stretch; }
@@ -1438,15 +1438,24 @@
   .student-home-hero-character img { width:min(100%,170px); max-height:88%; opacity:.92; }
   .student-v15-welcome-separated .student-v15-welcome-copy { left:33%; right:4%; width:auto; padding:16px 18px; }
   .student-character-change-button { min-height:31px; margin-top:7px; padding:5px 10px; font-size:.75rem; }
-  .student-character-modal-card { width:94vw; max-height:90vh; padding:20px 16px; }
+  .student-character-modal-card { width:94vw; max-width:94vw; max-height:90vh; padding:20px 16px; }
   .student-character-preview { min-height:112px; padding:10px 14px; }
-  .student-character-preview-image { width:92px; height:92px; }
+  .student-character-preview-image { width:92px; height:92px; flex-basis:92px; }
   .student-character-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-  .student-character-option { padding:8px 5px; }
+  .student-character-option { min-height:0; padding:8px 5px; }
   .student-character-option img { width:min(100%,100px); }
   .student-v15-points-card { grid-template-columns:clamp(70px,24%,88px) minmax(0,1fr); gap:12px; padding:18px 20px; }
   .student-v15-points-card .student-v15-coin { width:min(100%,82px); border-width:7px; }
   .student-v15-points-card .student-v15-points-value { font-size:clamp(32px,min(11cqw,var(--point-fit,52px)),52px); }
+}
+
+@media (min-width:621px) and (max-width:640px) {
+  .student-character-modal-card { width:94vw; max-width:94vw; max-height:90vh; padding:20px 16px; }
+  .student-character-preview { min-height:112px; padding:10px 14px; }
+  .student-character-preview-image { width:92px; height:92px; flex-basis:92px; }
+  .student-character-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .student-character-option { min-height:0; padding:8px 5px; }
+  .student-character-option img { width:min(100%,100px); }
 }
 
 
