@@ -417,6 +417,8 @@ let firebaseStudentAccountStatusesLoading = false;
 let firebaseStudentAccountStatusesLoadFailed = false;
 let firebaseStudentPasswordResetting = false;
 let firebaseBulkStudentAccountsCreating = false;
+let pendingStudentExcelRows = [];
+let pendingStudentExcelFileName = "";
 let firebaseLoadedCloudStudents = [];
 let firebaseAssignmentsChecked = false;
 let firebaseAssignmentsConnected = false;
@@ -598,7 +600,7 @@ function toast(message) { const element = document.querySelector("#toast"); elem
 function firebaseAuthMessage(error) { const code = error?.code || ""; if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return "Google 로그인 창이 닫혔습니다."; if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요."; if (code === "auth/unauthorized-domain") return "현재 도메인은 Google 로그인 허용 목록에 없습니다."; if (code === "auth/network-request-failed") return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."; return "Google 로그인 중 오류가 발생했습니다."; }
 function logFirebaseAuthError(error) { console.error("Firebase Google sign-in error details", { code: error?.code, message: error?.message, name: error?.name, customData: error?.customData }); console.error("Firebase Google sign-in error object", error); }
 async function enterFirebaseTeacher() { const client = window.ourClassFirebase; if (!client?.ready) { toast(client?.error ? "Firebase 초기화에 실패했습니다." : "Google 로그인을 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; } try { const user = await client.signInTeacher(); if (!user) return; firebaseTeacherUser = user; firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); toast(`${user.displayName || user.email || "선생님"} 선생님, 로그인했습니다.`); } catch (error) { logFirebaseAuthError(error); const isLocalDevelopment = location.hostname === "localhost" || location.hostname === "127.0.0.1"; toast(isLocalDevelopment ? `Google 로그인 오류: ${error?.code || "unknown"}` : firebaseAuthMessage(error)); } }
-function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseStudentAccountCreating = false; firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoading = false; firebaseStudentAccountStatusesLoadFailed = false; firebaseStudentPasswordResetting = false; firebaseBulkStudentAccountsCreating = false; firebaseLoadedCloudStudents = []; }
+function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseStudentAccountCreating = false; firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoading = false; firebaseStudentAccountStatusesLoadFailed = false; firebaseStudentPasswordResetting = false; firebaseBulkStudentAccountsCreating = false; clearPendingStudentExcelRows(); firebaseLoadedCloudStudents = []; }
 function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
 function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRolesConnecting = false; firebaseRoleConfigurationSaving = false; firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageInitializing = false; firebaseRoleDailyUsageDate = ""; firebaseRoleApplicationMutating = false; }
@@ -1385,8 +1387,97 @@ function studentPasswordResetErrorMessage(error) {
     "invalid-argument": "새 비밀번호 입력을 확인해 주세요."
   }[code] || "학생 비밀번호를 초기화하지 못했습니다.";
 }
-function openBulkStudentsModal() {
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="bulk-students-form" class="modal-card form bulk-students-modal"><h2>학생 및 계정 일괄 등록</h2><p class="muted">엑셀에서 <strong>번호 / 이름 / 로그인 ID / 초기 비밀번호</strong> 4열을 작성한 뒤 복사해서 붙여넣으세요.</p><label>학생 목록<textarea name="students" rows="12" required placeholder="1&#9;김민수&#9;minsu01&#9;class123&#10;2&#9;이서연&#9;seoyeon02&#9;class234"></textarea></label><div class="button-row"><button class="button success" type="submit">학생 및 계정 일괄 등록</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+const STUDENT_EXCEL_HEADERS = ["번호", "이름", "아이디", "초기 비밀번호"];
+function studentExcelLibraryReady() { return Boolean(window.XLSX?.utils?.aoa_to_sheet && window.XLSX?.read && window.XLSX?.writeFile); }
+function buildStudentExcelTemplateWorkbook() {
+  if (!studentExcelLibraryReady()) throw new Error("Excel 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해 주세요.");
+  const rosterRows = [STUDENT_EXCEL_HEADERS, ...Array.from({length: 30}, () => ["", "", "", ""])];
+  const rosterSheet = XLSX.utils.aoa_to_sheet(rosterRows);
+  for (let row = 2; row <= 31; row += 1) {
+    ["C", "D"].forEach((column) => { const address = `${column}${row}`; rosterSheet[address] = {t: "s", f: '=""', v: "", z: "@", s: {numFmt: "@"}}; });
+  }
+  rosterSheet["!ref"] = "A1:D31";
+  rosterSheet["!cols"] = [{wch: 10}, {wch: 18}, {wch: 24}, {wch: 22}];
+  rosterSheet["!autofilter"] = {ref: "A1:D31"};
+  const guideRows = [
+    ["우리반 퀘스트 학생 등록 양식 작성안내"],
+    ["학생명단 Sheet의 첫 행 제목은 수정하지 않는 것을 권장합니다."],
+    [],
+    ["항목", "설명"],
+    ["번호", "반에서 사용하는 학생 번호입니다. 1~99 정수를 입력하고 중복되지 않게 작성하세요."],
+    ["이름", "학생 이름입니다. 빈칸 없이 30자 이내로 작성하세요."],
+    ["아이디", "학생 로그인용 ID입니다. 영문, 숫자, 점(.), 밑줄(_), 하이픈(-)만 사용할 수 있습니다."],
+    ["초기 비밀번호", "최초 로그인용 비밀번호입니다. 현재 계정 규칙과 같이 6자 이상 작성하세요."],
+    [],
+    ["주의사항"],
+    ["번호와 아이디는 Excel 안에서도, 현재 학급의 기존 학생과도 중복될 수 없습니다."],
+    ["아이디와 초기 비밀번호는 Excel에서 텍스트 형식으로 입력하는 것을 권장합니다."],
+    ["업로드할 때는 학생명단 Sheet만 읽습니다. 업로드한 원본 파일은 서버에 저장하지 않습니다."],
+    [],
+    ["작성 예시(안내용이며 실제 학생으로 자동 등록되지 않습니다.)"],
+    STUDENT_EXCEL_HEADERS,
+    [1, "김민준", "minjun01", "class1234"],
+    [2, "이서연", "seoyeon02", "class1234"]
+  ];
+  const guideSheet = XLSX.utils.aoa_to_sheet(guideRows);
+  guideSheet["!cols"] = [{wch: 22}, {wch: 86}, {wch: 24}, {wch: 24}];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, rosterSheet, "학생명단");
+  XLSX.utils.book_append_sheet(workbook, guideSheet, "작성안내");
+  return workbook;
+}
+function downloadStudentExcelTemplate() {
+  try { XLSX.writeFile(buildStudentExcelTemplateWorkbook(), "우리반퀘스트_학생등록양식.xlsx", {compression: true, cellStyles: true}); }
+  catch (error) { toast(error.message || "Excel 양식을 만들지 못했습니다."); }
+}
+function clearPendingStudentExcelRows() {
+  pendingStudentExcelRows.forEach((row) => { row.password = ""; }); pendingStudentExcelRows = []; pendingStudentExcelFileName = "";
+}
+function validateStudentExcelRows(sourceRows) {
+  const numberCounts = new Map(); const loginCounts = new Map();
+  sourceRows.forEach((row) => {
+    const numberText = String(row.numberText || "").trim(); const parsedNumber = Number(numberText); const numberKey = numberText && Number.isFinite(parsedNumber) ? String(parsedNumber) : numberText; const loginKey = String(row.loginId || "").trim().toLocaleLowerCase("en-US");
+    if (numberKey) numberCounts.set(numberKey, (numberCounts.get(numberKey) || 0) + 1);
+    if (loginKey) loginCounts.set(loginKey, (loginCounts.get(loginKey) || 0) + 1);
+  });
+  return sourceRows.map((source) => {
+    const numberText = String(source.numberText || "").trim(); const number = Number(numberText); const name = String(source.name || "").trim(); const loginId = String(source.loginId || "").trim(); const normalizedLoginId = loginId.toLocaleLowerCase("en-US"); const password = String(source.password || ""); const errors = [];
+    if (!numberText) errors.push("번호 없음"); else if (!Number.isInteger(number) || number < 1 || number > 99) errors.push("번호는 1~99 정수");
+    if (!name) errors.push("이름 없음"); else if (name.length > 30) errors.push("이름 30자 초과");
+    if (!loginId) errors.push("아이디 없음"); else if (loginId.length > 40 || !/^[A-Za-z0-9._-]+$/.test(loginId)) errors.push("아이디 형식 오류");
+    if (!password) errors.push("비밀번호 없음"); else if (password.length < 6) errors.push("비밀번호 6자 미만");
+    const numberKey = numberText && Number.isFinite(number) ? String(number) : numberText;
+    if (numberKey && numberCounts.get(numberKey) > 1) errors.push("Excel 내부 번호 중복");
+    if (normalizedLoginId && loginCounts.get(normalizedLoginId) > 1) errors.push("Excel 내부 아이디 중복");
+    const existingByNumber = Number.isInteger(number) ? data.students.find((student) => studentNumber(student) === number) : null;
+    const existingByLoginId = normalizedLoginId ? data.students.find((student) => String(student.loginId || "").trim().toLocaleLowerCase("en-US") === normalizedLoginId) : null;
+    const retryStudent = existingByNumber && existingByNumber === existingByLoginId && existingByNumber.active !== false && existingByNumber.name === name && firebaseStudentAccountStatusesLoaded && !firebaseStudentAccountStatuses[existingByNumber.id]?.exists ? existingByNumber : null;
+    if (!retryStudent) {
+      if (existingByNumber) errors.push("기존 학생 번호와 충돌");
+      if (existingByLoginId) errors.push("기존 학생 아이디와 충돌");
+    }
+    return {rowNumber: source.rowNumber, number, name, loginId, password, errors: [...new Set(errors)], valid: errors.length === 0, retryStudentId: retryStudent?.id || ""};
+  });
+}
+async function parseStudentExcelFile(file) {
+  if (!studentExcelLibraryReady()) throw new Error("Excel 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해 주세요.");
+  if (!/\.xlsx$/i.test(file?.name || "")) throw new Error(".xlsx 파일만 업로드할 수 있습니다.");
+  const workbook = XLSX.read(await file.arrayBuffer(), {type: "array", cellDates: false});
+  const sheetName = workbook.SheetNames.includes("학생명단") ? "학생명단" : workbook.SheetNames[0];
+  if (!sheetName) throw new Error("Excel 파일에 Sheet가 없습니다.");
+  const values = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header: 1, raw: false, defval: ""}).map((columns) => [columns[0], columns[1], String(columns[2] ?? ""), String(columns[3] ?? "")]);
+  const headers = (values[0] || []).slice(0, 4).map((value) => String(value || "").replace(/^\uFEFF/, "").trim());
+  if (STUDENT_EXCEL_HEADERS.some((header, index) => headers[index] !== header)) throw new Error("학생명단 Sheet의 첫 행 제목을 번호 / 이름 / 아이디 / 초기 비밀번호로 유지해 주세요.");
+  const rows = values.slice(1).map((columns, index) => ({rowNumber: index + 2, numberText: columns[0], name: columns[1], loginId: columns[2], password: columns[3]})).filter((row) => [row.numberText, row.name, row.loginId, row.password].some((value) => String(value || "").trim()));
+  if (!rows.length) throw new Error("학생명단 Sheet에 등록할 학생이 없습니다.");
+  if (rows.length > 50) throw new Error("한 번에 최대 50명까지 등록할 수 있습니다.");
+  return validateStudentExcelRows(rows);
+}
+function openStudentExcelPreview(rows, fileName) {
+  clearPendingStudentExcelRows(); pendingStudentExcelRows = rows; pendingStudentExcelFileName = fileName;
+  const validCount = rows.filter((row) => row.valid).length; const errorCount = rows.length - validCount;
+  const body = rows.map((row) => `<tr class="${row.valid ? "is-valid" : "has-error"}"><td>${row.rowNumber}</td><td>${Number.isInteger(row.number) ? row.number : escapeHtml(String(row.number || ""))}</td><td>${escapeHtml(row.name || "-")}</td><td><code>${escapeHtml(row.loginId || "-")}</code></td><td><span aria-label="비밀번호 숨김">••••••</span></td><td><span class="excel-row-status ${row.valid ? "success" : "error"}">${row.valid ? (row.retryStudentId ? "계정 생성 재시도" : "정상") : escapeHtml(row.errors.join(" · "))}</span></td></tr>`).join("");
+  app.insertAdjacentHTML("beforeend", `<div class="modal student-excel-modal" data-student-excel-modal><section class="modal-card"><div class="section-heading"><div><h2>학생 등록 미리보기</h2><p class="muted">${escapeHtml(fileName)} · 비밀번호는 화면에 표시하거나 저장하지 않습니다.</p></div></div><div class="student-excel-summary"><div><span>전체</span><strong>${rows.length}명</strong></div><div class="success"><span>등록 가능</span><strong>${validCount}명</strong></div><div class="error"><span>확인 필요</span><strong>${errorCount}명</strong></div></div><div class="student-excel-table-wrap"><table class="student-excel-table"><thead><tr><th>행</th><th>번호</th><th>이름</th><th>아이디</th><th>초기 비밀번호</th><th>상태</th></tr></thead><tbody>${body}</tbody></table></div><p class="student-excel-server-note">전체 시스템의 아이디 충돌은 기존 계정 생성 서버가 최종 등록 시 한 번 더 검사합니다.</p><div class="button-row student-excel-actions"><button class="button secondary" type="button" data-action="close-modal">취소</button><button class="button success" type="button" data-action="confirm-student-excel-import" ${validCount ? "" : "disabled"}>등록 가능한 학생 ${validCount}명 등록</button></div></section></div>`);
 }
 function showBulkStudentAccountResult({studentCount, createdCount, existingCount, failures}) {
   const successCount = createdCount + existingCount;
@@ -1394,6 +1485,48 @@ function showBulkStudentAccountResult({studentCount, createdCount, existingCount
   const existing = existingCount ? `<p class="muted">이미 생성된 계정 ${existingCount}명 포함</p>` : "";
   const failureList = failures.length ? `<div class="bulk-account-failures"><h3>계정 생성 실패</h3><ul>${failures.map((failure) => `<li>${failure.number}번 ${escapeHtml(failure.name)} · ${escapeHtml(failure.reason)}</li>`).join("")}</ul><p class="muted">실패한 학생은 명단의 개별 계정 만들기 버튼으로 다시 생성할 수 있습니다.</p></div>` : "";
   app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>일괄 등록 결과</h2><p><strong>${summary}</strong></p>${existing}${failureList}<div class="button-row"><button class="button" type="button" data-action="close-modal">확인</button></div></section></div>`);
+}
+function openStudentExcelProgress(total) {
+  app.insertAdjacentHTML("beforeend", `<div class="modal student-excel-progress-modal"><section class="modal-card" role="status" aria-live="polite"><h2>학생 계정을 만들고 있어요</h2><p class="muted">완료될 때까지 창을 닫지 마세요.</p><div class="student-excel-progress"><span style="width:0%"></span></div><strong data-student-excel-progress>0 / ${total}명 완료</strong></section></div>`);
+}
+function updateStudentExcelProgress(completed, total) {
+  const modal = document.querySelector(".student-excel-progress-modal"); const bar = modal?.querySelector(".student-excel-progress span"); const label = modal?.querySelector("[data-student-excel-progress]");
+  if (bar) bar.style.width = `${total ? Math.round(completed / total * 100) : 0}%`; if (label) label.textContent = `${completed} / ${total}명 완료`;
+}
+async function registerPendingStudentExcelRows() {
+  if (firebaseBulkStudentAccountsCreating || firebaseStudentAccountCreating) return toast("학생 계정 생성 작업이 진행 중입니다.");
+  const validRows = pendingStudentExcelRows.filter((row) => row.valid); if (!validRows.length) return toast("등록 가능한 학생이 없습니다.");
+  const actualUser = window.ourClassFirebase?.getCurrentUser?.();
+  if (!firebaseTeacherSession || !firebaseTeacherUser?.uid || actualUser?.uid !== firebaseTeacherUser.uid || !firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.createStudentAccount) return toast("교사 로그인과 클라우드 학생 명단 연결을 확인해 주세요.");
+  const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId; const previewModal = document.querySelector("[data-student-excel-modal]");
+  const entries = validRows.map((row) => ({row, student: row.retryStudentId ? studentById(row.retryStudentId) : addStudentRecord(row.number, row.name, row.loginId)}));
+  const addedStudents = entries.filter((entry) => !entry.row.retryStudentId).map((entry) => entry.student); const studentCount = entries.length;
+  firebaseBulkStudentAccountsCreating = true; previewModal?.remove(); saveData(); render(); openStudentExcelProgress(studentCount);
+  let rosterSaved = addedStudents.length === 0; let createdCount = 0; let existingCount = 0; const failures = [];
+  try {
+    if (addedStudents.length) rosterSaved = await saveFirebaseStudentsBatch(addedStudents);
+    if (rosterSaved && firebaseTeacherUser?.uid === userUid && firebaseActiveClassId === classId) {
+      for (let index = 0; index < entries.length; index += 1) {
+        const {row, student} = entries[index];
+        try {
+          const result = await window.ourClassFirebase.createStudentAccount({classId, studentId: student.id, password: row.password});
+          if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId || !result?.ok || result.studentId !== student.id) throw {code: "functions/failed-precondition"};
+          if (result.created) createdCount += 1; else existingCount += 1;
+          firebaseStudentAccountStatuses[student.id] = {exists: true, active: true, loginId: result.loginId || student.loginId};
+        } catch (error) { failures.push({number: row.number, name: row.name, reason: studentAccountErrorMessage(error)}); }
+        finally { row.password = ""; updateStudentExcelProgress(index + 1, studentCount); }
+      }
+    }
+    firebaseStudentAccountStatusesLoaded = true; firebaseStudentAccountStatusesLoadFailed = false;
+    if (rosterSaved && firebaseTeacherUser?.uid === userUid && firebaseActiveClassId === classId) {
+      await loadFirebaseStudents(userUid, false); await loadFirebaseStudentAccountStatuses(userUid, classId);
+    }
+  } finally {
+    if (!rosterSaved && addedStudents.length) { const addedIds = new Set(addedStudents.map((student) => student.id)); data.students = data.students.filter((student) => !addedIds.has(student.id)); data.assignments.forEach((assignment) => { addedIds.forEach((studentId) => { if (assignment.studentStatuses) delete assignment.studentStatuses[studentId]; if (assignment.pointAwards) delete assignment.pointAwards[studentId]; }); }); }
+    clearPendingStudentExcelRows(); firebaseBulkStudentAccountsCreating = false; document.querySelector(".student-excel-progress-modal")?.remove(); saveData(); render();
+  }
+  if (!rosterSaved) return alert("학생 명단을 클라우드에 저장하지 못해 계정 생성을 시작하지 않았습니다.");
+  showBulkStudentAccountResult({studentCount, createdCount, existingCount, failures});
 }
 function addStudentRecord(number, name, loginId) {
   const student = { id: crypto.randomUUID(), number, name, loginId, active: true, points: 0, cards: {}, representativeCard: null, cardUpgradeHistory: [], cardAcquisitionHistory: [], pointHistory: [] };
@@ -1630,7 +1763,7 @@ function teacherClassSettingsBase() {
   const inactiveStudents = data.students.filter((student) => student.active === false).sort((first, second) => studentNumber(first) - studentNumber(second) || first.name.localeCompare(second.name, "ko"));
   const inactiveRows = inactiveStudents.map((student) => `<tr><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions"><button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button success compact" data-action="restore-class-student" data-id="${student.id}">복구</button></div></td></tr>`).join("");
   const inactiveSection = inactiveStudents.length ? `<details class="inactive-student-section"><summary>비활성 학생 ${inactiveStudents.length}명 보기</summary><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${inactiveRows}</tbody></table></div></details>` : "";
-  return `<div class="section-heading"><div><h1 class="page-heading">학급 설정</h1><p class="page-description">우리 반 기본 정보와 모든 기능에서 함께 사용하는 학생 명단을 관리합니다.</p></div></div><section class="card class-settings-card"><h2>학급 정보</h2><form id="class-info-form" class="class-info-form"><label>프로그램 이름<input name="appName" maxlength="50" value="${escapeHtml(data.classSettings.appName)}" required placeholder="예: 우리반 퀘스트"></label><label>학급 이름<input name="className" maxlength="50" value="${escapeHtml(data.classSettings.className)}" required placeholder="예: 5학년 2반"></label><label>선생님 표시 이름<input name="teacherName" maxlength="30" value="${escapeHtml(data.classSettings.teacherName)}" required placeholder="예: 윤석훈"></label><button class="button success" type="submit">저장</button></form></section><section class="card class-roster-card"><div class="section-heading"><div><h2>학생 명단 <span class="muted">총 ${activeStudents().length}명</span></h2><p class="muted">번호와 이름은 바꿀 수 있지만 학생 ID와 연결된 기존 기록은 그대로 유지됩니다.</p></div><div class="button-row"><button class="button secondary" data-action="open-bulk-students">학생 일괄 등록</button><button class="button success" data-action="new-class-student">+ 학생 추가</button></div></div><div class="class-student-search"><input id="class-student-search" type="search" value="${escapeHtml(classStudentSearch)}" placeholder="번호, 이름 또는 로그인 ID 검색"><span>${students.length}명 표시</span></div><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${rows || `<tr><td colspan="4"><div class="empty">검색 결과가 없습니다.</div></td></tr>`}</tbody></table></div><p class="class-login-note">학생 로그인과 비밀번호 관리는 Firebase 연결 후 사용할 수 있습니다. 현재는 비밀번호를 저장하지 않습니다.</p>${inactiveSection}</section>`;
+  return `<div class="section-heading"><div><h1 class="page-heading">학급 설정</h1><p class="page-description">우리 반 기본 정보와 모든 기능에서 함께 사용하는 학생 명단을 관리합니다.</p></div></div><section class="card class-settings-card"><h2>학급 정보</h2><form id="class-info-form" class="class-info-form"><label>프로그램 이름<input name="appName" maxlength="50" value="${escapeHtml(data.classSettings.appName)}" required placeholder="예: 우리반 퀘스트"></label><label>학급 이름<input name="className" maxlength="50" value="${escapeHtml(data.classSettings.className)}" required placeholder="예: 5학년 2반"></label><label>선생님 표시 이름<input name="teacherName" maxlength="30" value="${escapeHtml(data.classSettings.teacherName)}" required placeholder="예: 윤석훈"></label><button class="button success" type="submit">저장</button></form></section><section class="card class-roster-card"><div class="section-heading"><div><h2>학생 명단 <span class="muted">총 ${activeStudents().length}명</span></h2><p class="muted">번호와 이름은 바꿀 수 있지만 학생 ID와 연결된 기존 기록은 그대로 유지됩니다.</p></div><div class="button-row class-roster-actions"><button class="button secondary" data-action="download-student-excel-template">엑셀 양식 다운로드</button><button class="button secondary" data-action="upload-student-excel">엑셀로 학생 등록</button><button class="button success" data-action="new-class-student">+ 학생 추가</button><input id="student-excel-upload" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div></div><div class="class-student-search"><input id="class-student-search" type="search" value="${escapeHtml(classStudentSearch)}" placeholder="번호, 이름 또는 로그인 ID 검색"><span>${students.length}명 표시</span></div><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${rows || `<tr><td colspan="4"><div class="empty">검색 결과가 없습니다.</div></td></tr>`}</tbody></table></div><p class="class-login-note">학생 로그인과 비밀번호 관리는 Firebase 연결 후 사용할 수 있습니다. Excel 초기 비밀번호는 계정 생성 요청 후 메모리에서 지웁니다.</p>${inactiveSection}</section>`;
 }
 
 function classFeatureSettings() {
@@ -2489,7 +2622,9 @@ app.addEventListener("click", async (event) => {
   if (action === "view-student-point-history") { openTeacherPointHistoryModal(target.dataset.id); return; }
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
-  if (action === "open-bulk-students") return openBulkStudentsModal();
+  if (action === "download-student-excel-template") { downloadStudentExcelTemplate(); return; }
+  if (action === "upload-student-excel") { if (!studentExcelLibraryReady()) return toast("Excel 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해 주세요."); document.querySelector("#student-excel-upload")?.click(); return; }
+  if (action === "confirm-student-excel-import") { await registerPendingStudentExcelRows(); return; }
   if (action === "open-student-account") { if (firebaseStudentAccountCreating || firebaseBulkStudentAccountsCreating) return toast("학생 계정을 만드는 중입니다."); return openStudentAccountModal(target.dataset.id); }
   if (action === "reset-student-password") { if (firebaseStudentPasswordResetting) return toast("학생 비밀번호를 초기화하는 중입니다."); return openStudentPasswordResetModal(target.dataset.id); }
   if (action === "ask-delete-class-student") {
@@ -2805,7 +2940,7 @@ app.addEventListener("click", async (event) => {
     if (!confirm("현재 학급의 모든 데이터를 정말 초기화하시겠습니까?")) return;
     data = createDemoData(); teacherCardSetId = data.activeCardSetIds[0]; collectionCardSetFilter = "all"; selectedPointStudentIds.clear(); session = { mode: "teacher", studentId: null, view: "class-settings" }; saveData(); render(); toast("모든 데이터를 초기 상태로 되돌렸습니다."); return;
   }
-  if (action === "close-modal") { target.closest(".modal")?.remove(); return; }
+  if (action === "close-modal") { if (target.closest("[data-student-excel-modal]")) clearPendingStudentExcelRows(); target.closest(".modal")?.remove(); return; }
 });
 
 window.addEventListener("our-class-firebase-auth", (event) => {
@@ -2827,6 +2962,12 @@ window.addEventListener("our-class-firebase-error", () => { firebaseAuthPending 
 
 app.addEventListener("change", async (event) => {
   if (firebaseGroupsConnecting && event.target.dataset.action === "assign-student-group") return groupCloudConnectionLocked();
+  if (event.target.id === "student-excel-upload") {
+    const input = event.target; const file = input.files?.[0]; input.value = ""; if (!file) return;
+    try { const rows = await parseStudentExcelFile(file); openStudentExcelPreview(rows, file.name); }
+    catch (error) { clearPendingStudentExcelRows(); toast(error.message || "Excel 파일을 읽을 수 없습니다."); }
+    return;
+  }
   if (event.target.id === "backup-file-input") {
     const input = event.target; const file = input.files?.[0]; input.value = ""; if (!file) return;
     file.text().then((text) => { const payload = validateBackup(JSON.parse(text)); pendingBackupPayload = payload; openRestoreBackupModal(payload); }).catch((error) => { pendingBackupPayload = null; toast(error instanceof SyntaxError ? "JSON 파일을 읽을 수 없습니다." : error.message || "백업 파일을 확인할 수 없습니다."); }); return;
@@ -2893,7 +3034,7 @@ document.addEventListener("keydown", (event) => {
     const nextInput = timetableInput.form?.elements[`${dayKey}-${nextIndex}`]; if (nextInput instanceof HTMLElement) nextInput.focus();
     return;
   }
-  if (event.key === "Escape") [...document.querySelectorAll(".modal")].at(-1)?.remove();
+  if (event.key === "Escape") { const modal = [...document.querySelectorAll(".modal")].at(-1); if (modal?.matches("[data-student-excel-modal]")) clearPendingStudentExcelRows(); modal?.remove(); }
 });
 
 app.addEventListener("submit", async (event) => {
@@ -2990,54 +3131,6 @@ app.addEventListener("submit", async (event) => {
     if (data.students.some((student) => student.id !== existing?.id && (existing?.active !== false || student.active !== false) && student.loginId?.toLocaleLowerCase("en-US") === loginId.toLocaleLowerCase("en-US"))) return toast("이미 사용 중인 로그인 ID입니다.");
     const savedStudent = existing || addStudentRecord(number, name.slice(0, 30), loginId); if (existing) Object.assign(existing, { number, name: name.slice(0, 30), loginId });
     form.closest(".modal")?.remove(); saveData(); render(); toast(existing ? "학생 정보를 수정했습니다." : "학생을 추가했습니다."); saveFirebaseStudent(savedStudent, !existing); return;
-  }
-  if (form.id === "bulk-students-form") {
-    if (firebaseBulkStudentAccountsCreating || firebaseStudentAccountCreating) return toast("학생 계정 생성 작업이 진행 중입니다.");
-    const actualUser = window.ourClassFirebase?.getCurrentUser?.();
-    if (!firebaseTeacherSession || !firebaseTeacherUser?.uid || actualUser?.uid !== firebaseTeacherUser.uid || !firebaseActiveClassId || !firebaseStudentsConnected || !window.ourClassFirebase?.createStudentAccount) return toast("교사 로그인과 클라우드 학생 명단 연결을 확인해 주세요.");
-    const rows = String(formData.get("students") || "").split(/\r?\n/).map((text, index) => ({line: index + 1, text})).filter((row) => row.text.trim());
-    const parsed = []; const errors = []; const usedNumbers = new Set(activeStudents().map(studentNumber)); const usedLoginIds = new Set(data.students.map((student) => String(student.loginId || "").trim().toLocaleLowerCase("en-US")).filter(Boolean));
-    rows.forEach((row) => {
-      const columns = row.text.split("\t");
-      if (columns.length !== 4) { errors.push(`${row.line}번째 줄은 탭으로 구분된 4열이어야 합니다.`); return; }
-      const number = Number(columns[0].trim()); const name = columns[1].trim(); const loginId = columns[2].trim(); const password = columns[3]; const normalizedLoginId = loginId.toLocaleLowerCase("en-US");
-      if (!Number.isInteger(number) || number < 1 || number > 99) errors.push(`${row.line}번째 줄 번호는 1~99 정수여야 합니다.`);
-      else if (!name) errors.push(`${row.line}번째 줄 이름이 비어 있습니다.`);
-      else if (name.length > 30) errors.push(`${row.line}번째 줄 이름은 30자 이하여야 합니다.`);
-      else if (!loginId) errors.push(`${row.line}번째 줄 로그인 ID가 비어 있습니다.`);
-      else if (loginId.length > 40 || !/^[A-Za-z0-9._-]+$/.test(loginId)) errors.push(`${row.line}번째 줄 로그인 ID 형식을 확인해 주세요.`);
-      else if (password.length < 6) errors.push(`${row.line}번째 줄 초기 비밀번호는 6자 이상이어야 합니다.`);
-      else if (usedNumbers.has(number)) errors.push(`${row.line}번째 줄 ${number}번이 중복됩니다.`);
-      else if (usedLoginIds.has(normalizedLoginId)) errors.push(`${row.line}번째 줄 로그인 ID가 중복됩니다.`);
-      else { usedNumbers.add(number); usedLoginIds.add(normalizedLoginId); parsed.push({number, name, loginId, password}); }
-    });
-    if (errors.length) { form.elements.students.value = ""; parsed.forEach((item) => { item.password = ""; }); parsed.length = 0; return alert(`등록할 수 없는 항목이 있습니다.\n\n${errors.join("\n")}`); }
-    if (!parsed.length) return toast("추가할 학생을 입력해 주세요.");
-    if (!confirm(`${parsed.length}명의 학생과 Firebase 계정을 생성합니다.\n계속하시겠습니까?`)) { form.elements.students.value = ""; parsed.forEach((item) => { item.password = ""; }); parsed.length = 0; return; }
-    const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId; const studentCount = parsed.length; const textarea = form.elements.students; if (textarea) textarea.value = "";
-    const addedStudents = parsed.map((item) => addStudentRecord(item.number, item.name, item.loginId)); firebaseBulkStudentAccountsCreating = true; form.closest(".modal")?.remove(); saveData(); render(); toast("학생 명단을 클라우드에 저장하는 중입니다.");
-    let rosterSaved = false; let createdCount = 0; let existingCount = 0; const failures = [];
-    try {
-      rosterSaved = await saveFirebaseStudentsBatch(addedStudents);
-      if (rosterSaved && firebaseTeacherUser?.uid === userUid && firebaseActiveClassId === classId) {
-        for (let index = 0; index < parsed.length; index += 1) {
-          const item = parsed[index]; const student = addedStudents[index];
-          try {
-            const result = await window.ourClassFirebase.createStudentAccount({classId, studentId: student.id, password: item.password});
-            if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId || !result?.ok || result.studentId !== student.id) throw {code: "functions/failed-precondition"};
-            if (result.created) createdCount += 1; else existingCount += 1;
-            firebaseStudentAccountStatuses[student.id] = {exists: true, active: true, loginId: result.loginId || student.loginId};
-          } catch (error) { failures.push({number: item.number, name: item.name, reason: studentAccountErrorMessage(error)}); }
-        }
-      } else {
-        rosterSaved = false;
-      }
-      firebaseStudentAccountStatusesLoaded = true; firebaseStudentAccountStatusesLoadFailed = false;
-    } finally {
-      parsed.forEach((item) => { item.password = ""; }); parsed.length = 0; firebaseBulkStudentAccountsCreating = false; render();
-    }
-    if (!rosterSaved) return alert("학생 명단을 클라우드에 저장하지 못해 계정 생성을 시작하지 않았습니다.");
-    showBulkStudentAccountResult({studentCount, createdCount, existingCount, failures}); return;
   }
   if (form.id === "group-settings-form") {
     const count = Number(formData.get("count")); if (!Number.isInteger(count) || count < 2 || count > 8) { toast("모둠 수는 2~8개로 설정해 주세요."); return; }

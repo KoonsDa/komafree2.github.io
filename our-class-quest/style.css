@@ -411,7 +411,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .backup-summary dt { color: #687188; font-weight: 900; }
 .backup-summary dd { margin: 0; }
 .reset-data-modal > label { display: grid; gap: 7px; margin-top: 16px; }
-.bulk-students-modal { width: min(620px, 92vw); }
+.class-roster-actions { flex-wrap: wrap; justify-content: flex-end; }
+.student-excel-modal .modal-card { width: min(1080px, 94vw); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.student-excel-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 4px 0 16px; }
+.student-excel-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e0e3ec; border-radius: 14px; background: #f8f9fc; }
+.student-excel-summary span { color: #666d80; font-weight: 700; }
+.student-excel-summary strong { color: #333a50; font-size: 1.18rem; }
+.student-excel-summary .success { border-color: #bce6d6; background: #effaf6; }
+.student-excel-summary .success strong { color: #18785b; }
+.student-excel-summary .error { border-color: #f1c7c7; background: #fff4f4; }
+.student-excel-summary .error strong { color: #b34646; }
+.student-excel-table-wrap { min-height: 0; overflow: auto; border: 1px solid #dde1eb; border-radius: 15px; }
+.student-excel-table { width: 100%; min-width: 820px; border-collapse: separate; border-spacing: 0; font-family: var(--font-ui, sans-serif); font-size: .88rem; }
+.student-excel-table th { position: sticky; top: 0; z-index: 1; padding: 11px 12px; background: #f1f4f8; color: #42495e; text-align: left; white-space: nowrap; }
+.student-excel-table td { padding: 11px 12px; border-top: 1px solid #eceef3; vertical-align: middle; }
+.student-excel-table tr.has-error { background: #fff7f7; }
+.student-excel-table code { color: #41485d; font-size: .86rem; }
+.excel-row-status { display: inline-flex; align-items: center; max-width: 320px; padding: 5px 9px; border-radius: 999px; font-size: .78rem; font-weight: 800; line-height: 1.35; }
+.excel-row-status.success { color: #176c54; background: #dff5ec; }
+.excel-row-status.error { color: #a63e3e; background: #fee4e4; border-radius: 9px; }
+.student-excel-server-note { margin: 12px 0 0; color: #697087; font-size: .82rem; }
+.student-excel-actions { justify-content: flex-end; margin-top: 16px; }
+.student-excel-progress-modal .modal-card { width: min(480px, 92vw); text-align: center; }
+.student-excel-progress { height: 12px; margin: 20px 0 12px; overflow: hidden; border-radius: 999px; background: #e8e9f3; }
+.student-excel-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6b59d3, #58b99b); transition: width .2s ease; }
+.student-excel-progress-modal strong { color: #4636a6; font-size: 1.08rem; }
 .class-feature-settings { margin-bottom: 20px; }
 .class-feature-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
 .class-feature-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 16px; border: 1px solid #dfe5eb; border-radius: 14px; background: #f9fbfc; cursor: pointer; }
@@ -423,6 +447,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .class-core-features { margin: 14px 0 0; padding: 11px 13px; color: #536078; background: #eef7f5; border-radius: 10px; }
 
 @media (max-width: 700px) {
+  .class-roster-actions { width: 100%; justify-content: stretch; }
+  .class-roster-actions .button { flex: 1 1 150px; }
+  .student-excel-modal { padding: 10px; }
+  .student-excel-modal .modal-card { width: calc(100vw - 20px); max-height: 92vh; padding: 18px 14px; }
+  .student-excel-summary { gap: 7px; }
+  .student-excel-summary > div { display: grid; justify-items: center; gap: 3px; padding: 9px 5px; text-align: center; }
+  .student-excel-summary strong { font-size: 1rem; }
+  .student-excel-table-wrap { overflow-x: auto; }
+  .student-excel-actions .button { flex: 1 1 140px; }
   .class-info-form { grid-template-columns: 1fr; }
   .class-student-search { grid-template-columns: 1fr; }
   .class-roster-card > .section-heading { gap: 12px; }
