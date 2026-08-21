@@ -382,6 +382,137 @@ exports.resetStudentPassword = onCall(
     },
 );
 
+exports.updateStudentLoginId = onCall(
+    {region: "asia-northeast3"},
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Teacher authentication is required.",
+        );
+      }
+
+      const classId = requiredInputString(request.data?.classId, "classId");
+      const studentId = requiredInputString(
+          request.data?.studentId,
+          "studentId",
+      );
+      const loginId = requiredInputString(request.data?.loginId, "loginId");
+      if (loginId.length > 40 || !/^[A-Za-z0-9._-]+$/.test(loginId)) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Login ID must use at most 40 letters, numbers, dots, underscores, or hyphens.",
+        );
+      }
+      const loginIdNormalized = loginId.toLocaleLowerCase("en-US");
+      const db = getFirestore();
+      const uid = studentAuthUid(classId, studentId);
+      const classRef = db.doc(`classes/${classId}`);
+      const studentRef = classRef.collection("students").doc(studentId);
+      const accountRef = db.doc(`studentAccounts/${uid}`);
+      const newIndexRef = db.doc(
+          `studentLoginIndex/${studentLoginKey(classId, loginIdNormalized)}`,
+      );
+
+      await db.runTransaction(async (transaction) => {
+        const classSnapshot = await transaction.get(classRef);
+        if (!classSnapshot.exists ||
+            classSnapshot.data()?.ownerUid !== request.auth.uid) {
+          throw new HttpsError(
+              "permission-denied",
+              "Only the class owner can update student login IDs.",
+          );
+        }
+        const studentSnapshot = await transaction.get(studentRef);
+        if (!studentSnapshot.exists) {
+          throw new HttpsError("not-found", "Student was not found.");
+        }
+        const student = studentSnapshot.data();
+        if (student?.id !== studentId || student.active === false) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Student information is invalid or inactive.",
+          );
+        }
+
+        const accountSnapshot = await transaction.get(accountRef);
+        const newIndexSnapshot = await transaction.get(newIndexRef);
+        if (newIndexSnapshot.exists) {
+          const existing = newIndexSnapshot.data();
+          if (existing?.uid !== uid || existing?.classId !== classId ||
+              existing?.studentId !== studentId) {
+            throw new HttpsError(
+                "already-exists",
+                "Login ID is already connected to another student.",
+            );
+          }
+        }
+        if (!accountSnapshot.exists) {
+          transaction.set(studentRef, {
+            loginId,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, {merge: true});
+          return;
+        }
+
+        const account = accountSnapshot.data();
+        const internalEmail = typeof account?.internalEmail === "string" ?
+          account.internalEmail : "";
+        const oldLoginIdNormalized = typeof account?.loginIdNormalized ===
+          "string" ? account.loginIdNormalized : "";
+        if (account?.uid !== uid || account?.classId !== classId ||
+            account?.studentId !== studentId || !internalEmail ||
+            !oldLoginIdNormalized) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Student account mapping is invalid.",
+          );
+        }
+
+        const oldIndexRef = db.doc(
+            `studentLoginIndex/${studentLoginKey(classId, oldLoginIdNormalized)}`,
+        );
+        const oldIndexSnapshot = oldIndexRef.path === newIndexRef.path ?
+          newIndexSnapshot : await transaction.get(oldIndexRef);
+        if (oldIndexSnapshot.exists) {
+          const oldIndex = oldIndexSnapshot.data();
+          if (oldIndex?.uid !== uid || oldIndex?.classId !== classId ||
+              oldIndex?.studentId !== studentId) {
+            throw new HttpsError(
+                "failed-precondition",
+                "Existing student login ID mapping is invalid.",
+            );
+          }
+        }
+
+        const timestamp = FieldValue.serverTimestamp();
+        const createdAt = newIndexSnapshot.data()?.createdAt ||
+          oldIndexSnapshot.data()?.createdAt || account.createdAt || timestamp;
+        transaction.set(studentRef, {loginId, updatedAt: timestamp}, {merge: true});
+        transaction.set(accountRef, {
+          loginId,
+          loginIdNormalized,
+          updatedAt: timestamp,
+        }, {merge: true});
+        transaction.set(newIndexRef, {
+          uid,
+          classId,
+          studentId,
+          loginIdNormalized,
+          internalEmail,
+          active: account.active === true,
+          createdAt,
+          updatedAt: timestamp,
+        });
+        if (oldIndexRef.path !== newIndexRef.path && oldIndexSnapshot.exists) {
+          transaction.delete(oldIndexRef);
+        }
+      });
+
+      return {ok: true, studentId, loginId};
+    },
+);
+
 function studentLoginFailed() {
   return new HttpsError(
       "invalid-argument",

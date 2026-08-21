@@ -378,6 +378,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .class-info-form { display: grid; grid-template-columns: repeat(3, minmax(170px, 1fr)) auto; gap: 14px; align-items: end; }
 .class-info-form label, .class-student-search { display: grid; gap: 7px; }
 .class-roster-card > .section-heading { align-items: flex-start; }
+.student-access-card { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 12px 20px; align-items: center; margin: 16px 0; padding: 16px 18px; border: 1px solid #dedbf5; border-radius: 14px; background: #f8f7ff; }
+.student-access-copy { min-width: 0; }
+.student-access-copy strong { color: #43389a; font-size: 1rem; }
+.student-access-copy p { margin: 5px 0 0; color: #687188; font-size: .9rem; }
+.student-access-actions { margin-top: 0; justify-content: flex-end; }
+.student-access-actions .button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
+.student-access-preview { grid-column: 1 / -1; display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding-top: 11px; border-top: 1px solid #e5e2f6; font-size: .82rem; }
+.student-access-preview span { color: #687188; font-weight: 800; }
+.student-access-preview a { min-width: 0; overflow: hidden; color: #5148ae; text-overflow: ellipsis; white-space: nowrap; }
+.student-access-unavailable { grid-column: 1 / -1; margin: 0; color: #8b5b31; font-size: .86rem; font-weight: 700; }
+.student-access-fallback input { width: 100%; margin: 10px 0 16px; }
 .class-student-search { grid-template-columns: minmax(220px, 420px) auto; align-items: center; margin: 16px 0; }
 .class-student-search span { color: #687188; font-weight: 800; }
 .class-roster-table-wrap { overflow-x: auto; }
@@ -447,6 +458,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .class-core-features { margin: 14px 0 0; padding: 11px 13px; color: #536078; background: #eef7f5; border-radius: 10px; }
 
 @media (max-width: 700px) {
+  .student-access-card { grid-template-columns: 1fr; padding: 15px; }
+  .student-access-actions { width: 100%; justify-content: stretch; }
+  .student-access-actions .button { flex: 1 1 150px; }
+  .student-access-preview { grid-column: 1; grid-template-columns: 1fr; gap: 5px; }
+  .student-access-unavailable { grid-column: 1; }
   .class-roster-actions { width: 100%; justify-content: stretch; }
   .class-roster-actions .button { flex: 1 1 150px; }
   .student-excel-modal { padding: 10px; }

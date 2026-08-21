@@ -150,6 +150,7 @@ try {
   const createStudentAccountCallable = httpsCallable(functions, "createStudentAccount");
   const getStudentAccountStatusesCallable = httpsCallable(functions, "getStudentAccountStatuses");
   const resetStudentPasswordCallable = httpsCallable(functions, "resetStudentPassword");
+  const updateStudentLoginIdCallable = httpsCallable(functions, "updateStudentLoginId");
   const resolveStudentLoginCallable = httpsCallable(studentFunctions, "resolveStudentLogin");
   const getStudentSessionCallable = httpsCallable(studentFunctions, "getStudentSession");
   const getStudentHomeDataCallable = httpsCallable(studentFunctions, "getStudentHomeData");
@@ -348,6 +349,20 @@ try {
       return {
         ok: value.ok === true,
         studentId: String(value.studentId || ""),
+      };
+    },
+    updateStudentLoginId: async ({classId, studentId, loginId}) => {
+      const result = await updateStudentLoginIdCallable({
+        classId: String(classId || ""),
+        studentId: String(studentId || ""),
+        loginId: String(loginId || ""),
+      });
+      const value = result?.data && typeof result.data === "object" ?
+        result.data : {};
+      return {
+        ok: value.ok === true,
+        studentId: String(value.studentId || ""),
+        loginId: String(value.loginId || ""),
       };
     },
     loadTeacherClass: async () => {

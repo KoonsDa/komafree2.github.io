@@ -1756,6 +1756,34 @@ function studentAccountButton(student) {
   if (account?.exists) return `<span class="student-account-status">✅ 계정 생성됨</span><button class="button secondary compact" data-action="reset-student-password" data-id="${student.id}">비밀번호 초기화</button>`;
   return `<button class="button success compact" data-action="open-student-account" data-id="${student.id}">계정 만들기</button>`;
 }
+function studentAccessUrl() {
+  if (!firebaseActiveClassId) return "";
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("class", firebaseActiveClassId);
+  return url.toString();
+}
+function studentAccessSection() {
+  const url = studentAccessUrl();
+  if (!url) return `<div class="student-access-card"><div class="student-access-copy"><strong>학생 접속</strong><p>학생들이 접속할 우리 반 전용 주소입니다.</p></div><div class="button-row student-access-actions"><button class="button" disabled>학생 접속 링크 복사</button><button class="button secondary" disabled>학생 화면 열기 ↗</button></div><p class="student-access-unavailable">먼저 사용할 학급을 선택해 주세요.</p></div>`;
+  const safeUrl = escapeHtml(url);
+  return `<div class="student-access-card"><div class="student-access-copy"><strong>학생 접속</strong><p>학생들이 접속할 우리 반 전용 주소입니다.</p></div><div class="button-row student-access-actions"><button class="button" data-action="copy-student-access-link">학생 접속 링크 복사</button><a class="button secondary" href="${safeUrl}" target="_blank" rel="noopener noreferrer">학생 화면 열기 ↗</a></div><div class="student-access-preview"><span>학생 접속 주소</span><a href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="${safeUrl}">${safeUrl}</a></div></div>`;
+}
+async function copyStudentAccessLink() {
+  const url = studentAccessUrl();
+  if (!url) return toast("먼저 사용할 학급을 선택해 주세요.");
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard API is unavailable.");
+    await navigator.clipboard.writeText(url);
+    toast("학생 접속 링크를 복사했습니다.");
+  } catch (error) {
+    console.warn("Student access link copy failed", error);
+    app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card student-access-fallback"><h2>학생 접속 주소</h2><p>자동 복사하지 못했습니다. 아래 주소를 직접 복사해 주세요.</p><input type="text" value="${escapeHtml(url)}" readonly aria-label="학생 접속 주소"><div class="button-row"><button class="button secondary" data-action="close-modal">닫기</button></div></section></div>`);
+    const input = document.querySelector(".student-access-fallback input");
+    input?.focus(); input?.select();
+  }
+}
 function teacherClassSettingsBase() {
   const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR");
   const students = activeStudents().filter((student) => !keyword || String(studentNumber(student)).includes(keyword) || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || student.loginId.toLocaleLowerCase("en-US").includes(keyword));
@@ -1763,7 +1791,7 @@ function teacherClassSettingsBase() {
   const inactiveStudents = data.students.filter((student) => student.active === false).sort((first, second) => studentNumber(first) - studentNumber(second) || first.name.localeCompare(second.name, "ko"));
   const inactiveRows = inactiveStudents.map((student) => `<tr><td>${studentNumber(student)}</td><td><strong>${escapeHtml(student.name)}</strong></td><td><code>${escapeHtml(student.loginId)}</code></td><td><div class="button-row class-student-actions"><button class="button secondary compact" data-action="edit-class-student" data-id="${student.id}">수정</button><button class="button success compact" data-action="restore-class-student" data-id="${student.id}">복구</button></div></td></tr>`).join("");
   const inactiveSection = inactiveStudents.length ? `<details class="inactive-student-section"><summary>비활성 학생 ${inactiveStudents.length}명 보기</summary><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${inactiveRows}</tbody></table></div></details>` : "";
-  return `<div class="section-heading"><div><h1 class="page-heading">학급 설정</h1><p class="page-description">우리 반 기본 정보와 모든 기능에서 함께 사용하는 학생 명단을 관리합니다.</p></div></div><section class="card class-settings-card"><h2>학급 정보</h2><form id="class-info-form" class="class-info-form"><label>프로그램 이름<input name="appName" maxlength="50" value="${escapeHtml(data.classSettings.appName)}" required placeholder="예: 우리반 퀘스트"></label><label>학급 이름<input name="className" maxlength="50" value="${escapeHtml(data.classSettings.className)}" required placeholder="예: 5학년 2반"></label><label>선생님 표시 이름<input name="teacherName" maxlength="30" value="${escapeHtml(data.classSettings.teacherName)}" required placeholder="예: 윤석훈"></label><button class="button success" type="submit">저장</button></form></section><section class="card class-roster-card"><div class="section-heading"><div><h2>학생 명단 <span class="muted">총 ${activeStudents().length}명</span></h2><p class="muted">번호와 이름은 바꿀 수 있지만 학생 ID와 연결된 기존 기록은 그대로 유지됩니다.</p></div><div class="button-row class-roster-actions"><button class="button secondary" data-action="download-student-excel-template">엑셀 양식 다운로드</button><button class="button secondary" data-action="upload-student-excel">엑셀로 학생 등록</button><button class="button success" data-action="new-class-student">+ 학생 추가</button><input id="student-excel-upload" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div></div><div class="class-student-search"><input id="class-student-search" type="search" value="${escapeHtml(classStudentSearch)}" placeholder="번호, 이름 또는 로그인 ID 검색"><span>${students.length}명 표시</span></div><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${rows || `<tr><td colspan="4"><div class="empty">검색 결과가 없습니다.</div></td></tr>`}</tbody></table></div><p class="class-login-note">학생 로그인과 비밀번호 관리는 Firebase 연결 후 사용할 수 있습니다. Excel 초기 비밀번호는 계정 생성 요청 후 메모리에서 지웁니다.</p>${inactiveSection}</section>`;
+  return `<div class="section-heading"><div><h1 class="page-heading">학급 설정</h1><p class="page-description">우리 반 기본 정보와 모든 기능에서 함께 사용하는 학생 명단을 관리합니다.</p></div></div><section class="card class-settings-card"><h2>학급 정보</h2><form id="class-info-form" class="class-info-form"><label>프로그램 이름<input name="appName" maxlength="50" value="${escapeHtml(data.classSettings.appName)}" required placeholder="예: 우리반 퀘스트"></label><label>학급 이름<input name="className" maxlength="50" value="${escapeHtml(data.classSettings.className)}" required placeholder="예: 5학년 2반"></label><label>선생님 표시 이름<input name="teacherName" maxlength="30" value="${escapeHtml(data.classSettings.teacherName)}" required placeholder="예: 윤석훈"></label><button class="button success" type="submit">저장</button></form></section><section class="card class-roster-card"><div class="section-heading"><div><h2>학생 명단 <span class="muted">총 ${activeStudents().length}명</span></h2><p class="muted">번호와 이름은 바꿀 수 있지만 학생 ID와 연결된 기존 기록은 그대로 유지됩니다.</p></div><div class="button-row class-roster-actions"><button class="button secondary" data-action="download-student-excel-template">엑셀 양식 다운로드</button><button class="button secondary" data-action="upload-student-excel">엑셀로 학생 등록</button><button class="button success" data-action="new-class-student">+ 학생 추가</button><input id="student-excel-upload" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div></div>${studentAccessSection()}<div class="class-student-search"><input id="class-student-search" type="search" value="${escapeHtml(classStudentSearch)}" placeholder="번호, 이름 또는 로그인 ID 검색"><span>${students.length}명 표시</span></div><div class="class-roster-table-wrap"><table class="class-roster-table"><thead><tr><th>번호</th><th>이름</th><th>로그인 ID</th><th>관리</th></tr></thead><tbody>${rows || `<tr><td colspan="4"><div class="empty">검색 결과가 없습니다.</div></td></tr>`}</tbody></table></div><p class="class-login-note">학생 로그인과 비밀번호 관리는 Firebase 연결 후 사용할 수 있습니다. Excel 초기 비밀번호는 계정 생성 요청 후 메모리에서 지웁니다.</p>${inactiveSection}</section>`;
 }
 
 function classFeatureSettings() {
@@ -2622,6 +2650,7 @@ app.addEventListener("click", async (event) => {
   if (action === "view-student-point-history") { openTeacherPointHistoryModal(target.dataset.id); return; }
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
+  if (action === "copy-student-access-link") { await copyStudentAccessLink(); return; }
   if (action === "download-student-excel-template") { downloadStudentExcelTemplate(); return; }
   if (action === "upload-student-excel") { if (!studentExcelLibraryReady()) return toast("Excel 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해 주세요."); document.querySelector("#student-excel-upload")?.click(); return; }
   if (action === "confirm-student-excel-import") { await registerPendingStudentExcelRows(); return; }
@@ -3129,8 +3158,26 @@ app.addEventListener("submit", async (event) => {
     if (!/^[A-Za-z0-9._-]+$/.test(loginId)) return toast("로그인 ID는 영문, 숫자, 점, 밑줄, 하이픈만 사용할 수 있습니다.");
     if (data.students.some((student) => student.active !== false && student.id !== existing?.id && studentNumber(student) === number)) return toast(`${number}번은 이미 사용 중입니다.`);
     if (data.students.some((student) => student.id !== existing?.id && (existing?.active !== false || student.active !== false) && student.loginId?.toLocaleLowerCase("en-US") === loginId.toLocaleLowerCase("en-US"))) return toast("이미 사용 중인 로그인 ID입니다.");
+    const account = existing ? firebaseStudentAccountStatuses[existing.id] : null;
+    const loginIdChangedForAccount = Boolean(existing && account?.exists && account.loginId !== loginId);
     const savedStudent = existing || addStudentRecord(number, name.slice(0, 30), loginId); if (existing) Object.assign(existing, { number, name: name.slice(0, 30), loginId });
-    form.closest(".modal")?.remove(); saveData(); render(); toast(existing ? "학생 정보를 수정했습니다." : "학생을 추가했습니다."); saveFirebaseStudent(savedStudent, !existing); return;
+    form.closest(".modal")?.remove(); saveData(); render();
+    if (loginIdChangedForAccount) {
+      try {
+        const result = await window.ourClassFirebase.updateStudentLoginId({classId: firebaseActiveClassId, studentId: savedStudent.id, loginId});
+        if (!result.ok) throw new Error("Student login ID update response was invalid.");
+        firebaseStudentAccountStatuses[savedStudent.id].loginId = result.loginId || loginId;
+        await window.ourClassFirebase.saveStudent(savedStudent, data.students.findIndex((item) => item.id === savedStudent.id));
+        toast("학생 정보를 수정했습니다.");
+      } catch (error) {
+        console.error("Firebase student login ID update failed", error);
+        await loadFirebaseStudents(firebaseTeacherUser?.uid);
+        await loadFirebaseStudentAccountStatuses(firebaseTeacherUser?.uid, firebaseActiveClassId);
+        saveData(); render(); toast("로그인 ID를 변경하지 못했습니다.");
+      }
+      return;
+    }
+    toast(existing ? "학생 정보를 수정했습니다." : "학생을 추가했습니다."); saveFirebaseStudent(savedStudent, !existing); return;
   }
   if (form.id === "group-settings-form") {
     const count = Number(formData.get("count")); if (!Number.isInteger(count) || count < 2 || count > 8) { toast("모둠 수는 2~8개로 설정해 주세요."); return; }
