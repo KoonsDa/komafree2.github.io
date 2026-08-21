@@ -1405,6 +1405,673 @@
   .hall-my-rank { grid-template-columns:auto minmax(0,1fr); }.hall-my-rank > b { grid-column:2; }
 }
 
+/* Student ranking characters: reuse the shared character registry artwork. */
+.hall-podium {
+  min-height: 350px;
+  gap: 14px;
+  padding: 34px 18px 0;
+}
+.hall-podium-card {
+  gap: 6px;
+  min-height: 246px;
+  padding: 18px 12px 27px;
+}
+.hall-podium-card.place-1 { min-height: 300px; }
+.hall-podium-card.place-2 { min-height: 266px; }
+.hall-podium-card.place-3 { min-height: 238px; }
+.hall-character-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(127, 104, 226, .22), rgba(255,255,255,.58) 58%, transparent 72%);
+  box-shadow: none;
+}
+.hall-character-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 10px rgba(45, 35, 99, .18));
+  transform: translate(var(--character-offset-x, 0), var(--character-offset-y, 0)) scale(var(--character-scale, 1));
+  transform-origin: center bottom;
+}
+.hall-podium-card.place-1 .hall-character-avatar {
+  width: 148px;
+  height: 148px;
+  background: radial-gradient(circle, rgba(255, 211, 72, .32), rgba(255,255,255,.7) 58%, transparent 74%);
+}
+.hall-podium-card.place-2 .hall-character-avatar,
+.hall-podium-card.place-3 .hall-character-avatar {
+  width: 118px;
+  height: 118px;
+}
+.hall-podium-card.place-2 .hall-character-avatar { background: radial-gradient(circle, rgba(167, 181, 207, .3), rgba(255,255,255,.66) 58%, transparent 74%); }
+.hall-podium-card.place-3 .hall-character-avatar { background: radial-gradient(circle, rgba(211, 139, 82, .25), rgba(255,255,255,.66) 58%, transparent 74%); }
+.hall-podium-card > strong { font-size: 1rem; }
+.hall-podium-card > b { font-size: 1.1rem; }
+.hall-rank-badge { z-index: 3; }
+.hall-podium-card.place-1 .hall-rank-badge { top: -22px; font-size: 34px; }
+.hall-podium-card.place-2 .hall-rank-badge,
+.hall-podium-card.place-3 .hall-rank-badge { top: -14px; }
+.hall-ranking-row {
+  grid-template-columns: 34px 52px minmax(0, 1fr) auto;
+  min-height: 68px;
+  padding-block: 8px;
+}
+.hall-ranking-row .hall-character-avatar {
+  width: 48px;
+  height: 48px;
+}
+.hall-my-rank {
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  min-height: 100px;
+  padding: 12px 18px;
+}
+.hall-my-rank .hall-character-avatar {
+  width: 76px;
+  height: 76px;
+  background: radial-gradient(circle, rgba(255,255,255,.28), rgba(255,255,255,.1) 62%, transparent 74%);
+}
+.hall-my-rank .hall-character-image { filter: drop-shadow(0 7px 9px rgba(31, 22, 92, .25)); }
+
+@media (max-width: 700px) {
+  .hall-podium {
+    min-height: 275px;
+    gap: 5px;
+    padding: 27px 2px 0;
+  }
+  .hall-podium-card { gap: 4px; padding: 10px 4px 24px; }
+  .hall-podium-card.place-1 { min-height: 238px; }
+  .hall-podium-card.place-2 { min-height: 216px; }
+  .hall-podium-card.place-3 { min-height: 202px; }
+  .hall-podium-card.place-1 .hall-character-avatar { width: 94px; height: 94px; }
+  .hall-podium-card.place-2 .hall-character-avatar,
+  .hall-podium-card.place-3 .hall-character-avatar { width: 78px; height: 78px; }
+  .hall-podium-card > strong { font-size: .8rem; }
+  .hall-podium-card > b { font-size: .88rem; }
+  .hall-ranking-row { grid-template-columns: 28px 46px minmax(0, 1fr) auto; gap: 7px; padding-inline: 8px; }
+  .hall-ranking-row .hall-character-avatar { width: 44px; height: 44px; }
+  .hall-my-rank { grid-template-columns: 66px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .hall-my-rank .hall-character-avatar { width: 64px; height: 64px; }
+  .hall-my-rank > b { grid-column: 2; }
+}
+
+@media (max-width: 360px) {
+  .hall-podium-card.place-1 .hall-character-avatar { width: 80px; height: 80px; }
+  .hall-podium-card.place-2 .hall-character-avatar,
+  .hall-podium-card.place-3 .hall-character-avatar { width: 66px; height: 66px; }
+}
+
+/* Ranking design v3: a clearer 2-1-3 podium stage with character-first hierarchy. */
+.hall-podium {
+  position: relative;
+  min-height: 456px;
+  align-items: end;
+  gap: 18px;
+  padding: 54px 24px 18px;
+  overflow: visible;
+  background:
+    radial-gradient(circle at 50% 15%, rgba(255, 219, 77, .34), transparent 27%),
+    radial-gradient(circle at 18% 38%, rgba(164, 177, 215, .18), transparent 25%),
+    radial-gradient(circle at 82% 45%, rgba(221, 148, 91, .16), transparent 24%),
+    linear-gradient(180deg, #f7f3ff 0%, #fff 82%);
+}
+.hall-podium::after {
+  content: "";
+  position: absolute;
+  right: 5%;
+  bottom: 13px;
+  left: 5%;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(66, 55, 133, .09);
+  filter: blur(6px);
+}
+.hall-podium-card {
+  isolation: isolate;
+  justify-content: flex-start;
+  overflow: visible;
+  padding: 22px 14px 82px;
+  border-radius: 26px 26px 12px 12px;
+  transform-origin: center bottom;
+}
+.hall-podium-card::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -7px;
+  bottom: -12px;
+  left: -7px;
+  height: 66px;
+  border-radius: 10px 10px 16px 16px;
+  background: linear-gradient(180deg, #e6eaf3, #cdd5e4);
+  box-shadow: inset 0 5px rgba(255,255,255,.34), inset 0 -10px rgba(69,75,98,.12), 0 12px 18px rgba(55,50,95,.16);
+}
+.hall-podium-card.place-1 {
+  z-index: 3;
+  min-height: 378px;
+  border: 2px solid #efca55;
+  background: linear-gradient(180deg, #fff9d6 0%, #fff 55%);
+  box-shadow: 0 15px 34px rgba(192, 139, 23, .2), 0 0 28px rgba(255, 206, 47, .14);
+}
+.hall-podium-card.place-1::after { height: 82px; background: linear-gradient(180deg, #ead071 0 10%, #d7b43b 10% 72%, #b98d20 100%); }
+.hall-podium-card.place-2 { z-index: 2; min-height: 324px; margin-bottom: 0; border-color: #cad3e2; background: linear-gradient(180deg, #f2f6fc 0%, #fff 58%); }
+.hall-podium-card.place-2::after { height: 70px; background: linear-gradient(180deg, #d8dee9 0 10%, #b6c0d0 10% 72%, #8e9db3 100%); }
+.hall-podium-card.place-3 { z-index: 1; min-height: 292px; margin-bottom: 0; border-color: #e2b18b; background: linear-gradient(180deg, #fff0e2 0%, #fff 58%); }
+.hall-podium-card.place-3::after { height: 60px; background: linear-gradient(180deg, #e2b38d 0 10%, #cb8e61 10% 72%, #aa6840 100%); }
+.hall-podium-card .hall-character-image { --ranking-character-zoom: 1.3; transform: translate(var(--character-offset-x, 0), var(--character-offset-y, 0)) scale(calc(var(--character-scale, 1) * var(--ranking-character-zoom))); }
+.hall-podium-card.place-1 .hall-character-image { --ranking-character-zoom: 1.42; }
+.hall-podium-card.place-1 .hall-character-avatar { width: 166px; height: 166px; }
+.hall-podium-card.place-2 .hall-character-avatar,
+.hall-podium-card.place-3 .hall-character-avatar { width: 132px; height: 132px; }
+.hall-podium-card > strong { position: relative; z-index: 2; margin-top: 5px; color: #282c51; font-size: 1.2rem; font-weight: 700; line-height: 1.25; }
+.hall-podium-card.place-1 > strong { font-size: 1.35rem; }
+.hall-podium-card > small { position: relative; z-index: 2; color: #85899d; font-size: .75rem; font-weight: 500; }
+.hall-podium-card > b { position: relative; z-index: 2; margin-top: 3px; color: #5140c1; font-size: 1.4rem; line-height: 1.2; }
+.hall-podium-card.place-1 > b { color: #4936bb; font-size: 1.55rem; }
+.hall-rank-badge {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  font-family: var(--font-display, inherit);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: none;
+  box-shadow: 0 6px 14px rgba(54, 58, 93, .18);
+}
+.hall-podium-card.place-1 .hall-rank-badge { top: -48px; width: 62px; height: 54px; border: 0; border-radius: 0; color: #d69a13; background: transparent; font-size: 3.25rem; filter: drop-shadow(0 6px 7px rgba(173, 111, 0, .22)); box-shadow: none; }
+.hall-podium-card.place-2 .hall-rank-badge { top: -21px; color: #fff; background: linear-gradient(145deg, #bbc6d7, #718096); }
+.hall-podium-card.place-3 .hall-rank-badge { top: -21px; color: #fff; background: linear-gradient(145deg, #e0a276, #995a34); }
+.hall-place { z-index: 3; width: 34px; height: 25px; font-size: .9rem; }
+.hall-ranking-row {
+  grid-template-columns: 40px 58px minmax(0, 1fr) auto;
+  min-height: 72px;
+  padding: 8px 16px;
+  border-color: #e7e4f3;
+  background: #fcfbff;
+}
+.hall-ranking-row + .hall-ranking-row { margin-top: 1px; }
+.hall-row-rank { font-size: 1rem; font-weight: 700; }
+.hall-ranking-row .hall-character-avatar { width: 56px; height: 56px; }
+.hall-ranking-row .hall-character-image { transform: translate(var(--character-offset-x, 0), var(--character-offset-y, 0)) scale(calc(var(--character-scale, 1) * 1.2)); }
+.hall-ranking-row > strong { font-size: 1rem; font-weight: 700; }
+.hall-ranking-row > strong small { margin-top: 2px; font-size: .75rem; font-weight: 500; }
+.hall-ranking-row > b { color: #4c3fba; font-size: 1.1rem; font-weight: 700; }
+.hall-more-button { min-height: 38px; padding: 9px 20px; border-color: #cfc7f4; color: #5545bf; background: #faf8ff; transition: background .15s ease, transform .15s ease; }
+.hall-more-button:hover { background: #f1edff; transform: translateY(-1px); }
+.hall-my-rank {
+  position: relative;
+  grid-template-columns: 76px 88px minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 128px;
+  margin-top: 20px;
+  padding: 32px 22px 18px;
+  overflow: hidden;
+  border: 2px solid #b9acf3;
+  border-radius: 24px;
+  color: #35305f;
+  background: radial-gradient(circle at 14% 50%, rgba(125,101,221,.13), transparent 28%), linear-gradient(135deg, #f3efff 0%, #fff 56%, #eee9ff 100%);
+  box-shadow: 0 12px 26px rgba(77, 59, 177, .14);
+}
+.hall-my-label { position: absolute; top: 0; left: 0; padding: 7px 14px; color: #fff; background: #6955d3; border-radius: 0 0 13px 0; font-size: .78rem; font-weight: 700; }
+.hall-my-position { color: #5742c3; font-family: var(--font-display, inherit); font-size: 1.7rem; text-align: center; white-space: nowrap; }
+.hall-my-rank .hall-character-avatar { width: 86px; height: 86px; background: radial-gradient(circle, rgba(132, 104, 226, .24), rgba(255,255,255,.66) 62%, transparent 74%); }
+.hall-my-rank .hall-character-image { transform: translate(var(--character-offset-x, 0), var(--character-offset-y, 0)) scale(calc(var(--character-scale, 1) * 1.25)); }
+.hall-my-copy { min-width: 0; }
+.hall-my-copy > strong { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #2d2b4f; font-size: 1.2rem; font-weight: 700; }
+.hall-me-badge { padding: 3px 7px; color: #5b48c5; background: #e4ddff; border-radius: 999px; font-size: .7rem; font-weight: 700; }
+.hall-my-copy p { margin-top: 6px; color: #615d77; font-size: .875rem; font-weight: 600; line-height: 1.45; }
+.hall-my-rank > b { color: #4b38bb; font-size: 1.55rem; font-weight: 700; }
+
+@media (max-width: 700px) {
+  .hall-podium { min-height: 326px; gap: 5px; padding: 38px 3px 15px; }
+  .hall-podium-card { padding: 12px 3px 58px; border-radius: 18px 18px 9px 9px; }
+  .hall-podium-card::after { right: -3px; bottom: -8px; left: -3px; border-radius: 7px 7px 11px 11px; }
+  .hall-podium-card.place-1 { min-height: 276px; }
+  .hall-podium-card.place-1::after { height: 64px; }
+  .hall-podium-card.place-2 { min-height: 238px; }
+  .hall-podium-card.place-2::after { height: 55px; }
+  .hall-podium-card.place-3 { min-height: 218px; }
+  .hall-podium-card.place-3::after { height: 48px; }
+  .hall-podium-card.place-1 .hall-character-avatar { width: 100px; height: 100px; }
+  .hall-podium-card.place-2 .hall-character-avatar,
+  .hall-podium-card.place-3 .hall-character-avatar { width: 82px; height: 82px; }
+  .hall-podium-card > strong,
+  .hall-podium-card.place-1 > strong { margin-top: 2px; font-size: .82rem; }
+  .hall-podium-card > small { font-size: .66rem; }
+  .hall-podium-card > b,
+  .hall-podium-card.place-1 > b { font-size: .9rem; }
+  .hall-rank-badge { width: 32px; height: 32px; border-width: 2px; font-size: 1rem; }
+  .hall-podium-card.place-1 .hall-rank-badge { top: -38px; width: 44px; height: 40px; font-size: 2.35rem; }
+  .hall-podium-card.place-2 .hall-rank-badge,
+  .hall-podium-card.place-3 .hall-rank-badge { top: -14px; }
+  .hall-ranking-row { grid-template-columns: 30px 50px minmax(0, 1fr) auto; min-height: 68px; gap: 7px; padding-inline: 8px; }
+  .hall-ranking-row .hall-character-avatar { width: 48px; height: 48px; }
+  .hall-ranking-row > strong { font-size: .9rem; }
+  .hall-ranking-row > b { font-size: .9rem; }
+  .hall-my-rank { grid-template-columns: 56px 68px minmax(0, 1fr); gap: 8px; min-height: 142px; padding: 35px 12px 14px; }
+  .hall-my-position { font-size: 1.25rem; }
+  .hall-my-rank .hall-character-avatar { width: 66px; height: 66px; }
+  .hall-my-copy > strong { font-size: 1rem; }
+  .hall-my-copy p { font-size: .78rem; }
+  .hall-my-rank > b { grid-column: 3; margin-top: -4px; font-size: 1.15rem; }
+}
+
+@media (max-width: 360px) {
+  .hall-podium-card.place-1 .hall-character-avatar { width: 88px; height: 88px; }
+  .hall-podium-card.place-2 .hall-character-avatar,
+  .hall-podium-card.place-3 .hall-character-avatar { width: 72px; height: 72px; }
+  .hall-my-rank { grid-template-columns: 48px 58px minmax(0, 1fr); }
+  .hall-my-rank .hall-character-avatar { width: 56px; height: 56px; }
+}
+
+/* Ranking badge assets: medals remain secondary to the shared character artwork. */
+.hall-podium-card .hall-rank-badge {
+  position: absolute;
+  z-index: 6;
+  top: auto;
+  bottom: 28px;
+  left: 18px;
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  filter: drop-shadow(0 6px 8px rgba(31, 23, 68, .34));
+  box-shadow: none;
+  transform: none;
+}
+.hall-podium-card.place-1 .hall-rank-badge { top: auto; bottom: 34px; left: 22px; width: 96px; height: 96px; font-size: inherit; filter: drop-shadow(0 7px 9px rgba(31,23,68,.36)); }
+.hall-podium-card.place-2 .hall-rank-badge,
+.hall-podium-card.place-3 .hall-rank-badge { top: auto; color: inherit; background: transparent; }
+.hall-podium-card.place-3 .hall-rank-badge { bottom: 18px; }
+.hall-rank-badge::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 50%;
+  background: rgba(247,244,255,.88);
+  box-shadow: 0 4px 12px rgba(24,18,61,.18), inset 0 1px rgba(255,255,255,.92);
+}
+.hall-rank-badge > img { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: contain; transform: scale(1.3); }
+.hall-podium-card.place-1 .hall-rank-badge > img { transform: scale(1.36); }
+.hall-rank-fallback {
+  display: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 21px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  background: #7865d8;
+  font-family: var(--font-display, inherit);
+  font-size: 1.15rem;
+  font-weight: 700;
+  box-shadow: 0 5px 12px rgba(54,58,93,.18);
+}
+.place-1 .hall-rank-fallback { color: #715000; background: #f2c83e; }
+.place-2 .hall-rank-fallback { background: #8492a8; }
+.place-3 .hall-rank-fallback { background: #b86f43; }
+.hall-rank-badge.asset-failed .hall-rank-fallback { display: grid; }
+.hall-ranking-crown {
+  position: absolute;
+  z-index: 7;
+  top: -48px;
+  left: 50%;
+  width: 70px;
+  height: 70px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 6px 7px rgba(174,108,0,.2));
+}
+.hall-ranking-crown img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.hall-ranking-crown.asset-failed { visibility: hidden; }
+.hall-my-label {
+  top: 12px;
+  left: 16px;
+  width: 152px;
+  height: 54px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+}
+.hall-my-label img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.hall-my-label-fallback { display: none; width: max-content; padding: 7px 14px; border-radius: 0 0 13px 0; color: #fff; background: #6955d3; font-size: .78rem; font-weight: 700; }
+.hall-my-label.asset-failed { width: auto; height: auto; overflow: visible; }
+.hall-my-label.asset-failed .hall-my-label-fallback { display: block; }
+
+@media (max-width: 700px) {
+  .hall-podium-card .hall-rank-badge { top: auto; bottom: 18px; left: 10px; width: 58px; height: 58px; }
+  .hall-podium-card.place-1 .hall-rank-badge { top: auto; bottom: 22px; left: 12px; width: 68px; height: 68px; }
+  .hall-podium-card.place-2 .hall-rank-badge,
+  .hall-podium-card.place-3 .hall-rank-badge { top: auto; }
+  .hall-podium-card.place-3 .hall-rank-badge { bottom: 12px; }
+  .hall-rank-fallback { width: 32px; height: 32px; margin: 13px; border-width: 2px; font-size: .95rem; }
+  .hall-ranking-crown { top: -46px; width: 52px; height: 52px; }
+  .hall-my-label { top: 10px; left: 12px; width: 122px; height: 43px; }
+  .hall-my-rank { padding-top: 48px; }
+}
+
+@media (max-width: 360px) {
+  .hall-podium-card .hall-rank-badge { width: 52px; height: 52px; }
+  .hall-podium-card.place-1 .hall-rank-badge { width: 60px; height: 60px; }
+  .hall-ranking-crown { width: 46px; height: 46px; }
+}
+
+/* Ranking layout polish: medal-led podiums and a balanced personal summary. */
+.hall-podium-card > strong { margin-top: 10px; }
+.hall-podium-card > b { margin-top: 8px; }
+.hall-my-rank {
+  grid-template-columns: 92px 96px minmax(0,1fr) auto;
+  gap: 18px;
+  min-height: 150px;
+  padding: 36px 28px 22px;
+}
+.hall-my-position { font-size: 2rem; line-height: 1; }
+.hall-my-rank .hall-character-avatar { align-self: end; width: 92px; height: 92px; }
+.hall-my-copy { align-self: center; }
+.hall-my-copy > strong { font-family: var(--font-ui, inherit); font-size: 1.25rem; font-weight: 700; }
+.hall-me-badge { padding: 3px 8px; font-family: var(--font-ui, inherit); font-size: .72rem; }
+.hall-my-copy p { margin-top: 7px; color: #55516d; font-family: var(--font-ui, inherit); font-size: .875rem; font-weight: 600; line-height: 1.5; }
+.hall-my-rank > b { align-self: center; padding-left: 12px; font-family: var(--font-display, inherit); font-size: 1.75rem; line-height: 1.1; }
+
+@media (max-width: 700px) {
+  .hall-podium-card > strong { margin-top: 7px; }
+  .hall-podium-card > b { margin-top: 5px; }
+  .hall-my-rank { grid-template-columns: 54px 72px minmax(0,1fr); gap: 9px; min-height: 174px; padding: 54px 14px 16px; }
+  .hall-my-position { align-self: center; font-size: 1.45rem; }
+  .hall-my-rank .hall-character-avatar { align-self: center; width: 70px; height: 70px; }
+  .hall-my-copy > strong { font-size: 1rem; }
+  .hall-my-copy p { margin-top: 4px; font-size: .8rem; line-height: 1.4; }
+  .hall-my-rank > b { grid-column: 3; justify-self: start; margin: 0; padding: 0; font-size: 1.25rem; }
+}
+
+@media (max-width: 360px) {
+  .hall-my-rank { grid-template-columns: 46px 62px minmax(0,1fr); gap: 7px; padding-inline: 10px; }
+  .hall-my-rank .hall-character-avatar { width: 60px; height: 60px; }
+  .hall-my-position { font-size: 1.25rem; }
+}
+
+/* Ranking refinement v10: clearer navigation, calmer spacing and scan-friendly rows. */
+.hall-help { display: none; }
+.hall-page-head::after { right: 28px; }
+.hall-ranking-tabs {
+  gap: 10px;
+  margin: 20px 0 16px;
+  padding: 7px;
+  border: 1px solid #e1ddf7;
+  background: #eeecfa;
+  box-shadow: inset 0 1px rgba(255,255,255,.78);
+}
+.hall-ranking-tabs button {
+  min-height: 52px;
+  padding: 13px 16px;
+  color: #4f536f;
+  font-family: var(--font-ui, inherit);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  transition: color .16s ease, background .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.hall-ranking-tabs button span { display: inline-block; margin-right: 8px; font-size: 1.12em; vertical-align: -1px; }
+.hall-ranking-tabs button.active {
+  border: 1px solid #d7d0f6;
+  color: #4433b1;
+  background: linear-gradient(180deg,#fff,#fbfaff);
+  font-weight: 800;
+  box-shadow: 0 6px 15px rgba(67,52,145,.14), inset 0 1px #fff;
+}
+.hall-toolbar { align-items: center; margin: 12px 0 16px; padding: 0 4px; }
+.hall-toolbar > div:first-child { gap: 9px; }
+.hall-toolbar > div:first-child span { width: 32px; height: 32px; box-shadow: 0 4px 10px rgba(72,56,170,.16); }
+.hall-toolbar > div:first-child strong { color: #25284f; font-size: 1.02rem; }
+.student-v156-period-buttons { gap: 5px; border: 1px solid #dfdbf5; background: #efedfa; }
+.student-v156-period-buttons button { min-height: 34px; padding: 7px 14px; font-family: var(--font-ui, inherit); font-weight: 600; }
+.student-v156-period-buttons button.active { color: #4939bd; font-weight: 700; box-shadow: 0 4px 11px rgba(67,60,143,.12); }
+.hall-ranking-board {
+  border-color: #dfdbf1;
+  background: linear-gradient(180deg,#fffdfa 0%,#fff 44%,#fdfcff 100%);
+  box-shadow: 0 14px 34px rgba(55,48,116,.09);
+}
+.hall-podium-card { gap: 0; }
+.hall-podium-card > strong {
+  margin-top: 11px;
+  color: #232746;
+  font-family: var(--font-ui, inherit);
+  font-size: 1.18rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.hall-podium-card.place-1 > strong { font-size: 1.32rem; }
+.hall-podium-card > b {
+  margin-top: 7px;
+  color: #4332b0;
+  font-family: var(--font-display, inherit);
+  font-size: 1.42rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.hall-podium-card.place-1 > b { color: #38269f; font-size: 1.62rem; }
+.hall-ranking-list { gap: 9px; }
+.hall-ranking-row {
+  grid-template-columns: 42px 60px minmax(0,1fr) auto;
+  min-height: 76px;
+  gap: 13px;
+  padding: 9px 18px;
+  border-color: #e5e2f1;
+  background: #fdfcff;
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.hall-row-rank { color: #655b9f; font-size: 1.02rem; }
+.hall-ranking-row .hall-character-avatar { width: 56px; height: 56px; }
+.hall-ranking-row > strong { color: #282b50; font-family: var(--font-ui, inherit); font-size: 1.02rem; font-weight: 700; }
+.hall-ranking-row > b { min-width: 72px; color: #4133aa; font-family: var(--font-display, inherit); font-size: 1.12rem; text-align: right; }
+.hall-more-button {
+  min-height: 42px;
+  padding: 10px 22px;
+  border: 1px solid #c8c0ed;
+  border-radius: 14px;
+  color: #4e3db7;
+  background: linear-gradient(180deg,#fff,#f5f2ff);
+  font-family: var(--font-ui, inherit);
+  font-size: .86rem;
+  font-weight: 700;
+  box-shadow: 0 5px 12px rgba(73,57,163,.08);
+}
+.hall-my-rank {
+  grid-template-columns: 84px 90px minmax(0,1fr) auto;
+  gap: 16px;
+  min-height: 128px;
+  padding: 32px 26px 16px;
+  border-color: #b5a8ed;
+  box-shadow: 0 11px 25px rgba(77,59,177,.13);
+}
+.hall-my-position { color: #4d39b7; font-size: 2.05rem; }
+.hall-my-rank .hall-character-avatar { width: 88px; height: 88px; }
+.hall-my-copy > strong { color: #272747; font-size: 1.22rem; }
+.hall-my-copy p { margin-top: 5px; color: #55516c; font-size: .86rem; line-height: 1.45; }
+.hall-my-rank > b { padding-left: 16px; color: #3f2cad; font-size: 1.78rem; white-space: nowrap; }
+
+@media (hover:hover) and (pointer:fine) {
+  .hall-ranking-tabs button:not(.active):not(:disabled):hover { color: #4c42a0; background: rgba(255,255,255,.55); }
+  .hall-ranking-tabs button.active:hover { transform: translateY(-1px); }
+  .hall-ranking-row:hover { border-color: #cec7ec; background: #f8f5ff; box-shadow: 0 6px 15px rgba(72,58,151,.08); transform: translateY(-1px); }
+  .hall-more-button:hover { border-color: #ada2e1; background: #f0ebff; box-shadow: 0 7px 15px rgba(73,57,163,.13); }
+}
+
+@media (max-width: 700px) {
+  .hall-ranking-tabs { gap: 7px; margin: 16px 0 13px; padding: 6px; }
+  .hall-ranking-tabs button { min-height: 48px; padding: 11px 8px; font-size: 1rem; font-weight: 700; }
+  .hall-ranking-tabs button span { margin-right: 6px; font-size: 1.08em; }
+  .hall-ranking-tabs button.active { font-weight: 800; }
+  .hall-toolbar { align-items: flex-start; gap: 9px; margin-bottom: 13px; }
+  .student-v156-period-buttons button { min-height: 32px; padding: 6px 11px; }
+  .hall-ranking-board { padding: 14px; }
+  .hall-podium-card > strong,
+  .hall-podium-card.place-1 > strong { margin-top: 8px; font-size: .84rem; }
+  .hall-podium-card > b,
+  .hall-podium-card.place-1 > b { margin-top: 5px; font-size: .92rem; }
+  .hall-ranking-row { grid-template-columns: 30px 50px minmax(0,1fr) auto; min-height: 70px; gap: 8px; padding: 8px 10px; }
+  .hall-ranking-row .hall-character-avatar { width: 48px; height: 48px; }
+  .hall-ranking-row > strong { font-size: .92rem; }
+  .hall-ranking-row > b { min-width: 0; font-size: .92rem; }
+  .hall-more-button { min-height: 40px; padding: 9px 18px; }
+  .hall-my-rank { grid-template-columns: 52px 68px minmax(0,1fr); gap: 9px; min-height: 120px; padding: 54px 13px 16px; }
+  .hall-my-position { font-size: 1.48rem; }
+  .hall-my-rank .hall-character-avatar { width: 66px; height: 66px; }
+  .hall-my-copy > strong { font-size: 1rem; }
+  .hall-my-copy p { font-size: .79rem; }
+  .hall-my-rank > b { grid-column: 3; justify-self: start; margin: 0; padding: 0; font-size: 1.24rem; }
+}
+
+@media (max-width: 360px) {
+  .hall-ranking-tabs button { padding-inline: 5px; font-size: .92rem; }
+  .hall-my-rank { grid-template-columns: 44px 60px minmax(0,1fr); gap: 7px; padding-inline: 10px; }
+  .hall-my-rank .hall-character-avatar { width: 58px; height: 58px; }
+}
+
+/* My-rank polish v12: separate the badge and make the personal message easier to read. */
+.hall-my-position {
+  position: relative;
+  top: 2px;
+  font-size: 2.18rem;
+}
+.hall-my-copy {
+  max-width: 100%;
+  margin-left: 4px;
+}
+.hall-my-copy > strong {
+  color: #22223f;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.hall-my-copy p {
+  margin-top: 6px;
+  color: #49465f;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.hall-my-rank > b { white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .hall-my-position { top: -14px; font-size: 1.6rem; }
+  .hall-my-copy { margin-left: 3px; }
+  .hall-my-copy > strong { font-size: 1.1rem; font-weight: 700; }
+  .hall-my-copy p { margin-top: 5px; font-size: .9rem; font-weight: 600; line-height: 1.45; }
+}
+
+@media (max-width: 360px) {
+  .hall-my-position { font-size: 1.45rem; }
+  .hall-my-copy > strong { font-size: 1.04rem; }
+  .hall-my-copy p { font-size: .84rem; }
+}
+
+/* My-rank layout v13: use the full card as rank, identity and score zones. */
+.hall-my-rank {
+  box-sizing: border-box;
+  grid-template-columns: 140px 110px minmax(0,1fr) 180px;
+  gap: 20px;
+  width: 100%;
+  height: 180px;
+  min-height: 180px;
+  padding: 38px 28px 18px;
+  align-items: center;
+}
+.hall-my-label { top: 12px; left: 18px; }
+.hall-my-position {
+  position: relative;
+  top: 7px;
+  align-self: center;
+  margin: 24px 0 0;
+  color: #4934b2;
+  font-family: var(--font-display, inherit);
+  font-size: 2.125rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+}
+.hall-my-rank .hall-character-avatar {
+  align-self: center;
+  width: 106px;
+  height: 106px;
+}
+.hall-my-copy {
+  align-self: center;
+  width: 100%;
+  min-width: 0;
+  margin-left: 2px;
+}
+.hall-my-copy > strong {
+  gap: 8px;
+  color: #1f203d;
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.hall-me-badge { align-self: center; flex: 0 0 auto; }
+.hall-my-copy p {
+  max-width: 100%;
+  margin-top: 8px;
+  color: #454259;
+  font-size: 1.18rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.hall-my-rank > b {
+  align-self: center;
+  justify-self: end;
+  min-width: 0;
+  padding: 0;
+  color: #3b28a5;
+  font-size: 1.9rem;
+  font-weight: 800;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .hall-my-rank {
+    grid-template-columns: 58px 78px minmax(0,1fr);
+    grid-template-rows: minmax(92px,auto) auto;
+    gap: 8px 10px;
+    height: 218px;
+    min-height: 218px;
+    padding: 64px 14px 14px;
+    align-items: start;
+  }
+  .hall-my-label { top: 10px; left: 12px; }
+  .hall-my-position { align-self: start; margin-top: 12px; font-size: 1.85rem; }
+  .hall-my-rank .hall-character-avatar { align-self: start; width: 78px; height: 78px; }
+  .hall-my-copy { align-self: start; margin: 5px 0 0 3px; }
+  .hall-my-copy > strong { gap: 6px; font-size: 1.32rem; font-weight: 800; }
+  .hall-my-copy p { margin-top: 7px; font-size: 1rem; font-weight: 600; line-height: 1.45; }
+  .hall-my-rank > b { grid-column: 3; grid-row: 2; align-self: end; justify-self: end; font-size: 1.5rem; }
+}
+
+@media (max-width: 360px) {
+  .hall-my-rank { grid-template-columns: 52px 70px minmax(0,1fr); gap: 7px 8px; padding-inline: 10px; }
+  .hall-my-position { font-size: 1.65rem; }
+  .hall-my-rank .hall-character-avatar { width: 70px; height: 70px; }
+  .hall-my-copy > strong { font-size: 1.2rem; }
+  .hall-my-copy p { font-size: .92rem; }
+}
+
 /* v1.5.18.1 - separated home hero layers + responsive point value */
 .student-home-v155 .student-v15-welcome.student-v15-welcome-separated { background-image:none; isolation:isolate; }
 .student-home-hero-background { position:absolute; inset:0; z-index:-2; background:url("assets/home-ui/student-home-hero-bg.png") 54% center / cover no-repeat; }

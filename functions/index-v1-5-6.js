@@ -61,6 +61,7 @@ function rankedRows(students, values) {
     studentId: student.id,
     number: student.number,
     name: student.name,
+    characterId: student.characterId,
     value: numberValue(values.get(student.id)),
   })).sort((first, second) =>
     second.value - first.value ||
@@ -160,6 +161,7 @@ exports.getStudentPortalData = onCall(
           id: snapshot.id,
           number: Math.max(0, Math.trunc(numberValue(value.number))),
           name: stringValue(value.name) || `학생 ${snapshot.id}`,
+          characterId: stringValue(value.customization?.characterId),
           active: value.active !== false,
         };
       }).filter((student) => student.active)

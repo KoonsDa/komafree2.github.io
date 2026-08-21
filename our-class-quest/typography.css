@@ -1,0 +1,250 @@
+@font-face {
+  font-family: "Gmarket Sans";
+  src: url("assets/fonts/GmarketSansBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --font-ui: "Pretendard Variable", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --font-display: "Gmarket Sans", "Pretendard Variable", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-extrabold: 800;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: clamp(1.75rem, 3vw, 2.25rem);
+  --text-display: clamp(2rem, 4vw, 3rem);
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea,
+table {
+  font-family: var(--font-ui);
+}
+
+body { font-weight: var(--font-weight-regular); }
+button,
+input,
+select,
+textarea { font-weight: var(--font-weight-medium); }
+button,
+.button,
+.tab-button,
+.sidebar button,
+.nav-button { font-weight: var(--font-weight-semibold); }
+
+label,
+legend,
+th { font-weight: var(--font-weight-semibold); }
+.pill,
+.status-button,
+.subject-badge,
+.important-mark,
+.count-badge,
+.student-check,
+.group-main-student-chip,
+.group-student-chip,
+.observation-quick-chip,
+.collection-filter { font-weight: var(--font-weight-semibold); }
+.button,
+.icon-button,
+.student-login-button,
+.google-login-button { font-weight: var(--font-weight-bold); }
+
+/* Gmarket Sans is reserved for large display text and standout numbers. */
+.welcome h1,
+.brand,
+.student-v15-welcome-copy h1,
+.student-v155-page-head h1,
+.page-header h1,
+.hero h1,
+.hero h2,
+.modal-card > h1,
+.modal-card > h2,
+.modal-card .section-heading > div > h2,
+.student-v157-modal-card > h2,
+.student-v15-section-title h2,
+.management-section > h2,
+.class-mission-total strong,
+.big-number,
+.dashboard-summary-grid strong,
+.group-score-number,
+.group-score-value,
+.student-v155-balance-panel strong,
+.student-v15-points-card .student-v15-points-value,
+.student-v157-draw-balance strong,
+.hall-podium-card b,
+.hall-ranking-row b,
+.hall-my-rank b {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.student-v155-page-head h1,
+.page-header h1 { letter-spacing: -0.035em; }
+.student-v15-section-title h2,
+.section-heading h2,
+.management-section > h2 { font-weight: var(--font-weight-bold); }
+.muted,
+.helper-text,
+.field-help,
+.student-v155-page-head p { font-weight: var(--font-weight-medium); }
+
+/* Student ranking: clear hierarchy without applying the display face everywhere. */
+.hall-page-head h1 {
+  font-size: var(--text-2xl);
+  line-height: 1.2;
+}
+.hall-page-head p { line-height: 1.55; }
+.hall-ranking-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 13px 14px;
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.25;
+  color: #4f536f;
+}
+.hall-ranking-tabs button span {
+  margin-right: 0;
+  font-size: 1.08em;
+  line-height: 1;
+}
+.hall-ranking-tabs button.active {
+  color: #4030b7;
+  font-weight: var(--font-weight-extrabold);
+  box-shadow: 0 6px 16px rgba(58, 49, 139, 0.16);
+}
+.hall-toolbar strong {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.student-v156-period-buttons button { font-weight: var(--font-weight-semibold); }
+.student-v156-period-buttons button.active { font-weight: var(--font-weight-bold); }
+.hall-podium-card strong,
+.hall-ranking-row strong,
+.hall-my-rank strong {
+  font-family: var(--font-ui);
+  font-weight: var(--font-weight-bold);
+  color: #383b55;
+}
+.hall-row-rank { color: #5e529c; }
+.hall-podium-card small,
+.hall-ranking-row small,
+.hall-my-rank small {
+  font-weight: var(--font-weight-medium);
+}
+.hall-podium-card b,
+.hall-ranking-row b,
+.hall-my-rank b {
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+/* Shared card metadata hierarchy for collection details and draw results. */
+.card-era-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 10px;
+  overflow: hidden;
+  color: #514779;
+  background: rgba(238, 234, 251, 0.9);
+  border: 1px solid rgba(112, 94, 174, 0.18);
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  font-style: normal;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-shadow: none;
+  white-space: nowrap;
+}
+.card-description {
+  font-family: var(--font-ui);
+  font-size: 0.9375rem;
+  font-style: normal;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.6;
+  color: #40394f;
+}
+.collection-frame-info .card-era-badge {
+  margin-top: 3px;
+  padding: 3px 10px;
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.25;
+}
+.collection-frame-info .card-description {
+  display: -webkit-box;
+  width: 100%;
+  max-height: 3.2em;
+  margin-top: 5px;
+  padding: 0 3%;
+  overflow: hidden;
+  background: transparent;
+  border-radius: 0;
+  color: #40394f;
+  font-size: 0.9375rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.6;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.78);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.student-v157-result-copy {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 2px 0 4px;
+}
+.student-v157-result-copy .card-description {
+  margin: 0;
+  text-align: center;
+}
+.student-v157-result-copy > strong {
+  color: #68627a;
+  font-family: var(--font-ui);
+  font-size: 0.8125rem;
+  font-weight: var(--font-weight-medium);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --text-xl: 1.25rem;
+    --text-2xl: 1.75rem;
+    --text-display: 2rem;
+  }
+
+  .hall-ranking-tabs button {
+    min-height: 46px;
+    padding: 11px 8px;
+    font-size: 0.875rem;
+  }
+  .card-era-badge { font-size: 0.8125rem; }
+  .card-description { font-size: 0.875rem; }
+  .collection-frame-info .card-era-badge { font-size: 0.8125rem; }
+  .collection-frame-info .card-description { font-size: 0.875rem; }
+  .hall-ranking-row strong,
+  .hall-my-rank strong { min-width: 0; }
+}

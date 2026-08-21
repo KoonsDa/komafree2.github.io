@@ -372,21 +372,27 @@
       </section>${detail}`;
   }
 
-  function rankingAvatar(row) { const initial = String(row?.name || "친구").trim().slice(0, 1) || "★"; return `<span class="hall-avatar" aria-hidden="true">${escapeHtml(initial)}</span>`; }
+  function rankingCharacter(row) {
+    const isCurrentStudent = row?.studentId === firebaseStudentHomeData?.profile?.studentId;
+    return selectedCharacter(isCurrentStudent ? studentCustomization().characterId : row?.characterId);
+  }
+  function rankingAvatar(row) {
+    return `<span class="hall-avatar hall-character-avatar" aria-hidden="true">${characterImage(rankingCharacter(row), "hall-character-image")}</span>`;
+  }
   function rankingValue(row, unit) { return `${Number(row?.value) || 0}${escapeHtml(unit)}`; }
   function rankingPodium(rows, unit) {
     if (!rows.length) return `<div class="student-v15-empty hall-empty">아직 랭킹 기록이 없습니다.</div>`;
     const slots = [[rows[1], 2], [rows[0], 1], [rows[2], 3]];
-    return `<div class="hall-podium" aria-label="상위 3명">${slots.map(([row, place]) => row ? `<article class="hall-podium-card place-${place} ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}"><span class="hall-crown" aria-hidden="true">${place === 1 ? "♛" : place === 2 ? "◆" : "●"}</span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}</strong><small>${row.number ? `${row.number}번` : `${place}위`}</small><b>${rankingValue(row, unit)}</b><span class="hall-place">${place}</span></article>` : `<div class="hall-podium-card place-${place} empty" aria-hidden="true"></div>`).join("")}</div>`;
+    return `<div class="hall-podium" aria-label="상위 3명">${slots.map(([row, place]) => row ? `<article class="hall-podium-card place-${place} ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}">${place === 1 ? `<span class="hall-ranking-crown" aria-hidden="true"><img src="assets/common-ui/badges/rank-crown-gold.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"></span>` : ""}<span class="hall-rank-badge" aria-label="${place}위"><img src="assets/common-ui/badges/rank-medal-${place === 1 ? "gold" : place === 2 ? "silver" : "bronze"}.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"><span class="hall-rank-fallback" aria-hidden="true">${place}</span></span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}</strong><b>${rankingValue(row, unit)}</b></article>` : `<div class="hall-podium-card place-${place} empty" aria-hidden="true"></div>`).join("")}</div>`;
   }
   function rankingLowerList(rows, unit) {
     const lower = rows.slice(3); if (!lower.length) return ""; const shown = studentRankingExpanded ? lower : lower.slice(0, 5);
-    return `<section class="hall-lower-section"><div class="hall-ranking-list">${shown.map((row, index) => `<article class="hall-ranking-row ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}"><span class="hall-row-rank">${index + 4}</span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}${row.number ? `<small>${row.number}번</small>` : ""}</strong><b>${rankingValue(row, unit)}</b></article>`).join("")}</div>${lower.length > 5 ? `<button class="hall-more-button" type="button" data-student-ranking-more>${studentRankingExpanded ? "간단히 보기" : `더 많은 친구 보기 (${lower.length - 5}명)`}</button>` : ""}</section>`;
+    return `<section class="hall-lower-section"><div class="hall-ranking-list">${shown.map((row, index) => `<article class="hall-ranking-row ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}"><span class="hall-row-rank">${index + 4}</span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}</strong><b>${rankingValue(row, unit)}</b></article>`).join("")}</div>${lower.length > 5 ? `<button class="hall-more-button" type="button" data-student-ranking-more>${studentRankingExpanded ? "간단히 보기" : `더 많은 친구 보기 (${lower.length - 5}명)`}</button>` : ""}</section>`;
   }
   function rankingMine(rows, unit) {
     const studentId = firebaseStudentHomeData?.profile?.studentId; const mine = rows.find((row) => row.studentId === studentId);
     if (!mine) return `<section class="hall-my-rank"><span class="hall-my-icon">★</span><div><small>나의 순위</small><strong>아직 기록이 없어요</strong><p>첫 활동으로 명예의 전당에 도전해 보세요!</p></div></section>`;
-    return `<section class="hall-my-rank">${rankingAvatar(mine)}<div><small>나의 순위</small><strong>${mine.rank}위 · ${escapeHtml(mine.name)}</strong><p>오늘도 멋지게 해냈어요! 최고야!</p></div><b>${rankingValue(mine, unit)}</b></section>`;
+    return `<section class="hall-my-rank"><span class="hall-my-label" aria-label="나의 순위"><img src="assets/common-ui/badges/rank-my-rank-badge.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"><span class="hall-my-label-fallback" aria-hidden="true">나의 순위</span></span><strong class="hall-my-position">${mine.rank}위</strong>${rankingAvatar(mine)}<div class="hall-my-copy"><strong>${escapeHtml(mine.name)} <span class="hall-me-badge">나</span></strong><p>오늘도 멋지게 해냈어요! 최고야!</p></div><b>${rankingValue(mine, unit)}</b></section>`;
   }
 
   function rankingContent() {
@@ -526,7 +532,7 @@
         <img class="student-v158-result-frame-art" src="${rarityMeta.frame}" alt="${rarity} 카드 프레임">
       </div>
       <h2 id="student-v157-result-title">${escapeHtml(card.name)}</h2>
-      <p>${escapeHtml(card.era || "")} · ${escapeHtml(card.achievement || "새로운 카드를 획득했어요.")}<br><strong>현재 같은 카드 ${Number(card.count) || 1}장 · 이 카드 총 ${Number(card.totalOwned) || 1}장</strong></p>
+      <div class="student-v157-result-copy"><span class="card-era-badge">${escapeHtml(card.era || "분류 없음")}</span><p class="card-description">${escapeHtml(card.achievement || "새로운 카드를 획득했어요.")}</p><strong>현재 같은 카드 ${Number(card.count) || 1}장 · 이 카드 총 ${Number(card.totalOwned) || 1}장</strong></div>
       <div class="student-v157-result-ability"><span>${escapeHtml(card.ability?.icon || "✨")} ${escapeHtml(card.ability?.name || "카드 능력")}</span><strong>${escapeHtml(card.ability?.summary || "보너스 없음")}</strong></div>
       <div class="student-v157-result-actions"><button type="button" data-student-draw-again="${escapeHtml(option.id)}">한 번 더 뽑기</button><button type="button" data-student-cloud-view="collection" data-student-draw-close>도감에서 보기</button></div>
     </section></div>`);
@@ -567,7 +573,7 @@
 
   function collectionFrameCard(card, rarity, variant = "compact") {
     const meta = studentDrawRarityMeta[rarity] || studentDrawRarityMeta["일반"]; const image = card.imageUrl || card.imageData || "assets/portrait-placeholder-v1572.svg";
-    return `<span class="collection-frame-card ${variant} ${meta.className}"><img class="collection-frame-portrait" src="${escapeHtml(image)}" alt="${escapeHtml(card.name || card.cardName || "카드 이미지")}"><img class="collection-frame-art" src="${escapeHtml(meta.frame)}" alt="${rarity} 카드 프레임">${variant === "detail" ? `<span class="collection-frame-info"><b data-student-card-title>${escapeHtml(card.name)}</b><small>${escapeHtml(card.era || "")}</small><em>${escapeHtml(card.achievement || "")}</em></span>` : ""}</span>`;
+    return `<span class="collection-frame-card ${variant} ${meta.className}"><img class="collection-frame-portrait" src="${escapeHtml(image)}" alt="${escapeHtml(card.name || card.cardName || "카드 이미지")}"><img class="collection-frame-art" src="${escapeHtml(meta.frame)}" alt="${rarity} 카드 프레임">${variant === "detail" ? `<span class="collection-frame-info"><b data-student-card-title>${escapeHtml(card.name)}</b><small class="card-era-badge">${escapeHtml(card.era || "분류 없음")}</small><em class="card-description">${escapeHtml(card.achievement || "")}</em></span>` : ""}</span>`;
   }
 
   function fitStudentCardTitle(modal) {

@@ -1,12 +1,22 @@
 .card-ability-manager { margin: 18px 0 22px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
-.card-ability-list { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; }
-.card-ability-list-head, .card-ability-list-row { display: grid; grid-template-columns: minmax(170px, 1.3fr) minmax(120px, .9fr) minmax(150px, 1fr) 60px minmax(210px, auto); align-items: center; gap: 10px; padding: 10px 12px; }
-.card-ability-list-head { background: var(--surface); color: var(--muted); font-size: .84rem; font-weight: 700; }
-.card-ability-list-row + .card-ability-list-row { border-top: 1px solid var(--border); }
-.card-ability-list-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.card-ability-list-name > .pill { display: none; }
-.card-ability-list-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.card-ability-list-actions .button { padding: 6px 9px; }
+.card-ability-manager > .section-heading { align-items: flex-start; margin-bottom: 14px; }
+.card-ability-manager > .section-heading h3 { margin: 0 0 5px; }
+.card-ability-manager > .section-heading .button { flex: 0 0 auto; }
+.card-ability-list { overflow: hidden; border: 1px solid #dce8e4; border-radius: 18px; background: #fff; box-shadow: 0 6px 18px rgba(45, 76, 68, .05); }
+.card-ability-list-head, .card-ability-list-row { display: grid; grid-template-columns: minmax(170px, 1.3fr) minmax(130px, .9fr) minmax(165px, 1fr) 68px minmax(220px, auto); align-items: center; gap: 12px; padding: 13px 16px; }
+.card-ability-list-head { background: #eef8f5; color: #4f6962; font-family: var(--font-ui); font-size: .84rem; font-weight: 700; }
+.card-ability-list-row { min-height: 64px; transition: background-color .15s ease; }
+.card-ability-list-row:hover { background: #fbfefd; }
+.card-ability-list-row + .card-ability-list-row { border-top: 1px solid #e7efed; }
+.card-ability-list-name { display: flex; align-items: center; min-width: 0; }
+.card-ability-list-name strong { overflow-wrap: anywhere; color: #34413e; font-weight: 700; line-height: 1.35; }
+.card-ability-list-target { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.card-ability-list-target > span { display: inline-flex; align-items: center; min-height: 27px; padding: 4px 8px; color: #48655e; background: #edf7f4; border: 1px solid #d7ebe5; border-radius: 999px; font-size: .78rem; font-weight: 600; line-height: 1; white-space: nowrap; }
+.card-ability-list-rate { color: #525d6a; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.card-ability-list-status-wrap { display: flex; align-items: center; }
+.card-ability-list-status { min-width: 45px; text-align: center; }
+.card-ability-list-actions { display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; }
+.card-ability-list-actions .button { min-height: 34px; padding: 7px 10px; font-size: .78rem; white-space: nowrap; }
 .card-ability-target-field { display: flex; flex-wrap: wrap; gap: 8px; }
 .card-ability-target-field { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
 .card-ability-target-field legend { padding: 0 4px; font-weight: 700; }
@@ -34,19 +44,23 @@
 .daily-cap-setting-row { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
 .daily-cap-setting-row span { display: flex; align-items: center; gap: 5px; }
 .daily-cap-setting-row input { width: 78px; }
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .card-ability-manager .section-heading { align-items: stretch; }
   .card-ability-manager .section-heading .button { width: 100%; }
   .card-ability-list { border: 0; border-radius: 0; }
   .card-ability-list-head { display: none; }
-  .card-ability-list-row { grid-template-columns: 1fr auto; gap: 5px 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-  .card-ability-list-row + .card-ability-list-row { border-top: 0; }
-  .card-ability-list-name { grid-column: 1; }
-  .card-ability-list-name > .pill { display: inline-flex; }
-  .card-ability-list-status { display: none; }
-  .card-ability-list-target { grid-column: 1; font-size: .88rem; }
-  .card-ability-list-rate { grid-column: 2; grid-row: 2; font-size: .88rem; color: var(--muted); text-align: right; }
-  .card-ability-list-actions { grid-column: 1 / -1; justify-content: flex-start; margin-top: 3px; }
+  .card-ability-list-row { display: grid; grid-template-columns: 1fr; gap: 11px; margin-bottom: 10px; padding: 15px; border: 1px solid #dce8e4; border-radius: 15px; background: #fff; box-shadow: 0 4px 14px rgba(45, 76, 68, .05); }
+  .card-ability-list-row + .card-ability-list-row { border-top: 1px solid #dce8e4; }
+  .card-ability-list-name strong { font-size: 1rem; }
+  .card-ability-list-target,
+  .card-ability-list-rate,
+  .card-ability-list-status-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; white-space: normal; }
+  .card-ability-list-target::before,
+  .card-ability-list-rate::before,
+  .card-ability-list-status-wrap::before { content: attr(data-label); flex: 0 0 70px; color: #73817d; font-size: .76rem; font-weight: 700; }
+  .card-ability-list-rate { color: #48545f; font-size: .88rem; }
+  .card-ability-list-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; justify-content: stretch; margin-top: 2px; }
+  .card-ability-list-actions .button { width: 100%; min-width: 0; padding-inline: 5px; }
   .card-ability-modal { width: calc(100vw - 20px); }
   .card-ability-rarity-row { grid-template-columns: 48px 1fr; }
   .card-ability-rarity-row label { grid-column: 2; }
