@@ -11,6 +11,13 @@
 .point-transfer-warning { display: block; margin-top: 8px; color: #a24a42; }
 .point-transfer-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 12px; }
 .point-transfer-settings .check-label { grid-column: 1 / -1; }
+.point-gift-toggle { grid-column: 1 / -1; display: flex !important; align-items: center; gap: 10px; cursor: pointer; }
+.point-gift-toggle input { position: absolute; width: 1px !important; height: 1px; opacity: 0; }
+.point-gift-toggle i { position: relative; width: 48px; height: 26px; border-radius: 99px; background: #c8ccd7; transition: .2s; }
+.point-gift-toggle i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px #0003; transition: .2s; }
+.point-gift-toggle input:checked + i { background: #4baf72; }
+.point-gift-toggle input:checked + i::after { transform: translateX(22px); }
+.point-gift-toggle b { min-width: 28px; color: #697087; font-size: .78rem; }
 .point-transfer-history { display: grid; gap: 8px; }
 .point-transfer-history-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e3e5ed; border-radius: 12px; background: #fff; }
 .point-transfer-history-row small { display: block; margin-top: 4px; color: #697087; }

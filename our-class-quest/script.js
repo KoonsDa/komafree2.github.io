@@ -6,6 +6,7 @@ const DEFAULT_DRAW_OPTIONS = [
   { id: "draw-advanced", name: "고급 뽑기", price: 60, rates: { common: 35, rare: 35, epic: 18, legendary: 9, ancient: 3 }, active: true, deleted: false },
   { id: "draw-premium", name: "프리미엄 뽑기", price: 100, rates: { common: 15, rare: 30, epic: 30, legendary: 18, ancient: 7 }, active: true, deleted: false }
 ];
+const FIXED_DRAW_OPTION_NAMES = { "draw-basic": "일반 뽑기", "draw-premium": "프리미엄 뽑기" };
 const DEFAULT_CARD_SET_ID = "korean-history-basic";
 const CARD_UPGRADE_STEPS = [
   { from: "일반", to: "희귀", key: "commonToRare", defaultCount: 3 },
@@ -223,8 +224,9 @@ function loadData() {
     }));
     const fallbackCardSetId = saved.cardSets.find((cardSet) => !cardSet.deleted)?.id || DEFAULT_CARD_SET_ID;
     saved.cards = savedCards.map((card, index) => ({
-      id: card.id || crypto.randomUUID(), name: card.name || "이름 없는 인물", era: card.era || "시대 미상",
+      id: card.id || crypto.randomUUID(), name: card.name || "이름 없는 카드", era: card.era || "분류 없음",
       achievement: card.achievement || card.description || "", imageData: typeof card.imageData === "string" && card.imageData.startsWith("data:image/") ? card.imageData : "",
+      imagePath: typeof card.imagePath === "string" ? card.imagePath : "", imageUrl: typeof card.imageUrl === "string" ? card.imageUrl : "", imageUpdatedAt: typeof card.imageUpdatedAt === "string" ? card.imageUpdatedAt : "",
       cardSetId: saved.cardSets.some((cardSet) => cardSet.id === card.cardSetId) ? card.cardSetId : fallbackCardSetId,
       order: Number.isFinite(Number(card.order)) ? Number(card.order) : index, active: card.active !== false, deleted: Boolean(card.deleted)
     }));
@@ -331,7 +333,7 @@ function loadData() {
     saved.dailyClassNotes = saved.dailyClassNotes && typeof saved.dailyClassNotes === "object" && !Array.isArray(saved.dailyClassNotes) ? Object.fromEntries(Object.entries(saved.dailyClassNotes).filter(([date]) => /^\d{4}-\d{2}-\d{2}$/.test(date)).map(([date, note]) => [date, { text: String(typeof note === "string" ? note : note?.text || "").slice(0, 2000), updatedAt: typeof note === "object" ? note.updatedAt || "" : "" }])) : {};
     saved.classEvents = (Array.isArray(saved.classEvents) ? saved.classEvents : []).filter((event) => event && /^\d{4}-\d{2}-\d{2}$/.test(String(event.date || "")) && String(event.title || "").trim()).map((event) => ({ id: String(event.id || crypto.randomUUID()), date: String(event.date), title: String(event.title).trim().slice(0, 100), description: String(event.description || "").trim().slice(0, 500), category: ["학급행사", "학교행사", "준비물·안내", "기타"].includes(event.category) ? event.category : "기타", createdAt: String(event.createdAt || new Date().toISOString()), updatedAt: String(event.updatedAt || event.createdAt || new Date().toISOString()) }));
     saved.pointShopItems = (Array.isArray(saved.pointShopItems) ? saved.pointShopItems : []).filter((item) => item && String(item.name || "").trim()).map((item) => ({ id: String(item.id || crypto.randomUUID()), name: String(item.name).trim().slice(0, 80), description: String(item.description || "").trim().slice(0, 300), price: Math.max(0, Number.isInteger(Number(item.price)) ? Number(item.price) : 0), dailyStock: Math.max(1, Number.isInteger(Number(item.dailyStock)) ? Number(item.dailyStock) : 1), perStudentDailyLimit: Math.max(1, Number.isInteger(Number(item.perStudentDailyLimit)) ? Number(item.perStudentDailyLimit) : 1), approvalRequired: item.approvalRequired !== false, active: item.active !== false, deleted: Boolean(item.deleted), createdAt: String(item.createdAt || new Date().toISOString()), updatedAt: String(item.updatedAt || item.createdAt || new Date().toISOString()) }));
-    saved.pointUseRequests = (Array.isArray(saved.pointUseRequests) ? saved.pointUseRequests : []).filter((request) => request && /^\d{4}-\d{2}-\d{2}$/.test(String(request.date || "")) && ["pending", "completed", "rejected"].includes(request.status)).map((request) => ({ id: String(request.id || crypto.randomUUID()), itemId: String(request.itemId || ""), studentId: String(request.studentId || ""), date: String(request.date), price: Math.max(0, Number(request.price) || 0), status: request.status, createdAt: String(request.createdAt || new Date().toISOString()), resolvedAt: request.resolvedAt ? String(request.resolvedAt) : null }));
+    saved.pointUseRequests = (Array.isArray(saved.pointUseRequests) ? saved.pointUseRequests : []).filter((request) => request && /^\d{4}-\d{2}-\d{2}$/.test(String(request.date || "")) && ["pending", "completed", "rejected", "reversed"].includes(request.status)).map((request) => ({ id: String(request.id || crypto.randomUUID()), itemId: String(request.itemId || ""), itemName: String(request.itemName || ""), studentId: String(request.studentId || ""), date: String(request.date), price: Math.max(0, Number(request.price) || 0), status: request.status, createdAt: String(request.createdAt || new Date().toISOString()), resolvedAt: request.resolvedAt ? String(request.resolvedAt) : null, reversedAt: request.reversedAt ? String(request.reversedAt) : null, reversedBy: String(request.reversedBy || ""), reversalHistoryId: String(request.reversalHistoryId || ""), originalHistoryId: String(request.originalHistoryId || "") }));
     saved.pointShopSets = (Array.isArray(saved.pointShopSets) ? saved.pointShopSets : []).filter((set) => set && String(set.name || "").trim() && Array.isArray(set.items)).map((set) => ({ id: String(set.id || crypto.randomUUID()), name: String(set.name).trim().slice(0, 60), items: set.items.filter((item) => item && String(item.name || "").trim()).map((item) => ({ name: String(item.name).trim().slice(0, 80), description: String(item.description || "").trim().slice(0, 300), price: Math.max(0, Number.isInteger(Number(item.price)) ? Number(item.price) : 0), dailyStock: Math.max(1, Number.isInteger(Number(item.dailyStock)) ? Number(item.dailyStock) : 1), perStudentDailyLimit: Math.max(1, Number.isInteger(Number(item.perStudentDailyLimit)) ? Number(item.perStudentDailyLimit) : 1), approvalRequired: item.approvalRequired !== false, active: item.active !== false })), createdAt: String(set.createdAt || new Date().toISOString()), updatedAt: String(set.updatedAt || set.createdAt || new Date().toISOString()) }));
     const transferSettings = saved.pointTransferSettings && typeof saved.pointTransferSettings === "object" ? saved.pointTransferSettings : {};
     saved.pointTransferSettings = { enabled: transferSettings.enabled !== false, maxPerTransfer: Math.max(1, Number.isInteger(Number(transferSettings.maxPerTransfer)) ? Number(transferSettings.maxPerTransfer) : 10), dailyMaxAmount: Math.max(1, Number.isInteger(Number(transferSettings.dailyMaxAmount)) ? Number(transferSettings.dailyMaxAmount) : 20), dailyMaxCount: Math.max(1, Number.isInteger(Number(transferSettings.dailyMaxCount)) ? Number(transferSettings.dailyMaxCount) : 3) };
@@ -372,6 +374,11 @@ let dashboardSelectedDate = todayString();
 let dashboardMonth = dashboardSelectedDate.slice(0, 7);
 let studentManagementSearch = "";
 let studentDetailId = "";
+let teacherStudentPointPollTimer = null;
+let teacherStudentPointPollStudentId = "";
+const teacherStudentPointRefreshes = new Map();
+const teacherStudentCardData = new Map();
+const TEACHER_STUDENT_POINT_POLL_INTERVAL = 5000;
 const studentDetailAssignmentFilters = {};
 let showAllGroupTransactions = false;
 let selectedGroupId = "";
@@ -381,6 +388,8 @@ const assignmentSelections = {};
 const selectedPointStudentIds = new Set();
 let toastTimer;
 let pendingCardImageData = "";
+let pendingCardImagePath = "";
+let pendingCardImageDeleted = false;
 let pendingBackupPayload = null;
 let firebaseTeacherUser = null;
 let firebaseTeacherSession = false;
@@ -549,7 +558,8 @@ function reverseCardBonus(student, snapshot, reason) {
   return { id: crypto.randomUUID(), amount: -amount, reason, source: "카드 능력 보너스", studentId: student.id, representativeCardId: snapshot.cardId, representativeCardName: snapshot.cardName, representativeCardRarity: snapshot.rarity, representativeCardAbilityId: snapshot.abilityId, representativeCardAbilityName: snapshot.abilityName, originalSource: snapshot.originalSource, baseAmount: snapshot.baseAmount, bonusPercent: snapshot.bonusPercent, bonusAmount: -amount, relatedId: snapshot.relatedId, reversal: true, date: new Date().toLocaleDateString("ko-KR"), createdAt: new Date().toISOString() };
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
-function cardImageMarkup(card, className = "card-person-image") { return card?.imageData ? `<img class="${className}" src="${card.imageData}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span class="${className} card-image-placeholder" aria-hidden="true">★</span>`; }
+function cardImageSource(card) { return String(card?.imageUrl || card?.imageData || ""); }
+function cardImageMarkup(card, className = "card-person-image") { const source = cardImageSource(card); return source ? `<img class="${className}" src="${escapeHtml(source)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span class="${className} card-image-placeholder" aria-hidden="true">★</span>`; }
 function loadImageFile(file) { return new Promise((resolve, reject) => { const image = new Image(); const url = URL.createObjectURL(file); image.onload = () => { URL.revokeObjectURL(url); resolve(image); }; image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("이미지를 읽을 수 없습니다.")); }; image.src = url; }); }
 async function compressCardImage(file) {
   if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("JPG, PNG, WebP 이미지만 업로드할 수 있습니다.");
@@ -559,6 +569,30 @@ async function compressCardImage(file) {
   const context = canvas.getContext("2d"); if (!context) throw new Error("이 브라우저에서는 이미지를 처리할 수 없습니다."); context.drawImage(image, 0, 0, canvas.width, canvas.height);
   let result = canvas.toDataURL("image/webp", .78); if (!result.startsWith("data:image/webp")) result = canvas.toDataURL("image/jpeg", .78);
   if (result.length > 1.5 * 1024 * 1024) throw new Error("압축 후에도 이미지가 너무 큽니다. 더 작은 이미지를 선택해 주세요."); return result;
+}
+async function openCardImageCrop(file) {
+  if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("JPG, PNG, WebP 이미지만 업로드할 수 있습니다.");
+  if (file.size > 15 * 1024 * 1024) throw new Error("이미지 파일이 너무 큽니다. 15MB 이하 파일을 선택해 주세요.");
+  const bitmap = typeof createImageBitmap === "function" ? await createImageBitmap(file, {imageOrientation: "from-image"}) : await loadImageFile(file);
+  const width = bitmap.width || bitmap.naturalWidth; const height = bitmap.height || bitmap.naturalHeight; if (!width || !height) throw new Error("이미지 크기를 확인할 수 없습니다.");
+  app.insertAdjacentHTML("beforeend", `<div class="modal card-crop-modal"><section class="modal-card"><div class="section-heading"><div><h2>카드 이미지 자르기</h2><p class="muted">학생 카드의 실제 4:5 이미지 영역에 맞춰 조정하세요.</p></div><button class="icon-button" type="button" data-action="cancel-card-image-crop" aria-label="자르기 취소">×</button></div><div class="card-crop-stage"><canvas id="card-crop-canvas" width="800" height="1000" aria-label="카드 이미지 자르기 미리보기"></canvas><img src="assets/card-ui/초록빛_황금_장식_카드_프레임.png" alt="카드 프레임 미리보기"></div><div class="card-crop-toolbar"><button class="button secondary compact" type="button" data-action="card-crop-zoom-out" aria-label="축소">−</button><input id="card-crop-scale" type="range" step="0.01" aria-label="이미지 확대 축소"><button class="button secondary compact" type="button" data-action="card-crop-zoom-in" aria-label="확대">＋</button><button class="button secondary compact" type="button" data-action="card-crop-fit">이미지 전체 맞춤</button><button class="button secondary compact" type="button" data-action="card-crop-reset">초기화</button></div><p class="muted">이미지를 마우스나 손가락으로 움직여 위치를 맞추세요. 빈 영역은 투명하게 저장됩니다.</p><div class="button-row"><button class="button success" type="button" data-action="apply-card-image-crop">적용</button><button class="button secondary" type="button" data-action="cancel-card-image-crop">취소</button></div></section></div>`);
+  const modal = document.querySelector(".card-crop-modal:last-of-type"); const canvas = modal?.querySelector("#card-crop-canvas"); const slider = modal?.querySelector("#card-crop-scale"); const context = canvas?.getContext("2d"); if (!modal || !canvas || !slider || !context) throw new Error("이미지 편집 화면을 열 수 없습니다.");
+  const state = {scale: 1, x: 0, y: 0, dragging: false, px: 0, py: 0}; const baseScale = Math.max(800 / width, 1000 / height); const fitScale = Math.min(800 / width, 1000 / height); const fitRatio = fitScale / baseScale; const minimumScale = Math.max(.02, fitRatio * .4); slider.min = String(minimumScale); slider.max = "3"; slider.value = "1";
+  const clamp = () => { const drawnWidth = width * baseScale * state.scale; const drawnHeight = height * baseScale * state.scale; const limitX = Math.abs(800 - drawnWidth) / 2; const limitY = Math.abs(1000 - drawnHeight) / 2; state.x = Math.max(-limitX, Math.min(limitX, state.x)); state.y = Math.max(-limitY, Math.min(limitY, state.y)); };
+  const draw = () => { clamp(); const drawnWidth = width * baseScale * state.scale; const drawnHeight = height * baseScale * state.scale; context.clearRect(0, 0, 800, 1000); context.drawImage(bitmap, (800 - drawnWidth) / 2 + state.x, (1000 - drawnHeight) / 2 + state.y, drawnWidth, drawnHeight); };
+  slider.addEventListener("input", () => { state.scale = Number(slider.value) || 1; draw(); });
+  canvas.addEventListener("pointerdown", (event) => { state.dragging = true; state.px = event.clientX; state.py = event.clientY; canvas.setPointerCapture(event.pointerId); });
+  canvas.addEventListener("pointermove", (event) => { if (!state.dragging) return; const rect = canvas.getBoundingClientRect(); state.x += (event.clientX - state.px) * 800 / rect.width; state.y += (event.clientY - state.py) * 1000 / rect.height; state.px = event.clientX; state.py = event.clientY; draw(); });
+  canvas.addEventListener("pointerup", () => { state.dragging = false; }); draw();
+  return new Promise((resolve) => {
+    modal.addEventListener("click", (event) => { const action = event.target.closest?.("[data-action]")?.dataset.action;
+      if (action === "card-crop-zoom-out" || action === "card-crop-zoom-in") { state.scale = Math.max(minimumScale, Math.min(3, state.scale + (action.endsWith("in") ? .1 : -.1))); slider.value = String(state.scale); draw(); }
+      if (action === "card-crop-fit") { state.scale = fitRatio; state.x = 0; state.y = 0; slider.value = String(state.scale); draw(); }
+      if (action === "card-crop-reset") { state.scale = 1; state.x = 0; state.y = 0; slider.value = "1"; draw(); }
+      if (action === "cancel-card-image-crop") { bitmap.close?.(); modal.remove(); resolve(""); }
+      if (action === "apply-card-image-crop") { const result = canvas.toDataURL("image/webp", .85); bitmap.close?.(); modal.remove(); resolve(result); }
+    });
+  });
 }
 function toast(message) { const element = document.querySelector("#toast"); element.textContent = message; element.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove("show"), 2200); }
 function firebaseAuthMessage(error) { const code = error?.code || ""; if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return "Google 로그인 창이 닫혔습니다."; if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요."; if (code === "auth/unauthorized-domain") return "현재 도메인은 Google 로그인 허용 목록에 없습니다."; if (code === "auth/network-request-failed") return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."; return "Google 로그인 중 오류가 발생했습니다."; }
@@ -602,6 +636,20 @@ async function loadFirebaseStudentHomeData() {
     if (firebaseStudentAuthUser?.uid === userUid) { firebaseStudentHomeLoading = false; render(); }
   }
 }
+window.refreshFirebaseStudentHomeDataQuietly = async function refreshFirebaseStudentHomeDataQuietly() {
+  const userUid = firebaseStudentAuthUser?.uid; const verifiedStudentId = firebaseVerifiedStudentSession?.student?.studentId;
+  if (!userUid || !verifiedStudentId || !window.ourClassFirebase?.getStudentHomeData) return false;
+  try {
+    const homeData = await window.ourClassFirebase.getStudentHomeData();
+    if (firebaseStudentAuthUser?.uid !== userUid || firebaseVerifiedStudentSession?.student?.studentId !== verifiedStudentId || !homeData?.ok || homeData.profile?.studentId !== verifiedStudentId) return false;
+    const changed = JSON.stringify(firebaseStudentHomeData) !== JSON.stringify(homeData);
+    firebaseStudentHomeData = homeData; firebaseStudentHomeError = false;
+    return changed;
+  } catch (error) {
+    console.error("Firebase student home quiet refresh failed", {code: error?.code, message: error?.message});
+    return false;
+  }
+};
 function firebaseStudentMutationCode(error) { return String(error?.details?.code || error?.code || ""); }
 function openCloudAssignmentReviewModal(assignmentId) {
   const assignment = firebaseStudentHomeData?.assignments?.find((item) => item.id === assignmentId && item.status === "missing");
@@ -1055,11 +1103,11 @@ function syncFirebaseClassContextInUrl(classId) {
   const url = new URL(location.href); if (url.searchParams.get("class") === value) return;
   url.searchParams.set("class", value); history.replaceState(history.state, "", url);
 }
-function renderWelcome(showStudentLogin = false) {
-  document.title = data.classSettings.appName;
+function renderWelcome() {
+  document.title = "우리반 퀘스트";
   const classId = studentClassContext();
-  const studentLogin = showStudentLogin ? `<form id="firebase-student-login-form" class="student-login-form"><h2>학생 로그인</h2>${classId ? `<p class="muted">선생님이 안내한 로그인 ID와 비밀번호를 입력하세요.</p><label>로그인 ID<input name="loginId" autocomplete="username" required></label><label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label><button class="button" type="submit" ${!firebaseStudentAuthReady || firebaseStudentSigningIn ? "disabled" : ""}>${firebaseStudentSigningIn ? "로그인 중..." : "로그인"}</button>` : `<p class="student-login-context-error">학생 로그인 링크를 확인해 주세요.</p>`}</form>` : "";
-  app.innerHTML = `<main class="welcome"><section class="welcome-card"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>함께 돕고, 성장하고, 역사의 주인공을 만나 보세요!</p><div class="role-choices"><button class="role-choice student" data-action="show-students">학생 로그인</button><button class="role-choice teacher" data-action="enter-teacher">선생님으로 체험하기</button><button class="role-choice google" data-action="firebase-teacher-login">🔵 Google로 선생님 로그인</button></div>${studentLogin}</section></main>`;
+  const studentFields = classId ? `<p class="login-card-description">선생님이 안내한 계정으로 오늘의 퀘스트를 시작하세요.</p><label>로그인 ID<input name="loginId" autocomplete="username" placeholder="로그인 ID를 입력하세요" required></label><label>비밀번호<input name="password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required></label><button class="student-login-button" type="submit" ${!firebaseStudentAuthReady || firebaseStudentSigningIn ? "disabled" : ""}>${firebaseStudentSigningIn ? "로그인 중..." : "학생으로 시작하기"}</button>` : `<p class="student-login-context-error">학생 로그인 링크를 확인해 주세요.<small>선생님이 보내 준 학급 링크로 다시 접속해 주세요.</small></p>`;
+  app.innerHTML = `<main class="welcome"><section class="welcome-card"><header class="welcome-heading"><div class="brand-mark" aria-hidden="true"><span>★</span></div><div><h1>우리반 <strong>퀘스트</strong></h1><p class="welcome-intro">함께 돕고, 성장하고, 도전해요!</p></div></header><div class="login-stage"><div class="scene-art-layer" aria-hidden="true"><div class="student-scene-art"></div><div class="student-character-art"></div><div class="teacher-scene-art"></div></div><header class="stage-heading"><p class="stage-title"><span aria-hidden="true">✦</span> 환영해요! <span aria-hidden="true">✦</span></p><p>우리반 퀘스트에서 함께 성장하는 모험을 시작해요.</p></header><div class="login-card-grid"><form id="firebase-student-login-form" class="login-card student-login-card"><div class="login-card-icon" aria-hidden="true">★</div><h2>학생 로그인</h2>${studentFields}</form><section class="login-card teacher-login-card"><div class="login-card-icon" aria-hidden="true">▣</div><h2>선생님 로그인</h2><p class="login-card-description">학급을 관리하려면 Google 계정으로 로그인하세요.</p><button class="google-login-button" data-action="firebase-teacher-login"><span aria-hidden="true">G</span>Google로 로그인</button><p class="teacher-login-note">교사용 관리자 화면으로 이동합니다.</p></section></div><footer class="welcome-footer"><strong>♢ 안전하고 즐거운 우리반 퀘스트</strong><span>모두가 존중하고 함께 성장하는 공간이에요.</span></footer></div></section></main>`;
 }
 function renderAuthLoading() { document.title = data.classSettings.appName; app.innerHTML = `<main class="welcome"><section class="welcome-card auth-loading"><div class="brand-mark">⚔</div><h1>${escapeHtml(data.classSettings.appName)}</h1><p>로그인 상태 확인 중...</p></section></main>`; }
 
@@ -1390,6 +1438,35 @@ function studentManagementCard(student) { const number = studentNumber(student);
 function isThisWeek(value) { if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = localDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= weekStart() && date <= new Date(); }
 function weeklyEarnedPoints(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (["1인1역", "과제"].includes(item.source) && isThisWeek(item.createdAt || item.date) ? Number(item.amount) || 0 : 0), 0); }
 function studentCollectedTypes(student) { const types = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) types.add(`${cardId}|${rarity}`); })); return types.size; }
+const TEACHER_CARD_FRAME_ASSETS = {
+  "일반": "assets/card-ui/초록빛_황금_장식_카드_프레임.png", "희귀": "assets/card-ui/푸른빛_판타지_카드_프레임_템플릿.png",
+  "영웅": "assets/card-ui/보라빛_황금_판타지_카드_프레임.png", "전설": "assets/card-ui/황금_판타지_카드_프레임_ui.png",
+  "고대": "assets/card-ui/불꽃_보석_왕관_카드_프레임.png"
+};
+function teacherStudentCardSummary(studentId) {
+  const value = teacherStudentCardData.get(studentId); const items = Array.isArray(value?.items) ? value.items.filter((item) => Number(item.count) > 0) : [];
+  const types = new Set(items.map((item) => `${item.cardId}|${item.rarity}`)); const total = items.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  const representative = value?.representativeCard; const representativeItem = representative ? items.find((item) => item.cardId === representative.cardId && item.rarity === representative.rarity && item.abilityId === representative.abilityId) : null;
+  return {loaded: Boolean(value), value, items, types: types.size, total, representative, representativeItem};
+}
+function teacherStudentRepresentativeText(summary) {
+  const item = summary.representativeItem; return item ? `${escapeHtml(item.cardName)} · ${escapeHtml(item.rarity)} · ${escapeHtml(item.ability?.name || "특수능력")}` : "대표 카드 없음";
+}
+function teacherStudentCardPanel(student) {
+  const summary = teacherStudentCardSummary(student.id); const loading = !summary.loaded;
+  const content = loading ? `<div class="empty">Firebase 카드 보유 정보를 불러오는 중입니다.</div>` : `<p><strong>대표 카드:</strong> <span data-teacher-card-representative>${teacherStudentRepresentativeText(summary)}</span></p><p><strong>수집 카드 종류:</strong> <span data-teacher-card-counts>${summary.types}종 · 총 ${summary.total}장</span></p>`;
+  return studentRecordSection("카드", loading ? "Firebase 확인 중" : `${summary.types}종 · 총 ${summary.total}장`, content, `<button class="button secondary compact record-view-all" data-action="view-teacher-student-cards" data-id="${escapeHtml(student.id)}" ${loading || !summary.total ? "disabled" : ""}>전체 보기</button>`, "teacher-card-cards").replace('<details class="', `<details data-teacher-student-cards="${escapeHtml(student.id)}" class="`);
+}
+function teacherCardFrame(item) {
+  const image = item.imageData || "assets/portrait-placeholder-v1572.svg"; const frame = TEACHER_CARD_FRAME_ASSETS[item.rarity] || TEACHER_CARD_FRAME_ASSETS["일반"];
+  return `<span class="collection-frame-card compact student-v158-rarity-${rarityClass(item.rarity)}"><img class="collection-frame-portrait" src="${escapeHtml(image)}" alt="${escapeHtml(item.cardName)} 카드 이미지"><img class="collection-frame-art" src="${escapeHtml(frame)}" alt="${escapeHtml(item.rarity)} 카드 프레임"></span>`;
+}
+function openTeacherStudentCardsModal(studentId) {
+  const student = studentById(studentId); const summary = teacherStudentCardSummary(studentId); if (!student || !summary.loaded) return;
+  const setNames = new Map((Array.isArray(summary.value.cardSets) ? summary.value.cardSets : []).map((set) => [set.id, set.name]));
+  const rows = summary.items.map((item) => { const representative = summary.representative?.cardId === item.cardId && summary.representative?.rarity === item.rarity && summary.representative?.abilityId === item.abilityId; return `<article class="teacher-owned-card rarity-${rarityClass(item.rarity)}">${teacherCardFrame(item)}<div><h3>${escapeHtml(item.cardName)}</h3><p>${escapeHtml(setNames.get(item.cardSetId) || "카드셋 정보 없음")}</p><span class="pill rarity-${rarityClass(item.rarity)}">${escapeHtml(item.rarity)}</span><strong>${escapeHtml(item.ability?.icon || "✨")} ${escapeHtml(item.ability?.name || "특수능력")}</strong><small>보유 ${Number(item.count) || 0}장</small>${representative ? `<span class="pill success">대표 카드</span>` : ""}</div></article>`; }).join("");
+  app.insertAdjacentHTML("beforeend", `<div class="modal teacher-student-cards-modal"><section class="modal-card"><div class="section-heading"><div><h2>${studentNumber(student)}번 ${escapeHtml(student.name)} · 전체 보유 카드</h2><p class="muted">${summary.types}종 · 총 ${summary.total}장 · 비활성 카드셋의 기존 보유 카드 포함</p></div><button class="button secondary compact" data-action="close-modal">닫기</button></div><div class="teacher-owned-card-grid">${rows || `<div class="empty">보유 카드가 없습니다.</div>`}</div></section></div>`);
+}
 function studentDetailAssignments(student) {
   const filter = studentDetailAssignmentFilters[student.id] || "all";
   const row = (assignment) => { const status = assignmentStatusForStudent(assignment, student.id); return `<article><div><span class="subject-badge">${escapeHtml(assignment.subject)}</span><strong>${escapeHtml(assignment.title)}</strong></div><small>마감 ${assignment.dueDate || "날짜 없음"}</small><span class="pill ${assignmentStatusClass(status)}">${ASSIGNMENT_STATUS_LABELS[status]}</span></article>`; };
@@ -1416,13 +1493,123 @@ function studentRoleTrend(student) {
   return `<div class="role-trend-summary"><div><span>이번 주</span><strong>${stats.thisWeek}회</strong></div><div><span>최근 4주</span><strong>${stats.recentFourWeeks}회</strong></div><div><span>전체 완료</span><strong>${stats.total}회</strong></div></div><h3 class="student-detail-subheading">최근 4주 역할 수행</h3>${chart}<div class="section-heading role-history-heading"><h3>최근 완료 기록</h3><span class="muted">최대 5개</span></div>${studentRoleHistory(student, stats.completed)}`;
 }
 function studentDetailObservations(student) { const observations = studentObservations(student); return observations.length ? `<div class="student-detail-list">${observations.slice(0, 5).map((observation) => `<article><div><strong>${observation.date}</strong><span class="pill">${escapeHtml(observation.category)}</span></div>${observation.quickItems?.length ? `<small>${observation.quickItems.map((item) => `#${escapeHtml(item)}`).join(" ")}</small>` : ""}<p>${escapeHtml(observation.content)}</p></article>`).join("")}</div>` : `<div class="empty">학생 관찰 기록이 없습니다.</div>`; }
-function studentDetailPoints(student) { const history = (student.pointHistory || []).slice(-5).reverse(); return `<div class="student-current-points"><span>현재 포인트</span><strong>${student.points}P</strong></div>${history.length ? `<div class="student-detail-list">${history.map((item) => `<article class="student-point-row"><div><strong>${escapeHtml(item.source || item.reason)}</strong><small>${compactDate(item.createdAt || item.date)}</small></div><b class="${item.amount > 0 ? "points" : ""}">${item.amount > 0 ? "+" : ""}${item.amount}P</b></article>`).join("")}</div>` : `<div class="empty">포인트 거래 기록이 없습니다.</div>`}`; }
-function studentRecordSection(title, summary, content, action = "") { return `<details class="card student-detail-section record-section" open><summary><span>${title}</span><small>${summary}</small></summary><div class="record-section-content">${content}${action}</div></details>`; }
+function teacherPointHistoryRows(student, history) {
+  const allHistory = [...(student.pointHistory || [])].sort((a, b) => pointHistorySortValue(b) - pointHistorySortValue(a));
+  const reversedOriginalIds = new Set(allHistory.map((item) => item.reversalOf).filter(Boolean));
+  return history.length ? `<div class="student-detail-list">${history.map((item) => {
+    const amount = Number(item.amount) || 0; const productUse = amount < 0 && String(item.source || "").includes("포인트 상품") && item.relatedId;
+    const reversed = productUse && (reversedOriginalIds.has(item.id) || data.pointUseRequests.some((request) => request.id === item.relatedId && request.status === "reversed"));
+    const kind = String(item.source || "기타").includes("포인트 상품") ? "포인트 상품 사용 기록" : amount >= 0 ? "적립" : "사용";
+    const action = productUse ? `<button class="button secondary compact" data-action="reverse-point-product-use" data-id="${escapeHtml(item.relatedId)}" ${reversed ? "disabled" : ""}>${reversed ? "사용 취소됨" : "되돌리기"}</button>` : "";
+    return `<article class="student-point-row"><div><strong>${escapeHtml(item.reason || item.source || "포인트 변동")}</strong><small>${compactDate(item.createdAt || item.date)} · ${escapeHtml(item.source || "기타")} · ${kind}</small></div><b class="${amount > 0 ? "points" : ""}">${amount > 0 ? "+" : ""}${amount}P</b>${action}</article>`;
+  }).join("")}</div>` : `<div class="empty">포인트 거래 기록이 없습니다.</div>`;
+}
+function studentDetailPoints(student) {
+  const history = [...(student.pointHistory || [])].sort((a, b) => pointHistorySortValue(b) - pointHistorySortValue(a)).slice(0, 5);
+  return `<div class="student-current-points"><span>현재 포인트</span><strong>${student.points}P</strong></div>${teacherPointHistoryRows(student, history)}`;
+}
+function studentPointRecordSection(student) {
+  const count = (student.pointHistory || []).length;
+  return `<section class="card student-detail-section teacher-point-record-section teacher-card-points" data-teacher-student-points="${escapeHtml(student.id)}"><header><span>포인트</span><small data-teacher-point-summary>현재 ${student.points}P · 최근 ${Math.min(5, count)}건</small><button class="button secondary compact" data-action="view-student-point-history" data-id="${escapeHtml(student.id)}" ${count ? "" : "hidden"}>전체 보기</button></header><div class="record-section-content">${studentDetailPoints(student)}</div></section>`;
+}
+function openTeacherPointHistoryModal(studentId) {
+  const student = studentById(studentId); if (!student) return;
+  const history = [...(student.pointHistory || [])].sort((a, b) => pointHistorySortValue(b) - pointHistorySortValue(a));
+  app.insertAdjacentHTML("beforeend", `<div class="modal teacher-point-history-modal" data-teacher-point-modal="${escapeHtml(student.id)}"><section class="modal-card"><div class="section-heading"><div><h2>${studentNumber(student)}번 ${escapeHtml(student.name)} · 전체 포인트 내역</h2><p class="muted">현재 <span data-teacher-modal-points>${student.points}P</span> · 최신 기록부터 표시</p></div><button class="button secondary compact" data-action="close-modal">닫기</button></div><div class="teacher-point-history-scroll">${teacherPointHistoryRows(student, history)}</div></section></div>`);
+}
+function teacherStudentPointPollingActive() {
+  return document.visibilityState !== "hidden" && session.mode === "teacher" && session.view === "students" && Boolean(studentDetailId && firebaseTeacherUser?.uid && (window.ourClassFirebase?.loadStudentPoints || window.ourClassFirebase?.getTeacherStudentCardData));
+}
+function stopTeacherStudentPointPolling() {
+  if (teacherStudentPointPollTimer !== null) clearTimeout(teacherStudentPointPollTimer);
+  teacherStudentPointPollTimer = null;
+}
+function updateTeacherStudentPointDom(student) {
+  const page = document.querySelector("[data-teacher-student-detail]");
+  if (!page || page.dataset.teacherStudentDetail !== student.id) return;
+  const section = page.querySelector("[data-teacher-student-points]");
+  const current = page.querySelector("[data-teacher-current-points]");
+  if (current) current.textContent = `${student.points}P`;
+  if (section) {
+    const count = (student.pointHistory || []).length;
+    const summary = section.querySelector("[data-teacher-point-summary]");
+    const button = section.querySelector('[data-action="view-student-point-history"]');
+    const content = section.querySelector(".record-section-content");
+    if (summary) summary.textContent = `현재 ${student.points}P · 최근 ${Math.min(5, count)}건`;
+    if (button) button.hidden = count === 0;
+    if (content) content.innerHTML = studentDetailPoints(student);
+  }
+  const modal = document.querySelector("[data-teacher-point-modal]");
+  if (modal?.dataset.teacherPointModal === student.id) {
+    const modalPoints = modal.querySelector("[data-teacher-modal-points]");
+    const modalHistory = modal.querySelector(".teacher-point-history-scroll");
+    if (modalPoints) modalPoints.textContent = `${student.points}P`;
+    if (modalHistory) modalHistory.innerHTML = teacherPointHistoryRows(student, [...student.pointHistory].sort((a, b) => pointHistorySortValue(b) - pointHistorySortValue(a)));
+  }
+}
+function updateTeacherStudentCardDom(studentId) {
+  const page = document.querySelector("[data-teacher-student-detail]"); if (!page || page.dataset.teacherStudentDetail !== studentId) return;
+  const student = studentById(studentId); if (!student) return; const summary = teacherStudentCardSummary(studentId);
+  const previous = page.querySelector("[data-teacher-student-cards]"); if (previous) previous.outerHTML = teacherStudentCardPanel(student);
+  const representative = page.querySelector("[data-teacher-profile-card-representative]"); const types = page.querySelector("[data-teacher-profile-card-types]");
+  if (representative) representative.innerHTML = summary.representativeItem ? `${escapeHtml(summary.representativeItem.cardName)} · ${escapeHtml(summary.representativeItem.rarity)}<small>${escapeHtml(summary.representativeItem.ability?.name || "")}</small>` : `없음<small></small>`;
+  if (types) types.textContent = `${summary.types}종`;
+  const modal = document.querySelector(".teacher-student-cards-modal"); if (modal) { modal.remove(); openTeacherStudentCardsModal(studentId); }
+}
+async function refreshTeacherStudentPoints(studentId) {
+  if (!studentId) return false;
+  if (teacherStudentPointRefreshes.has(studentId)) return teacherStudentPointRefreshes.get(studentId);
+  const promise = (async () => {
+    try {
+      const [pointResult, cardResult] = await Promise.all([
+        firebasePointsConnected && window.ourClassFirebase?.loadStudentPoints ? window.ourClassFirebase.loadStudentPoints(studentId).catch((error) => { console.error("Teacher student point polling failed", {studentId, code: error?.code, message: error?.message}); return null; }) : null,
+        window.ourClassFirebase?.getTeacherStudentCardData ? window.ourClassFirebase.getTeacherStudentCardData({studentId}).catch((error) => { console.error("Teacher student card polling failed", {studentId, code: error?.code, message: error?.message}); return null; }) : null
+      ]);
+      const student = studentById(studentId); if (!student) return false; let changed = false;
+      if (pointResult?.id === studentId) {
+        const nextHistory = (Array.isArray(pointResult.history) ? pointResult.history : []).filter((entry) => entry?.id).sort((a, b) => pointHistorySortValue(a) - pointHistorySortValue(b));
+        if (student.points !== pointResult.points || JSON.stringify(student.pointHistory || []) !== JSON.stringify(nextHistory)) { student.points = pointResult.points; student.pointHistory = nextHistory; updateTeacherStudentPointDom(student); changed = true; }
+      }
+      if (cardResult?.studentId === studentId) {
+        const previous = teacherStudentCardData.get(studentId); const next = {items: Array.isArray(cardResult.items) ? cardResult.items : [], representativeCard: cardResult.representativeCard || null, cardSets: Array.isArray(cardResult.cardSets) ? cardResult.cardSets : []};
+        if (JSON.stringify(previous || null) !== JSON.stringify(next)) { teacherStudentCardData.set(studentId, next); updateTeacherStudentCardDom(studentId); changed = true; }
+      }
+      return changed;
+    } catch (error) {
+      console.error("Teacher student detail polling failed", {studentId, code: error?.code, message: error?.message});
+      return false;
+    } finally { teacherStudentPointRefreshes.delete(studentId); }
+  })();
+  teacherStudentPointRefreshes.set(studentId, promise);
+  return promise;
+}
+function scheduleTeacherStudentPointPolling() {
+  stopTeacherStudentPointPolling();
+  if (!teacherStudentPointPollingActive()) return;
+  const studentId = studentDetailId;
+  teacherStudentPointPollTimer = setTimeout(async () => {
+    teacherStudentPointPollTimer = null;
+    if (!teacherStudentPointPollingActive() || studentDetailId !== studentId) return syncTeacherStudentPointPolling();
+    await refreshTeacherStudentPoints(studentId);
+    scheduleTeacherStudentPointPolling();
+  }, TEACHER_STUDENT_POINT_POLL_INTERVAL);
+}
+function syncTeacherStudentPointPolling(immediate = false) {
+  if (!teacherStudentPointPollingActive()) { stopTeacherStudentPointPolling(); teacherStudentPointPollStudentId = ""; return; }
+  const changedStudent = teacherStudentPointPollStudentId !== studentDetailId;
+  if (changedStudent) { stopTeacherStudentPointPolling(); teacherStudentPointPollStudentId = studentDetailId; }
+  if (changedStudent || immediate) refreshTeacherStudentPoints(studentDetailId).finally(scheduleTeacherStudentPointPolling);
+  else if (teacherStudentPointPollTimer === null) scheduleTeacherStudentPointPolling();
+}
+function studentRecordSection(title, summary, content, action = "", className = "") { return `<details class="card student-detail-section record-section ${className}" open><summary><span>${title}</span><small>${summary}</small></summary><div class="record-section-content">${content}${action}</div></details>`; }
 function teacherStudentDetail(student) {
-  const assignments = activeAssignmentSummary(student); const observations = studentObservations(student); const roleStats = studentRoleFourWeekStats(student); const representative = representativeCardInfo(student); const pointCount = (student.pointHistory || []).length; const assignmentFilter = studentDetailAssignmentFilters[student.id] || "all";
+  const assignments = activeAssignmentSummary(student); const observations = studentObservations(student); const roleStats = studentRoleFourWeekStats(student); const cardSummary = teacherStudentCardSummary(student.id); const assignmentFilter = studentDetailAssignmentFilters[student.id] || "all";
   const assignmentButtons = [["all", "전체", assignments.active.length], ["missing", "미제출", assignments.missing], ["review", "확인 대기", assignments.review], ["submitted", "제출 완료", assignments.submitted]].map(([value, label, count]) => `<button class="student-assignment-filter ${assignmentFilter === value ? "active" : ""}" data-action="filter-student-detail-assignments" data-id="${student.id}" data-status="${value}">${label} ${count}</button>`).join("");
-  const cardsSummary = `<p><strong>대표 카드:</strong> ${studentRepresentativeLabel(student)}</p><p><strong>수집 카드 종류:</strong> ${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장</p>`;
-  return `<div class="student-detail-page"><div class="section-heading"><div><button class="button secondary compact" data-action="close-student-detail">← 학생 목록</button><h1 class="page-heading">${studentNumber(student)}번 ${escapeHtml(student.name)}</h1><p class="page-description">학생 한 명을 중심으로 현재 상태와 최근 기록을 확인합니다.</p></div><div class="button-row">${studentAccountButton(student)}</div></div><section class="student-profile-summary card"><div><span>현재 포인트</span><strong>${student.points}P</strong></div><div><span>대표 카드</span><strong>${representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}` : "없음"}</strong><small>${representative?.ability?.name || ""}</small></div><div><span>수집 카드 종류</span><strong>${studentCollectedTypes(student)}종</strong></div></section><div class="student-recent-summary"><article class="student-assignment-summary"><span>진행 중 과제</span><div class="student-assignment-filters">${assignmentButtons}</div></article><article><span>이번 주 1인1역</span><strong>완료 ${roleStats.thisWeek}회</strong></article><article><span>이번 주 획득 포인트</span><strong>${weeklyEarnedPoints(student)}P</strong></article><article><span>학생 관찰 기록</span><strong>총 ${observations.length}건</strong></article></div><div class="student-detail-grid">${studentRecordSection("과제", `${assignments.active.length}개 중 ${assignmentFilter === "all" ? "전체" : ASSIGNMENT_STATUS_LABELS[assignmentFilter]} 보기`, studentDetailAssignments(student), `<button class="button secondary compact record-view-all" data-action="view-student-assignments" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("1인1역", `이번 주 완료 ${roleStats.thisWeek}회 · 최근 4주 ${roleStats.recentFourWeeks}회`, studentRoleTrend(student), roleStats.total > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 기록 보기</button>` : "")}${studentRecordSection("학생 관찰 기록", `총 ${observations.length}건 · 최근 최대 5건`, studentDetailObservations(student), `<button class="button secondary compact record-view-all" data-action="manage-student-observations" data-id="${student.id}">전체 보기</button>`)}${studentRecordSection("포인트", `현재 ${student.points}P · 최근 ${Math.min(5, pointCount)}건`, studentDetailPoints(student), `<button class="button secondary compact record-view-all" data-action="navigate" data-view="points">전체 보기</button>`)}${studentRecordSection("카드", `${studentCollectedTypes(student)}종 · 총 ${cardCount(student)}장`, cardsSummary, `<button class="button secondary compact record-view-all" data-action="navigate" data-view="cards">전체 보기</button>`)}</div></div>`;
+  const assignmentCard = studentRecordSection("과제", `${assignments.active.length}개 중 ${assignmentFilter === "all" ? "전체" : ASSIGNMENT_STATUS_LABELS[assignmentFilter]} 보기`, studentDetailAssignments(student), `<button class="button secondary compact record-view-all" data-action="view-student-assignments" data-id="${student.id}">전체 보기</button>`, "teacher-card-assignments");
+  const roleCard = studentRecordSection("1인1역", `이번 주 완료 ${roleStats.thisWeek}회 · 최근 4주 ${roleStats.recentFourWeeks}회`, studentRoleTrend(student), roleStats.total > 5 ? `<button class="button secondary compact record-view-all" data-action="navigate" data-view="roles">전체 기록 보기</button>` : "", "teacher-card-roles");
+  const observationCard = studentRecordSection("학생 관찰 기록", `총 ${observations.length}건 · 최근 최대 5건`, studentDetailObservations(student), `<button class="button secondary compact record-view-all" data-action="manage-student-observations" data-id="${student.id}">전체 보기</button>`, "teacher-card-observations");
+  const cardCard = teacherStudentCardPanel(student); const representativeProfile = cardSummary.loaded && cardSummary.representativeItem ? `${escapeHtml(cardSummary.representativeItem.cardName)} · ${escapeHtml(cardSummary.representativeItem.rarity)}<small>${escapeHtml(cardSummary.representativeItem.ability?.name || "")}</small>` : `${cardSummary.loaded ? "없음" : "확인 중"}<small></small>`;
+  return `<div class="student-detail-page" data-teacher-student-detail="${escapeHtml(student.id)}"><div class="section-heading"><div><button class="button secondary compact" data-action="close-student-detail">← 학생 목록</button><h1 class="page-heading">${studentNumber(student)}번 ${escapeHtml(student.name)}</h1><p class="page-description">학생 한 명을 중심으로 현재 상태와 최근 기록을 확인합니다.</p></div><div class="button-row">${studentAccountButton(student)}</div></div><section class="student-profile-summary card"><div><span>현재 포인트</span><strong data-teacher-current-points>${student.points}P</strong></div><div><span>대표 카드</span><strong data-teacher-profile-card-representative>${representativeProfile}</strong></div><div><span>수집 카드 종류</span><strong data-teacher-profile-card-types>${cardSummary.loaded ? `${cardSummary.types}종` : "확인 중"}</strong></div></section><div class="student-recent-summary"><article class="student-assignment-summary"><span>진행 중 과제</span><div class="student-assignment-filters">${assignmentButtons}</div></article><article><span>이번 주 1인1역</span><strong>완료 ${roleStats.thisWeek}회</strong></article><article><span>이번 주 획득 포인트</span><strong>${weeklyEarnedPoints(student)}P</strong></article><article><span>학생 관찰 기록</span><strong>총 ${observations.length}건</strong></article></div><div class="student-detail-grid"><div class="student-detail-column teacher-student-column-left">${assignmentCard}${observationCard}${cardCard}</div><div class="student-detail-column teacher-student-column-right">${roleCard}${studentPointRecordSection(student)}</div></div></div>`;
 }
 function teacherStudents() { const selected = studentById(studentDetailId); if (selected && selected.active !== false) return teacherStudentDetail(selected); const keyword = studentManagementSearch.trim().toLocaleLowerCase("ko-KR"); const students = activeStudents().filter((student) => !keyword || student.name.toLocaleLowerCase("ko-KR").includes(keyword) || String(studentNumber(student)).includes(keyword)); return `<div class="section-heading"><div><h1 class="page-heading">학생 관리</h1><p class="page-description">전체 학생의 객관적인 현재 상태를 한눈에 확인하세요.</p></div></div><div class="student-management-search"><input id="student-management-search" value="${escapeHtml(studentManagementSearch)}" placeholder="학생 이름 또는 번호 검색" aria-label="학생 이름 또는 번호 검색"><button class="button secondary compact" data-action="reset-student-management-search">초기화</button><span id="student-management-count">${students.length}명</span></div><div class="student-overview-grid">${students.map(studentManagementCard).join("") || `<div class="empty">검색 결과가 없습니다.</div>`}</div>`; }
 
@@ -1616,12 +1803,12 @@ function teacherCards() {
 function teacherCardsV2() {
   const cardSets = data.cardSets.filter((cardSet) => !cardSet.deleted); if (!cardSets.some((cardSet) => cardSet.id === teacherCardSetId)) teacherCardSetId = data.activeCardSetIds[0] || cardSets[0]?.id || "";
   const selectedSet = cardSetById(teacherCardSetId) || cardSets[0]; const cards = selectedSet ? sortedCards(false, selectedSet.id) : [];
-  const drawOptions = data.drawOptions.filter((option) => !option.deleted).map((option) => `<article class="draw-option-manage-card"><div class="teacher-card-top"><span class="pill ${option.active ? "success" : "danger"}">${option.active ? "사용 중" : "사용 중지"}</span><strong>${option.price}P</strong></div><h3>${escapeHtml(option.name)}</h3><div class="draw-option-rate-summary">${CARD_RARITIES.map((rarity) => `<span>${rarity} <strong>${drawRate(rarity, option.rates)}%</strong></span>`).join("")}</div><div class="button-row"><button class="button secondary compact" data-action="edit-draw-option" data-id="${option.id}">수정</button><button class="button ${option.active ? "danger" : "success"} compact" data-action="toggle-draw-option" data-id="${option.id}">${option.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-draw-option" data-id="${option.id}">삭제</button></div></article>`).join("");
+  const drawOptions = data.drawOptions.filter((option) => !option.deleted && FIXED_DRAW_OPTION_NAMES[option.id]).map((option) => `<article class="draw-option-manage-card"><div class="teacher-card-top"><span class="pill success">고정 옵션</span><strong>${option.price}P</strong></div><h3>${escapeHtml(FIXED_DRAW_OPTION_NAMES[option.id])}</h3><div class="draw-option-rate-summary">${CARD_RARITIES.map((rarity) => `<span>${rarity} <strong>${drawRate(rarity, option.rates)}%</strong></span>`).join("")}</div><div class="button-row"><button class="button secondary compact" data-action="edit-draw-option" data-id="${option.id}">가격·확률 수정</button></div></article>`).join("");
   const upgradeInputs = CARD_UPGRADE_STEPS.map((step) => `<label><span>${step.from} → ${step.to}</span><span class="upgrade-setting-input"><input name="${step.key}" type="number" min="2" step="1" value="${data.cardUpgradeSettings[step.key]}" required><b>장</b></span></label>`).join("");
   const abilityInputs = CARD_RARITIES.map((rarity) => { const setting = cardAbilitySetting(rarity); return `<label class="daily-cap-setting-row"><strong>${rarity}</strong><span><input name="${CARD_RATE_KEYS[rarity]}-dailyCap" type="number" min="0" step="1" value="${setting.dailyCap}" required> P</span></label>`; }).join("");
   const setRows = cardSets.map((cardSet) => `<article class="card-set-item ${cardSet.id === teacherCardSetId ? "selected" : ""}"><button class="card-set-select" data-action="select-card-set" data-id="${cardSet.id}"><strong>${escapeHtml(cardSet.name)}</strong><small>${escapeHtml(cardSet.description || "설명 없음")}</small><span>${sortedCards(false, cardSet.id).length}명 · ${cardSet.active ? "사용 중" : "사용 중지"}</span></button><label class="card-set-draw-toggle"><input type="checkbox" data-action="toggle-card-set-selection" data-id="${cardSet.id}" ${data.activeCardSetIds.includes(cardSet.id) ? "checked" : ""} ${!cardSet.active ? "disabled" : ""}><span>카드 뽑기에 사용</span></label><div class="button-row"><button class="button secondary compact" data-action="edit-card-set" data-id="${cardSet.id}">이름 수정</button><button class="button secondary compact" data-action="duplicate-card-set" data-id="${cardSet.id}">복제</button><button class="button ${cardSet.active ? "danger" : "success"} compact" data-action="toggle-card-set" data-id="${cardSet.id}">${cardSet.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card-set" data-id="${cardSet.id}">삭제</button></div></article>`).join("");
-  const personCards = cards.map((card) => `<article class="teacher-card-item"><div class="teacher-card-top"><span class="pill">5개 등급·${cardAbilities(false).length}개 능력</span><span class="pill ${card.active ? "success" : "danger"}">${card.active ? "사용 중" : "사용 중지"}</span></div><div class="teacher-card-identity">${card.imageData ? cardImageMarkup(card, "teacher-card-thumbnail") : ""}<div><h3>${escapeHtml(card.name)}</h3><p class="muted">${escapeHtml(card.era)}</p></div></div><small>${escapeHtml(card.achievement)}</small><div class="button-row teacher-card-actions"><button class="button secondary compact" data-action="edit-card" data-id="${card.id}">수정</button><button class="button ${card.active ? "danger" : "success"} compact" data-action="toggle-card-active" data-id="${card.id}">${card.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card" data-id="${card.id}">삭제</button></div></article>`).join("");
-  return `<div class="section-heading card-page-heading"><div><h1 class="page-heading">카드 관리</h1><p class="page-description">전체 규칙을 정한 뒤 카드셋과 인물 카드를 관리하세요.</p></div></div><section class="management-section"><div class="section-heading"><div><h2>1. 뽑기 옵션·가격·등급 확률</h2></div><button class="button success" data-action="new-draw-option">+ 새 뽑기 옵션</button></div><div class="draw-option-manage-grid">${drawOptions}</div></section><section class="management-section"><h2>2. 카드 업그레이드 설정</h2><form id="upgrade-settings-form"><div class="upgrade-settings-grid">${upgradeInputs}</div><button class="button success" type="submit">업그레이드 설정 저장</button></form></section><section class="management-section"><h2>3. 특수능력 설정</h2><p class="muted">등급별 능력 보너스와 하루 최대 보너스를 설정하세요.</p><form id="card-ability-settings-form"><div class="special-ability-settings">${abilityInputs}</div><button class="button success" type="submit">특수능력 설정 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>4. 카드셋 관리</h2><span class="pill success">뽑기 사용 ${data.activeCardSetIds.length}개</span></div><button class="button success" data-action="new-card-set">+ 새 카드셋 만들기</button></div><div class="card-set-grid">${setRows}</div></section>${selectedSet ? `<section class="management-section"><div class="section-heading"><div><h2>5. ${escapeHtml(selectedSet.name)} 인물 카드</h2><p class="muted">각 인물은 5개 등급과 현재 활성화된 특수능력을 가질 수 있습니다.</p></div><button class="button success" data-action="new-card" data-set-id="${selectedSet.id}">+ 새 인물 카드 추가</button></div><div class="teacher-card-grid">${personCards || `<div class="empty">이 카드셋에는 인물 카드가 없습니다.</div>`}</div></section>` : ""}<section class="card" style="margin-top:24px"><h2>데모 설정</h2><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
+  const personCards = cards.map((card) => `<article class="teacher-card-item"><div class="teacher-card-top"><span class="pill">5개 등급·${cardAbilities(false).length}개 능력</span><span class="pill ${card.active ? "success" : "danger"}">${card.active ? "사용 중" : "사용 중지"}</span></div><div class="teacher-card-identity">${cardImageSource(card) ? cardImageMarkup(card, "teacher-card-thumbnail") : ""}<div><h3>${escapeHtml(card.name)}</h3><p class="muted">${escapeHtml(card.era)}</p></div></div><small>${escapeHtml(card.achievement)}</small><div class="button-row teacher-card-actions"><button class="button secondary compact" data-action="edit-card" data-id="${card.id}">수정</button><button class="button ${card.active ? "danger" : "success"} compact" data-action="toggle-card-active" data-id="${card.id}">${card.active ? "사용 중지" : "사용 재개"}</button><button class="button danger compact" data-action="ask-delete-card" data-id="${card.id}">삭제</button></div></article>`).join("");
+  return `<div class="section-heading card-page-heading"><div><h1 class="page-heading">카드 관리</h1><p class="page-description">전체 규칙을 정한 뒤 다양한 주제의 카드셋과 카드를 관리하세요.</p></div></div><section class="management-section"><div class="section-heading"><div><h2>1. 뽑기 옵션·가격·등급 확률</h2><p class="muted">일반 뽑기와 프리미엄 뽑기의 가격과 확률을 설정하세요.</p></div></div><div class="draw-option-manage-grid">${drawOptions}</div></section><section class="management-section"><h2>2. 카드 업그레이드 설정</h2><form id="upgrade-settings-form"><div class="upgrade-settings-grid">${upgradeInputs}</div><button class="button success" type="submit">업그레이드 설정 저장</button></form></section><section class="management-section"><h2>3. 특수능력 설정</h2><p class="muted">등급별 능력 보너스와 하루 최대 보너스를 설정하세요.</p><form id="card-ability-settings-form"><div class="special-ability-settings">${abilityInputs}</div><button class="button success" type="submit">특수능력 설정 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>4. 카드셋 관리</h2><span class="pill success">뽑기 사용 ${data.activeCardSetIds.length}개</span></div><button class="button success" data-action="new-card-set">+ 새 카드셋 만들기</button></div><div class="card-set-grid">${setRows}</div></section>${selectedSet ? `<section class="management-section"><div class="section-heading"><div><h2>5. ${escapeHtml(selectedSet.name)} 카드 관리</h2><p class="muted">각 카드는 5개 등급과 현재 활성화된 특수능력을 가질 수 있습니다.</p></div><button class="button success" data-action="new-card" data-set-id="${selectedSet.id}">+ 새 카드 추가</button></div><div class="teacher-card-grid">${personCards || `<div class="empty">이 카드셋에는 카드가 없습니다.</div>`}</div></section>` : ""}<section class="card" style="margin-top:24px"><h2>데모 설정</h2><button class="button danger" data-action="reset-demo">데모 데이터 초기화</button></section>`;
 }
 
 function activeGroups() { return data.groups.filter((group) => group.active).sort((first, second) => first.order - second.order); }
@@ -1789,7 +1976,13 @@ function renderTeacher() {
   if (!teacherNavItems().some(([view]) => view === session.view)) session.view = "class-settings";
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
-function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "firebase-student" ? renderFirebaseStudentLanding() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); }
+function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "firebase-student" ? renderFirebaseStudentLanding() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); setTimeout(() => syncTeacherStudentPointPolling(), 0); }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") stopTeacherStudentPointPolling();
+  else syncTeacherStudentPointPolling(true);
+});
+window.addEventListener("focus", () => syncTeacherStudentPointPolling(true));
 
 function roleCloudConnectionLocked() { if (!firebaseRolesConnecting) return false; toast("1인1역 데이터를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
 function groupCloudConnectionLocked() { if (!firebaseGroupsConnecting) return false; toast("모둠활동을 클라우드에 연결하는 중입니다."); return true; }
@@ -2035,8 +2228,8 @@ function drawCard(optionId) {
 function openCardModal(cardId = "", preferredSetId = "") {
   const card = data.cards.find((item) => item.id === cardId);
   const selectedSetId = card?.cardSetId || preferredSetId || teacherCardSetId || data.activeCardSetIds[0];
-  pendingCardImageData = card?.imageData || "";
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="card-form" class="modal-card form card-form-modal" data-id="${cardId}"><h2>${card ? "인물 카드 수정" : "새 인물 카드 추가"}</h2><label>카드셋<select name="cardSetId">${data.cardSets.filter((cardSet) => !cardSet.deleted).map((cardSet) => `<option value="${cardSet.id}" ${cardSet.id === selectedSetId ? "selected" : ""}>${escapeHtml(cardSet.name)}</option>`).join("")}</select></label><label>인물 이름<input name="name" maxlength="40" required value="${card ? escapeHtml(card.name) : ""}" placeholder="예: 장영실"></label><label>시대<input name="era" maxlength="40" required value="${card ? escapeHtml(card.era) : ""}" placeholder="예: 조선"></label><label>한 줄 설명<input name="achievement" maxlength="160" required value="${card ? escapeHtml(card.achievement) : ""}" placeholder="예: 과학 기술 발전에 기여한 발명가"></label><fieldset class="card-image-field"><legend>카드 이미지</legend><div id="card-image-preview" class="card-image-preview">${pendingCardImageData ? `<img src="${pendingCardImageData}" alt="현재 카드 이미지">` : `<span>이미지 없음</span>`}</div><label class="button secondary compact card-image-file-button"><span>${pendingCardImageData ? "이미지 변경" : "파일 선택"}</span><input id="card-image-input" type="file" accept="image/jpeg,image/png,image/webp"></label><button class="button danger compact" type="button" data-action="delete-card-image" ${pendingCardImageData ? "" : "disabled"}>이미지 삭제</button><small id="card-image-message" class="muted">JPG, PNG, WebP · 긴 변 최대 800px로 자동 압축</small></fieldset><p class="form-help">인물 정보를 한 번만 등록하면 일반·희귀·영웅·전설·고대 등급을 모두 사용할 수 있습니다.</p><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
+  pendingCardImageData = cardImageSource(card); pendingCardImagePath = card?.imagePath || ""; pendingCardImageDeleted = false;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="card-form" class="modal-card form card-form-modal" data-id="${cardId}"><h2>${card ? "카드 수정" : "새 카드 추가"}</h2><label>카드셋<select name="cardSetId">${data.cardSets.filter((cardSet) => !cardSet.deleted).map((cardSet) => `<option value="${cardSet.id}" ${cardSet.id === selectedSetId ? "selected" : ""}>${escapeHtml(cardSet.name)}</option>`).join("")}</select></label><label>카드 이름<input name="name" maxlength="40" required value="${card ? escapeHtml(card.name) : ""}" placeholder="예: 세종대왕, 대한민국, 광합성"></label><label>분류 / 부제<input name="era" maxlength="40" required value="${card ? escapeHtml(card.era) : ""}" placeholder="예: 조선, 아시아, 생명과학"></label><label>한 줄 설명<input name="achievement" maxlength="160" required value="${card ? escapeHtml(card.achievement) : ""}" placeholder="카드를 간단하게 설명해 주세요."></label><fieldset class="card-image-field"><legend>카드 이미지</legend><div id="card-image-preview" class="card-image-preview">${pendingCardImageData ? `<img src="${escapeHtml(pendingCardImageData)}" alt="현재 카드 이미지">` : `<span>이미지 없음</span>`}</div><label class="button secondary compact card-image-file-button"><span>${pendingCardImageData ? "이미지 변경" : "파일 선택"}</span><input id="card-image-input" type="file" accept="image/jpeg,image/png,image/webp"></label><button class="button danger compact" type="button" data-action="delete-card-image" ${pendingCardImageData ? "" : "disabled"}>이미지 삭제</button><small id="card-image-message" class="muted">4:5 비율로 자른 뒤 800×1000 WebP로 최적화합니다.</small></fieldset><p class="form-help">카드 정보를 한 번만 등록하면 일반·희귀·영웅·전설·고대 등급을 모두 사용할 수 있습니다.</p><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
 
 function openCardSetModal(cardSetId = "") {
@@ -2045,14 +2238,10 @@ function openCardSetModal(cardSetId = "") {
 }
 
 function openDrawOptionModal(optionId = "") {
-  const option = data.drawOptions.find((item) => item.id === optionId); const rates = option?.rates || DEFAULT_DRAW_RATES;
+  const option = data.drawOptions.find((item) => item.id === optionId && FIXED_DRAW_OPTION_NAMES[item.id]); if (!option) return;
+  const rates = option.rates || DEFAULT_DRAW_RATES;
   const rateInputs = CARD_RARITIES.map((rarity) => `<label><span>${rarity}</span><span class="rate-input-wrap"><input name="${CARD_RATE_KEYS[rarity]}" type="number" min="0" max="100" step="1" value="${drawRate(rarity, rates)}" required><b>%</b></span></label>`).join("");
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="draw-option-form" class="modal-card form" data-id="${optionId}"><h2>${option ? "뽑기 옵션 수정" : "새 뽑기 옵션"}</h2><label>옵션 이름<input name="name" maxlength="40" required value="${option ? escapeHtml(option.name) : ""}" placeholder="예: 고급 뽑기"></label><label>1회 가격<input name="price" type="number" min="0" step="1" required value="${option?.price ?? 50}"></label><fieldset class="draw-option-rate-fieldset"><legend>등급별 확률</legend><div class="draw-rate-grid">${rateInputs}</div></fieldset><div class="draw-rate-total-line"><strong>합계: <span id="draw-rate-total">100</span>%</strong></div><p id="draw-rate-error" class="form-error" hidden>등급별 확률의 합계가 100%가 되어야 합니다.</p><div class="button-row"><button id="draw-rate-save" class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
-}
-
-function openDeleteDrawOptionModal(optionId) {
-  const option = data.drawOptions.find((item) => item.id === optionId && !item.deleted); if (!option) return;
-  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>뽑기 옵션 삭제</h2><p><strong>${escapeHtml(option.name)}</strong> 옵션을 삭제하시겠습니까?</p><p class="muted">기존 포인트 거래 기록은 그대로 유지됩니다.</p><div class="button-row"><button class="button danger" type="button" data-action="confirm-delete-draw-option" data-id="${option.id}">삭제</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></section></div>`);
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="draw-option-form" class="modal-card form" data-id="${optionId}"><h2>${escapeHtml(FIXED_DRAW_OPTION_NAMES[option.id])} 설정</h2><input name="name" type="hidden" value="${escapeHtml(FIXED_DRAW_OPTION_NAMES[option.id])}"><label>1회 가격<input name="price" type="number" min="0" step="1" required value="${option.price}"></label><fieldset class="draw-option-rate-fieldset"><legend>등급별 확률</legend><div class="draw-rate-grid">${rateInputs}</div></fieldset><div class="draw-rate-total-line"><strong>합계: <span id="draw-rate-total">100</span>%</strong></div><p id="draw-rate-error" class="form-error" hidden>등급별 확률의 합계가 100%가 되어야 합니다.</p><div class="button-row"><button id="draw-rate-save" class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`);
 }
 
 function openCardUpgradeModal(cardId, rarity) {
@@ -2297,6 +2486,7 @@ app.addEventListener("click", async (event) => {
   if (action === "open-cloud-role-cancel") { openCloudRoleCancelModal(target.dataset.id); return; }
   if (action === "confirm-cloud-role-cancel") { const id = target.dataset.id; target.closest(".modal")?.remove(); await mutateCloudStudentRole("cancel", id); return; }
   if (action === "navigate") { session.view = target.dataset.view; return render(); }
+  if (action === "view-student-point-history") { openTeacherPointHistoryModal(target.dataset.id); return; }
   if (action === "new-class-student") return openClassStudentModal();
   if (action === "edit-class-student") return openClassStudentModal(target.dataset.id);
   if (action === "open-bulk-students") return openBulkStudentsModal();
@@ -2345,8 +2535,9 @@ app.addEventListener("click", async (event) => {
   if (action === "confirm-class-mission") { const mission = data.classMissions.find((item) => item.id === target.dataset.id); if (!mission || classGroupScore() < mission.target) return; const proposedMission = { ...mission, confirmed: true, confirmedAt: new Date().toISOString() }; await persistClassMission(proposedMission, `${mission.target}점 공동 미션 달성을 확정했습니다!`); return; }
   if (action === "ask-reset-group-scores") { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>모둠 점수 초기화</h2><p>모든 모둠의 현재 점수를 0점으로 초기화합니다.<br>기존 점수 기록은 유지됩니다.<br>계속하시겠습니까?</p><div class="button-row"><button class="button danger" data-action="confirm-reset-group-scores">초기화</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
   if (action === "confirm-reset-group-scores") return resetAllGroupScores();
-  if (action === "open-student-detail") { studentDetailId = target.dataset.id; return render(); }
+  if (action === "open-student-detail") { const nextStudentId = target.dataset.id; if (studentDetailId !== nextStudentId) teacherStudentCardData.delete(nextStudentId); studentDetailId = nextStudentId; return render(); }
   if (action === "close-student-detail") { studentDetailId = ""; return render(); }
+  if (action === "view-teacher-student-cards") { openTeacherStudentCardsModal(target.dataset.id); return; }
   if (action === "filter-student-detail-assignments") { studentDetailAssignmentFilters[target.dataset.id] = target.dataset.status; return render(); }
   if (action === "reset-student-management-search") { studentManagementSearch = ""; return render(); }
   if (action === "manage-student-observations") { observationFilters.studentId = target.dataset.id; session.view = "observations"; return render(); }
@@ -2431,11 +2622,7 @@ app.addEventListener("click", async (event) => {
   if (action === "quick-teacher-points") return applyTeacherPointChange(Number(target.dataset.amount));
   if (action === "new-card") return openCardModal("", target.dataset.setId);
   if (action === "edit-card") return openCardModal(target.dataset.id);
-  if (action === "new-draw-option") return openDrawOptionModal();
   if (action === "edit-draw-option") return openDrawOptionModal(target.dataset.id);
-  if (action === "toggle-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id && !item.deleted); if (!option) return; option.active = !option.active; saveData(); render(); toast(option.active ? "뽑기 옵션을 다시 사용합니다." : "뽑기 옵션을 사용 중지했습니다."); return; }
-  if (action === "ask-delete-draw-option") return openDeleteDrawOptionModal(target.dataset.id);
-  if (action === "confirm-delete-draw-option") { const option = data.drawOptions.find((item) => item.id === target.dataset.id); if (!option) return; option.active = false; option.deleted = true; saveData(); render(); toast("뽑기 옵션을 삭제했습니다."); return; }
   if (action === "open-collection-card") return openCollectionCardModal(target.dataset.cardId, target.dataset.rarity);
   if (action === "flip-collection-card") { const modal = target.closest(".collection-card-modal"); const stage = modal?.querySelector(".collection-detail-stage"); if (!stage) return; stage.classList.toggle("show-back"); const button = modal.querySelector('.collection-modal-controls > [data-action="flip-collection-card"]'); if (button) button.textContent = stage.classList.contains("show-back") ? "앞면 보기" : "뒤집기"; return; }
   if (action === "select-collection-ability") { target.closest(".modal")?.remove(); return openCollectionCardModal(target.dataset.cardId, target.dataset.rarity, target.dataset.abilityId, true); }
@@ -2582,7 +2769,7 @@ app.addEventListener("click", async (event) => {
   if (action === "load-template") return loadTemplateForToday(target.dataset.id);
   if (action === "edit-template") { editingTemplateId = target.dataset.id; render(); document.querySelector(".template-editor")?.scrollIntoView({ behavior: "smooth" }); return; }
   if (action === "close-template-editor") { editingTemplateId = null; render(); return; }
-  if (action === "delete-card-image") { pendingCardImageData = ""; const preview = target.closest(".card-image-field")?.querySelector("#card-image-preview"); if (preview) preview.innerHTML = "<span>이미지 없음</span>"; const label = target.closest(".card-image-field")?.querySelector(".card-image-file-button span"); if (label) label.textContent = "파일 선택"; target.disabled = true; return; }
+  if (action === "delete-card-image") { pendingCardImageData = ""; pendingCardImageDeleted = true; const preview = target.closest(".card-image-field")?.querySelector("#card-image-preview"); if (preview) preview.innerHTML = "<span>이미지 없음</span>"; const label = target.closest(".card-image-field")?.querySelector(".card-image-file-button span"); if (label) label.textContent = "파일 선택"; target.disabled = true; return; }
   if (action === "rename-template") {
     const template = data.roleTemplates.find((item) => item.id === target.dataset.id); if (!template) return;
     const name = prompt("새 템플릿 이름을 입력해 주세요.", template.name)?.trim(); if (!name) return;
@@ -2646,8 +2833,8 @@ app.addEventListener("change", async (event) => {
   }
   if (event.target.id === "card-image-input") {
     const input = event.target; const field = input.closest(".card-image-field"); const message = field?.querySelector("#card-image-message"); const file = input.files?.[0]; if (!file) return;
-    input.disabled = true; if (message) message.textContent = "이미지를 자동 축소하는 중입니다…";
-    compressCardImage(file).then((result) => { pendingCardImageData = result; const preview = field?.querySelector("#card-image-preview"); if (preview) preview.innerHTML = `<img src="${result}" alt="선택한 카드 이미지 미리보기">`; const label = field?.querySelector(".card-image-file-button span"); if (label) label.textContent = "이미지 변경"; const remove = field?.querySelector('[data-action="delete-card-image"]'); if (remove) remove.disabled = false; if (message) message.textContent = "압축된 이미지가 저장 준비되었습니다."; }).catch((error) => { input.value = ""; if (message) message.textContent = error.message; toast(error.message); }).finally(() => { input.disabled = false; }); return;
+    input.disabled = true; if (message) message.textContent = "자르기 화면을 준비하는 중입니다…";
+    openCardImageCrop(file).then((result) => { if (!result) return; pendingCardImageData = result; pendingCardImageDeleted = false; const preview = field?.querySelector("#card-image-preview"); if (preview) preview.innerHTML = `<img src="${result}" alt="선택한 카드 이미지 미리보기">`; const label = field?.querySelector(".card-image-file-button span"); if (label) label.textContent = "이미지 변경"; const remove = field?.querySelector('[data-action="delete-card-image"]'); if (remove) remove.disabled = false; if (message) message.textContent = "800×1000 WebP 이미지가 저장 준비되었습니다."; }).catch((error) => { if (message) message.textContent = error.message; toast(error.message); }).finally(() => { input.value = ""; input.disabled = false; }); return;
   }
   if (event.target.dataset.action === "select-daily-note-date") { const date = event.target.value; if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return; dashboardSelectedDate = date; dashboardMonth = date.slice(0, 7); render(); return; }
   if (event.target.closest("#class-feature-form") && event.target.type === "checkbox") { const label = event.target.closest(".feature-toggle")?.querySelector("b"); if (label) label.textContent = event.target.checked ? "사용" : "사용 안 함"; return; }
@@ -2926,10 +3113,10 @@ app.addEventListener("submit", async (event) => {
     const name = formData.get("name").trim(); const price = Number(formData.get("price")); const rates = Object.fromEntries(Object.keys(DEFAULT_DRAW_RATES).map((key) => [key, Number(formData.get(key))])); const values = Object.values(rates); const total = values.reduce((sum, value) => sum + value, 0);
     if (!name || !Number.isInteger(price) || price < 0) return;
     if (!values.every((value) => Number.isFinite(value) && value >= 0 && value <= 100) || Math.abs(total - 100) >= 0.001) { toast("등급별 확률의 합계가 100%가 되어야 합니다."); return; }
-    const existing = data.drawOptions.find((option) => option.id === form.dataset.id);
-    if (existing) Object.assign(existing, { name: name.slice(0, 40), price, rates });
-    else data.drawOptions.push({ id: crypto.randomUUID(), name: name.slice(0, 40), price, rates, active: true, deleted: false });
-    saveData(); render(); toast(existing ? "뽑기 옵션을 수정했습니다." : "새 뽑기 옵션을 추가했습니다.");
+    const existing = data.drawOptions.find((option) => option.id === form.dataset.id && FIXED_DRAW_OPTION_NAMES[option.id]);
+    if (!existing) return;
+    Object.assign(existing, { name: FIXED_DRAW_OPTION_NAMES[existing.id], price, rates, active: true, deleted: false });
+    saveData(); render(); toast("뽑기 옵션을 수정했습니다.");
   }
   if (form.id === "upgrade-settings-form") {
     const settings = Object.fromEntries(CARD_UPGRADE_STEPS.map((step) => [step.key, Number(formData.get(step.key))]));
@@ -2945,11 +3132,21 @@ app.addEventListener("submit", async (event) => {
   if (form.id === "card-form") {
     const cardSetId = formData.get("cardSetId"); const name = formData.get("name").trim(); const era = formData.get("era").trim(); const achievement = formData.get("achievement").trim();
     if (!cardSetById(cardSetId) || !name || !era || !achievement) return;
-    const existing = data.cards.find((card) => card.id === form.dataset.id);
-    if (existing) Object.assign(existing, { cardSetId, name, era, achievement, imageData: pendingCardImageData });
-    else data.cards.push({ id: crypto.randomUUID(), cardSetId, name, era, achievement, imageData: pendingCardImageData, order: sortedCards(true, cardSetId).reduce((max, card) => Math.max(max, card.order), -1) + 1, active: true, deleted: false });
+    const existing = data.cards.find((card) => card.id === form.dataset.id); const cardId = existing?.id || crypto.randomUUID();
+    const card = existing || { id: cardId, order: sortedCards(true, cardSetId).reduce((max, item) => Math.max(max, item.order), -1) + 1, active: true, deleted: false, imageData: "", imagePath: "", imageUrl: "", imageUpdatedAt: "" };
+    Object.assign(card, {cardSetId, name, era, achievement}); if (!existing) data.cards.push(card);
     teacherCardSetId = cardSetId;
-    try { saveData(); } catch (error) { toast("저장 공간이 부족합니다. 더 작은 이미지를 사용해 주세요."); return; } pendingCardImageData = ""; render(); toast(existing ? "카드를 수정했습니다." : "새 카드를 추가했습니다.");
+    const submitButton = form.querySelector('button[type="submit"]'); if (submitButton) { submitButton.disabled = true; submitButton.textContent = "저장 중…"; }
+    try {
+      saveData(); await window.ourClassCardCloud?.saveNow?.();
+      if (pendingCardImageData.startsWith("data:image/webp")) {
+        const image = await window.ourClassFirebase.saveCardPortrait({cardId, action: "save", imageData: pendingCardImageData});
+        Object.assign(card, {imageData: "", imagePath: image.imagePath || "", imageUrl: image.imageUrl || "", imageUpdatedAt: image.imageUpdatedAt || ""}); saveData(); await window.ourClassCardCloud?.saveNow?.();
+      } else if (pendingCardImageDeleted && (pendingCardImagePath || card.imageUrl || card.imageData)) {
+        await window.ourClassFirebase.saveCardPortrait({cardId, action: "delete"}); Object.assign(card, {imageData: "", imagePath: "", imageUrl: "", imageUpdatedAt: new Date().toISOString()}); saveData(); await window.ourClassCardCloud?.saveNow?.();
+      }
+    } catch (error) { console.error("Card save failed", {code: error?.code, message: error?.message, details: error?.details, error}); const message = String(error?.message || ""); toast(message.includes("storage-bucket-not-found") ? "Firebase Storage가 아직 활성화되지 않았습니다." : message.includes("storage-upload-failed") ? "카드 이미지를 Storage에 업로드하지 못했습니다." : message.includes("firestore-update-failed") ? "이미지 업로드 후 카드 정보를 저장하지 못했습니다." : "카드 정보를 Firebase에 저장하지 못했습니다."); if (submitButton) { submitButton.disabled = false; submitButton.textContent = "저장"; } return; }
+    pendingCardImageData = ""; pendingCardImagePath = ""; pendingCardImageDeleted = false; render(); toast(existing ? "카드를 수정했습니다." : "새 카드를 추가했습니다.");
   }
   if (form.id === "card-set-form") {
     const name = formData.get("name").trim(); const description = formData.get("description").trim(); if (!name) return;

@@ -1,6 +1,31 @@
 (() => {
   let processingTransfer = false;
   let showAllPointTransfers = false;
+  let cloudGift = {classId: "", loading: false, loaded: false, data: null, promise: null};
+
+  function activeCloudClassId() { return String(window.ourClassFirebase?.getActiveClassId?.() || ""); }
+  function mapCloudSettings(settings) { return {enabled: settings?.enabled === true, maxPerTransfer: Number(settings?.maxPointsPerTransfer) || 10, dailyMaxAmount: Number(settings?.maxPointsPerDay) || 20, dailyMaxCount: Number(settings?.maxTransfersPerDay) || 3}; }
+  async function loadCloudGift(force = false) {
+    const classId = activeCloudClassId();
+    if (!classId || !window.ourClassFirebase?.getPointGiftData) return null;
+    if (cloudGift.classId !== classId) cloudGift = {classId, loading: false, loaded: false, data: null, promise: null};
+    if (!force && cloudGift.loaded) return cloudGift.data;
+    if (cloudGift.promise) return cloudGift.promise;
+    cloudGift.loading = true;
+    cloudGift.promise = (async () => {
+      let value = await window.ourClassFirebase.getPointGiftData({classId, mode: "teacher"});
+      if (value?.ok === true && value.settingsExists === false) {
+        await window.ourClassFirebase.savePointGiftSettings({classId, action: "migrate", settings: {enabled: data.pointTransferSettings.enabled, maxPointsPerTransfer: data.pointTransferSettings.maxPerTransfer, maxPointsPerDay: data.pointTransferSettings.dailyMaxAmount, maxTransfersPerDay: data.pointTransferSettings.dailyMaxCount}});
+        value = await window.ourClassFirebase.getPointGiftData({classId, mode: "teacher"});
+      }
+      cloudGift.data = value; cloudGift.loaded = true;
+      if (value?.settings) data.pointTransferSettings = mapCloudSettings(value.settings);
+      if (Array.isArray(value?.history)) data.pointTransfers = value.history;
+      return value;
+    })().catch((caught) => { console.error("Teacher point gift load failed", caught); return null; })
+      .finally(() => { cloudGift.loading = false; cloudGift.promise = null; if (typeof render === "function") render(); });
+    return cloudGift.promise;
+  }
 
   function transfersSentToday(studentId) { return data.pointTransfers.filter((transfer) => transfer.fromStudentId === studentId && transfer.date === todayString()); }
   function transferUsage(studentId) { const transfers = transfersSentToday(studentId); return { count: transfers.length, amount: transfers.reduce((sum, transfer) => sum + transfer.amount, 0) }; }
@@ -35,15 +60,15 @@
 
   function teacherSettingsSection() {
     const settings = data.pointTransferSettings;
-    return `<section class="management-section"><div class="section-heading"><div><h2>친구 포인트 선물 설정</h2><p class="muted">학생 간 포인트 선물 한도를 설정합니다.</p></div></div><form id="point-transfer-settings-form" class="card point-transfer-settings"><label class="check-label"><input name="enabled" type="checkbox" ${settings.enabled ? "checked" : ""}><span>친구 선물 기능 사용</span></label><label>1회 최대 포인트<input name="maxPerTransfer" type="number" min="1" step="1" required value="${settings.maxPerTransfer}"></label><label>하루 최대 총 포인트<input name="dailyMaxAmount" type="number" min="1" step="1" required value="${settings.dailyMaxAmount}"></label><label>하루 최대 전송 횟수<input name="dailyMaxCount" type="number" min="1" step="1" required value="${settings.dailyMaxCount}"></label><button class="button success" type="submit">설정 저장</button></form></section>`;
+    return `<section class="management-section"><div class="section-heading"><div><h2>친구 포인트 선물 설정</h2><p class="muted">학생 간 포인트 선물 한도를 설정합니다.</p></div></div><form id="point-transfer-settings-form" class="card point-transfer-settings"><label class="point-gift-toggle"><span>친구 선물 기능 사용</span><input name="enabled" type="checkbox" ${settings.enabled ? "checked" : ""}><i aria-hidden="true"></i><b>${settings.enabled ? "ON" : "OFF"}</b></label><label>1회 최대 포인트<input name="maxPerTransfer" type="number" min="1" step="1" required value="${settings.maxPerTransfer}"></label><label>하루 최대 총 포인트<input name="dailyMaxAmount" type="number" min="1" step="1" required value="${settings.dailyMaxAmount}"></label><label>하루 최대 전송 횟수<input name="dailyMaxCount" type="number" min="1" step="1" required value="${settings.dailyMaxCount}"></label><button class="button success" type="submit" ${cloudGift.loading ? "disabled" : ""}>설정 저장</button></form></section>`;
   }
   function teacherTransferHistory() {
-    const sorted = [...data.pointTransfers].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); const shown = showAllPointTransfers ? sorted : sorted.slice(0, 10);
-    const rows = shown.map((transfer) => { const from = studentById(transfer.fromStudentId); const to = studentById(transfer.toStudentId); return `<article class="point-transfer-history-row"><div><strong>${escapeHtml(studentLabel(from))} → ${escapeHtml(studentLabel(to))}</strong><small>${new Date(transfer.createdAt).toLocaleString("ko-KR")}</small></div><b>${transfer.amount}P</b></article>`; }).join("");
+    const sorted = [...data.pointTransfers].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))); const shown = showAllPointTransfers ? sorted : sorted.slice(0, 10);
+    const rows = shown.map((transfer) => { const from = studentById(transfer.fromStudentId || transfer.senderStudentId); const to = studentById(transfer.toStudentId || transfer.receiverStudentId); const fromName = transfer.senderName || (from ? studentLabel(from) : "삭제된 학생"); const toName = transfer.receiverName || (to ? studentLabel(to) : "삭제된 학생"); return `<article class="point-transfer-history-row"><div><strong>${escapeHtml(fromName)} → ${escapeHtml(toName)}</strong><small>${transfer.createdAt ? new Date(transfer.createdAt).toLocaleString("ko-KR") : escapeHtml(transfer.date || "")}</small></div><b>${transfer.amount}P</b></article>`; }).join("");
     return `<section class="management-section"><div class="section-heading"><div><h2>친구 포인트 선물 기록</h2><p class="muted">최근 전송 기록부터 표시합니다.</p></div><span class="muted">${sorted.length}건</span></div>${rows ? `<div class="point-transfer-history">${rows}</div>` : `<div class="empty">친구에게 선물한 기록이 없습니다.</div>`}${sorted.length > 10 ? `<button class="button secondary record-view-all" data-action="toggle-point-transfer-history">${showAllPointTransfers ? "최근 10건만 보기" : "더 보기"}</button>` : ""}</section>`;
   }
   const originalTeacherPoints = teacherPoints;
-  teacherPoints = function pointTransferTeacherPoints() { return `${originalTeacherPoints()}${teacherSettingsSection()}${teacherTransferHistory()}`; };
+  teacherPoints = function pointTransferTeacherPoints() { if (!cloudGift.loaded && !cloudGift.loading) setTimeout(() => loadCloudGift(), 0); return `${originalTeacherPoints()}${teacherSettingsSection()}${teacherTransferHistory()}`; };
 
   function openTransferConfirm(toStudent, amount) {
     const student = currentStudent();
@@ -64,10 +89,11 @@
     } finally { processingTransfer = false; }
   }
 
-  app.addEventListener("submit", (event) => {
+  app.addEventListener("submit", async (event) => {
     const form = event.target; if (form.id !== "point-transfer-form" && form.id !== "point-transfer-settings-form") return; event.preventDefault(); const values = new FormData(form);
-    if (form.id === "point-transfer-settings-form") { const maxPerTransfer = Number(values.get("maxPerTransfer")); const dailyMaxAmount = Number(values.get("dailyMaxAmount")); const dailyMaxCount = Number(values.get("dailyMaxCount")); if (![maxPerTransfer, dailyMaxAmount, dailyMaxCount].every((value) => Number.isInteger(value) && value > 0)) return toast("제한값은 모두 양의 정수로 입력해 주세요."); data.pointTransferSettings = { enabled: values.has("enabled"), maxPerTransfer, dailyMaxAmount, dailyMaxCount }; saveData(); render(); toast("친구 포인트 선물 설정을 저장했습니다."); return; }
+    if (form.id === "point-transfer-settings-form") { const maxPerTransfer = Number(values.get("maxPerTransfer")); const dailyMaxAmount = Number(values.get("dailyMaxAmount")); const dailyMaxCount = Number(values.get("dailyMaxCount")); if (![maxPerTransfer, dailyMaxAmount, dailyMaxCount].every((value) => Number.isInteger(value) && value > 0)) return toast("제한값은 모두 양의 정수로 입력해 주세요."); const next = { enabled: values.has("enabled"), maxPerTransfer, dailyMaxAmount, dailyMaxCount }; const button = form.querySelector("button[type=submit]"); if (button) button.disabled = true; try { if (activeCloudClassId() && window.ourClassFirebase?.savePointGiftSettings) { await window.ourClassFirebase.savePointGiftSettings({action: "save", settings: {enabled: next.enabled, maxPointsPerTransfer: maxPerTransfer, maxPointsPerDay: dailyMaxAmount, maxTransfersPerDay: dailyMaxCount}}); data.pointTransferSettings = next; await loadCloudGift(true); } else { data.pointTransferSettings = next; saveData(); render(); } toast("친구 포인트 선물 설정을 저장했습니다."); } catch (caught) { console.error("Point gift settings save failed", caught); toast("친구 선물 설정을 저장하지 못했습니다."); if (button) button.disabled = false; } return; }
     const student = currentStudent(); const toStudent = activeStudents().find((friend) => friend.id === values.get("toStudentId")); const amount = Number(values.get("amount")); const reason = transferBlockReason(student, toStudent, amount); if (reason) return toast(reason); openTransferConfirm(toStudent, amount);
   });
   app.addEventListener("click", (event) => { const target = event.target.closest("[data-action]"); if (!target) return; if (target.dataset.action === "confirm-point-transfer") { if (target.disabled || processingTransfer) return; target.disabled = true; return completePointTransfer(target.dataset.to, Number(target.dataset.amount)); } if (target.dataset.action === "toggle-point-transfer-history") { showAllPointTransfers = !showAllPointTransfers; render(); } });
+  app.addEventListener("change", (event) => { if (event.target?.name !== "enabled" || event.target.form?.id !== "point-transfer-settings-form") return; const label = event.target.closest(".point-gift-toggle"); const state = label?.querySelector("b"); if (state) state.textContent = event.target.checked ? "ON" : "OFF"; });
 })();

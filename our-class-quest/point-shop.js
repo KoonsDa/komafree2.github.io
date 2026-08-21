@@ -1,8 +1,35 @@
 (() => {
+  let cloudLoading = false;
+  let cloudLoadedClassId = "";
+  function cloudClassId() { return window.ourClassFirebase?.getActiveClassId?.() || ""; }
+  function cloudEnabled() { return Boolean(window.ourClassFirebase?.ready && window.ourClassFirebase?.getCurrentUser?.()?.uid && cloudClassId()); }
+  async function loadCloudShop(force = false) {
+    const classId = cloudClassId();
+    if (!cloudEnabled() || cloudLoading || (!force && cloudLoadedClassId === classId)) return;
+    cloudLoading = true;
+    try {
+      let result = await window.ourClassFirebase.getPointShopData({classId, mode: "teacher"});
+      if (!result.items?.length && data.pointShopItems.some((item) => !item.deleted)) {
+        await window.ourClassFirebase.savePointShopProduct({classId, action: "migrate", items: data.pointShopItems});
+        result = await window.ourClassFirebase.getPointShopData({classId, mode: "teacher"});
+      }
+      data.pointShopItems = Array.isArray(result.items) ? result.items : [];
+      data.pointUseRequests = Array.isArray(result.requests) ? result.requests : [];
+      cloudLoadedClassId = classId;
+      saveData();
+      if (session.mode === "teacher" && session.view === "points") render();
+    } catch (error) { console.error("Point shop cloud load failed", error); toast("포인트 상품을 클라우드에서 불러오지 못했습니다."); }
+    finally { cloudLoading = false; }
+  }
+  async function saveCloudItem(item) {
+    if (!cloudEnabled()) return;
+    await window.ourClassFirebase.savePointShopProduct({classId: cloudClassId(), item});
+    await loadCloudShop(true);
+  }
   function itemById(id) { return data.pointShopItems.find((item) => item.id === id); }
   function completedUses(itemId, date = todayString(), studentId = "") { return data.pointUseRequests.filter((request) => request.itemId === itemId && request.date === date && request.status === "completed" && (!studentId || request.studentId === studentId)).length; }
   function pendingRequest(itemId, studentId, date = todayString()) { return data.pointUseRequests.find((request) => request.itemId === itemId && request.studentId === studentId && request.date === date && request.status === "pending"); }
-  function remainingStock(item, date = todayString()) { return Math.max(0, item.dailyStock - completedUses(item.id, date)); }
+  function remainingStock(item, date = todayString()) { return Math.max(0, item.dailyStock - data.pointUseRequests.filter((request) => request.itemId === item.id && request.date === date && ["pending", "completed"].includes(request.status)).length); }
   function requestBlockReason(item, student, date = todayString(), requestId = "", price = item?.price ?? 0) {
     if (!item || item.deleted || !item.active) return "현재 신청할 수 없는 상품입니다.";
     if (!student) return "학생 정보를 찾을 수 없습니다.";
@@ -41,7 +68,7 @@
     return `${pendingSection()}<section class="management-section"><div class="section-heading"><div><h2>포인트 상품 관리</h2><p class="muted">상품 설정은 날짜가 바뀌어도 유지됩니다.</p></div><div class="button-row"><button class="button secondary" data-action="save-point-shop-set">현재 상품을 세트로 저장</button><button class="button secondary" data-action="manage-point-shop-sets">저장된 세트 불러오기/관리</button><button class="button success" data-action="new-point-shop-item">+ 상품 추가</button></div></div>${rows ? `<div class="point-shop-manage-list">${rows}</div>` : `<div class="empty">등록된 포인트 상품이 없습니다.</div>`}</section>`;
   }
   const originalTeacherPoints = teacherPoints;
-  teacherPoints = function pointShopTeacherPoints() { return `${originalTeacherPoints()}${teacherShopSection()}`; };
+  teacherPoints = function pointShopTeacherPoints() { if (cloudEnabled()) setTimeout(() => loadCloudShop(), 0); return `${originalTeacherPoints()}${teacherShopSection()}`; };
 
   function openItemModal(id = "") {
     const item = itemById(id);
@@ -59,12 +86,12 @@
   }
   function openRenameSetModal(id) { const set = data.pointShopSets.find((item) => item.id === id); if (!set) return; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="point-shop-set-rename-form" class="modal-card form" data-id="${id}"><h2>세트 이름 수정</h2><label>세트 이름<input name="name" maxlength="60" required value="${escapeHtml(set.name)}"></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
   function openItemRequests(itemId) {
-    const item = itemById(itemId); if (!item) return; const labels = { pending: "승인 대기", completed: "사용 완료", rejected: "거절" }; const requests = todayRequestsForItem(itemId);
+    const item = itemById(itemId); if (!item) return; const labels = { pending: "승인 대기", completed: "사용 완료", rejected: "거절", reversed: "사용 취소됨" }; const requests = todayRequestsForItem(itemId);
     const rows = requests.map((request) => { const student = studentById(request.studentId); const studentLabel = student ? `${studentNumber(student)}번 ${student.name}` : "삭제된 학생"; return `<article class="point-request-row"><div><strong>${escapeHtml(studentLabel)}</strong><span>${escapeHtml(item.name)} · ${request.price}P</span><small>${labels[request.status]} · ${new Date(request.createdAt).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}</small></div>${request.status === "pending" ? `<div class="button-row"><button class="button success compact" data-action="approve-point-use" data-id="${request.id}">승인</button><button class="button danger compact" data-action="reject-point-use" data-id="${request.id}">거절</button></div>` : ""}</article>`; }).join("");
     app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card point-shop-set-modal"><div class="section-heading"><div><h2>${escapeHtml(item.name)} 신청 현황</h2><p class="muted">오늘 신청한 학생</p></div></div>${rows ? `<div class="point-request-list">${rows}</div>` : `<div class="empty">오늘 신청한 학생이 없습니다.</div>`}<div class="button-row"><button class="button secondary" data-action="close-modal">닫기</button></div></section></div>`);
   }
 
-  app.addEventListener("click", (event) => {
+  app.addEventListener("click", async (event) => {
     const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
     if (action === "new-point-shop-item") return openItemModal();
     if (action === "save-point-shop-set") return openSaveSetModal();
@@ -73,16 +100,33 @@
     if (action === "rename-point-shop-set") { target.closest(".modal")?.remove(); return openRenameSetModal(target.dataset.id); }
     if (action === "delete-point-shop-set") { const set = data.pointShopSets.find((item) => item.id === target.dataset.id); if (!set || !confirm(`‘${set.name}’ 세트를 삭제할까요?`)) return; data.pointShopSets = data.pointShopSets.filter((item) => item.id !== set.id); saveData(); render(); toast("상품 세트를 삭제했습니다."); return; }
     if (action === "overwrite-point-shop-set") { const set = data.pointShopSets.find((item) => item.id === target.dataset.id); if (!set || !confirm(`‘${set.name}’ 세트를 현재 상품 구성으로 덮어쓸까요?`)) return; set.items = pointShopSetItems(); set.updatedAt = new Date().toISOString(); saveData(); render(); toast("상품 세트를 수정했습니다."); return; }
-    if (action === "load-point-shop-set") { const set = data.pointShopSets.find((item) => item.id === target.dataset.id); if (!set || !confirm(`‘${set.name}’ 세트를 현재 상품으로 불러올까요?`)) return; const now = new Date().toISOString(); data.pointShopItems.filter((item) => !item.deleted).forEach((item) => { item.active = false; item.deleted = true; item.updatedAt = now; }); data.pointShopItems.push(...set.items.map((item) => ({ id: crypto.randomUUID(), ...structuredClone(item), deleted: false, createdAt: now, updatedAt: now }))); saveData(); render(); toast("상품 세트를 불러왔습니다."); return; }
+    if (action === "load-point-shop-set") { const set = data.pointShopSets.find((item) => item.id === target.dataset.id); if (!set || !confirm(`‘${set.name}’ 세트를 현재 상품으로 불러올까요?`)) return; const now = new Date().toISOString(); data.pointShopItems.filter((item) => !item.deleted).forEach((item) => { item.active = false; item.deleted = true; item.updatedAt = now; }); data.pointShopItems.push(...set.items.map((item) => ({ id: crypto.randomUUID(), ...structuredClone(item), deleted: false, createdAt: now, updatedAt: now }))); saveData(); render(); try { if (cloudEnabled()) { await Promise.all(data.pointShopItems.map((item) => window.ourClassFirebase.savePointShopProduct({classId: cloudClassId(), item}))); await loadCloudShop(true); } toast("상품 세트를 불러왔습니다."); } catch (error) { console.error(error); await loadCloudShop(true); toast("상품 세트를 클라우드에 저장하지 못했습니다."); } return; }
     if (action === "edit-point-shop-item") return openItemModal(target.dataset.id);
-    if (action === "toggle-point-shop-item") { const item = itemById(target.dataset.id); if (!item || item.deleted) return; item.active = !item.active; item.updatedAt = new Date().toISOString(); saveData(); render(); toast(`상품을 ${item.active ? "활성화" : "비활성화"}했습니다.`); return; }
+    if (action === "toggle-point-shop-item") { const item = itemById(target.dataset.id); if (!item || item.deleted) return; item.active = !item.active; item.updatedAt = new Date().toISOString(); saveData(); render(); try { await saveCloudItem(item); toast(`상품을 ${item.active ? "활성화" : "비활성화"}했습니다.`); } catch (error) { console.error(error); await loadCloudShop(true); toast("상품 상태를 클라우드에 저장하지 못했습니다."); } return; }
     if (action === "ask-delete-point-shop-item") { const item = itemById(target.dataset.id); if (!item) return; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>상품 삭제</h2><p><strong>${escapeHtml(item.name)}</strong> 상품을 삭제하시겠습니까?</p><p class="muted">과거 사용 기록은 유지됩니다.</p><div class="button-row"><button class="button danger" data-action="confirm-delete-point-shop-item" data-id="${item.id}">삭제</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
-    if (action === "confirm-delete-point-shop-item") { const item = itemById(target.dataset.id); if (!item) return; item.deleted = true; item.active = false; item.updatedAt = new Date().toISOString(); saveData(); render(); toast("상품을 삭제했습니다."); return; }
+    if (action === "confirm-delete-point-shop-item") { const item = itemById(target.dataset.id); if (!item) return; item.deleted = true; item.active = false; item.updatedAt = new Date().toISOString(); saveData(); render(); try { await saveCloudItem(item); toast("상품을 삭제했습니다."); } catch (error) { console.error(error); await loadCloudShop(true); toast("상품 삭제를 클라우드에 저장하지 못했습니다."); } return; }
     if (action === "ask-use-point-item") { const item = itemById(target.dataset.id); const student = currentStudent(); const reason = requestBlockReason(item, student); if (reason) return toast(reason); return openUseConfirm(item, student); }
     if (action === "confirm-use-point-item") {
       const item = itemById(target.dataset.id); const student = currentStudent(); const reason = requestBlockReason(item, student); if (reason) { target.closest(".modal")?.remove(); return toast(reason); }
       const now = new Date().toISOString(); const request = { id: crypto.randomUUID(), itemId: item.id, studentId: student.id, date: todayString(), price: item.price, status: item.approvalRequired ? "pending" : "completed", createdAt: now, resolvedAt: item.approvalRequired ? null : now };
       if (!item.approvalRequired && !addUseHistory(student, item, request)) { if (pointChangeFailureReason !== "cloud-unavailable") toast("포인트가 부족합니다."); return; } data.pointUseRequests.push(request); saveData(); render(); toast(item.approvalRequired ? "사용 승인을 신청했습니다." : `${item.name} 상품을 사용했습니다.`); return;
+    }
+    if (action === "approve-point-use" && cloudEnabled()) { try { await window.ourClassFirebase.resolvePointUseRequest({classId: cloudClassId(), requestId: target.dataset.id, decision: "approve"}); await loadCloudShop(true); toast("사용을 승인했습니다."); } catch (error) { console.error(error); await loadCloudShop(true); toast("승인하지 못했습니다. 잔액과 수량을 확인해 주세요."); } return; }
+    if (action === "reject-point-use" && cloudEnabled()) { try { await window.ourClassFirebase.resolvePointUseRequest({classId: cloudClassId(), requestId: target.dataset.id, decision: "reject"}); await loadCloudShop(true); toast("사용 신청을 거절했습니다."); } catch (error) { console.error(error); await loadCloudShop(true); toast("신청을 처리하지 못했습니다."); } return; }
+    if (action === "reverse-point-product-use" && cloudEnabled()) {
+      if (!confirm("이 상품 사용을 되돌리고 차감된 포인트를 학생에게 다시 지급할까요?\n기존 사용 기록은 감사 이력으로 유지됩니다.")) return;
+      target.disabled = true;
+      try {
+        const result = await window.ourClassFirebase.reversePointProductUse({classId: cloudClassId(), requestId: target.dataset.id});
+        if (result?.ok !== true || result.status !== "reversed") throw new Error("Invalid reversal response.");
+        await Promise.all([loadCloudShop(true), loadFirebasePoints(firebaseTeacherUser.uid, false)]);
+        saveData(); render(); toast(`${result.refundedPoints}P를 학생에게 반환했습니다.`);
+      } catch (error) {
+        console.error("Point product reversal failed", error);
+        await Promise.all([loadCloudShop(true), loadFirebasePoints(firebaseTeacherUser.uid, false)]);
+        render(); toast(String(error?.message || "").includes("already-reversed") ? "이미 취소된 상품 사용입니다." : "상품 사용을 되돌리지 못했습니다.");
+      }
+      return;
     }
     if (action === "approve-point-use") {
       const request = data.pointUseRequests.find((item) => item.id === target.dataset.id); if (!request || request.status !== "pending") return toast("이미 처리된 신청입니다.");
@@ -92,11 +136,12 @@
     if (action === "reject-point-use") { const request = data.pointUseRequests.find((item) => item.id === target.dataset.id); if (!request || request.status !== "pending") return toast("이미 처리된 신청입니다."); request.status = "rejected"; request.resolvedAt = new Date().toISOString(); saveData(); render(); toast("사용 신청을 거절했습니다."); return; }
   });
 
-  app.addEventListener("submit", (event) => {
+  app.addEventListener("submit", async (event) => {
     const form = event.target; if (form.id !== "point-shop-item-form") return; event.preventDefault(); const values = new FormData(form); const name = String(values.get("name") || "").trim(); const description = String(values.get("description") || "").trim(); const price = Number(values.get("price")); const dailyStock = Number(values.get("dailyStock")); const perStudentDailyLimit = Number(values.get("perStudentDailyLimit"));
     if (!name || !Number.isInteger(price) || price < 0 || !Number.isInteger(dailyStock) || dailyStock < 1 || !Number.isInteger(perStudentDailyLimit) || perStudentDailyLimit < 1) return toast("상품 설정값을 확인해 주세요.");
     const now = new Date().toISOString(); const existing = itemById(form.dataset.id); const update = { name: name.slice(0, 80), description: description.slice(0, 300), price, dailyStock, perStudentDailyLimit, approvalRequired: values.has("approvalRequired"), active: values.has("active"), updatedAt: now };
-    if (existing) Object.assign(existing, update); else data.pointShopItems.push({ id: crypto.randomUUID(), ...update, deleted: false, createdAt: now }); saveData(); render(); toast(existing ? "상품을 수정했습니다." : "상품을 추가했습니다.");
+    const savedItem = existing || { id: crypto.randomUUID(), deleted: false, createdAt: now }; Object.assign(savedItem, update); if (!existing) data.pointShopItems.push(savedItem); saveData(); render();
+    try { await saveCloudItem(savedItem); toast(existing ? "상품을 수정했습니다." : "상품을 추가했습니다."); } catch (error) { console.error(error); await loadCloudShop(true); toast("상품을 클라우드에 저장하지 못했습니다."); }
   });
   app.addEventListener("submit", (event) => {
     const form = event.target; if (form.id !== "point-shop-set-form" && form.id !== "point-shop-set-rename-form") return; event.preventDefault(); const name = String(new FormData(form).get("name") || "").trim().slice(0, 60); if (!name) return;

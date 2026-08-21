@@ -1,7 +1,7 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
-import { getFirestore, doc, collection, getDoc, getDocs, setDoc, deleteDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, doc, collection, query, where, getDoc, getDocs, setDoc, deleteDoc, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCEjJSL0PNZUfoQ_j06xvPMlDgbC8x_FwI",
@@ -156,6 +156,24 @@ try {
   const studentRequestAssignmentReviewCallable = httpsCallable(studentFunctions, "studentRequestAssignmentReview");
   const studentApplyRoleCallable = httpsCallable(studentFunctions, "studentApplyRole");
   const studentCancelRoleCallable = httpsCallable(studentFunctions, "studentCancelRole");
+  const getPointShopDataCallable = httpsCallable(functions, "getPointShopData");
+  const getStudentPointShopDataCallable = httpsCallable(studentFunctions, "getPointShopData");
+  const savePointShopProductCallable = httpsCallable(functions, "savePointShopProduct");
+  const studentUsePointProductCallable = httpsCallable(studentFunctions, "studentUsePointProduct");
+  const resolvePointUseRequestCallable = httpsCallable(functions, "resolvePointUseRequest");
+  const reversePointProductUseCallable = httpsCallable(functions, "reversePointProductUse");
+  const getPointGiftDataCallable = httpsCallable(functions, "getPointGiftData");
+  const getStudentPointGiftDataCallable = httpsCallable(studentFunctions, "getPointGiftData");
+  const savePointGiftSettingsCallable = httpsCallable(functions, "savePointGiftSettings");
+  const studentGiftPointsCallable = httpsCallable(studentFunctions, "studentGiftPoints");
+  const getCardConfigCallable = httpsCallable(functions, "getCardConfig");
+  const getTeacherStudentCardDataCallable = httpsCallable(functions, "getTeacherStudentCardData");
+  const saveCardConfigCallable = httpsCallable(functions, "saveCardConfig");
+  const getStudentCardDrawDataCallable = httpsCallable(studentFunctions, "getStudentCardDrawData");
+  const studentDrawCardCallable = httpsCallable(studentFunctions, "studentDrawCard");
+  const getStudentCardCollectionCallable = httpsCallable(studentFunctions, "getStudentCardCollection");
+  const setStudentRepresentativeCardCallable = httpsCallable(studentFunctions, "setStudentRepresentativeCard");
+  const saveCardPortraitCallable = httpsCallable(functions, "saveCardPortrait");
   const provider = new GoogleAuthProvider();
   let activeClassId = "";
   window.ourClassFirebase = {
@@ -165,6 +183,72 @@ try {
     getCurrentUser: () => publicUser(auth.currentUser),
     getStudentCurrentUser: () => publicUser(studentAuth.currentUser),
     getActiveClassId: () => activeClassId,
+    getPointShopData: async ({classId, mode = "teacher"} = {}) => {
+      const callable = mode === "student" ? getStudentPointShopDataCallable : getPointShopDataCallable;
+      const result = await callable(mode === "student" ? {mode: "student"} : {mode: "teacher", classId: String(classId || activeClassId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    savePointShopProduct: async ({classId, action = "save", item, items} = {}) => {
+      const result = await savePointShopProductCallable({classId: String(classId || activeClassId || ""), action, item, items});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    studentUsePointProduct: async ({itemId}) => {
+      const result = await studentUsePointProductCallable({itemId: String(itemId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    resolvePointUseRequest: async ({classId, requestId, decision}) => {
+      const result = await resolvePointUseRequestCallable({classId: String(classId || activeClassId || ""), requestId: String(requestId || ""), decision: String(decision || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    reversePointProductUse: async ({classId, requestId}) => {
+      const result = await reversePointProductUseCallable({classId: String(classId || activeClassId || ""), requestId: String(requestId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getPointGiftData: async ({classId, mode = "teacher"} = {}) => {
+      const callable = mode === "student" ? getStudentPointGiftDataCallable : getPointGiftDataCallable;
+      const result = await callable(mode === "student" ? {mode: "student"} : {mode: "teacher", classId: String(classId || activeClassId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    savePointGiftSettings: async ({classId, action = "save", settings} = {}) => {
+      const result = await savePointGiftSettingsCallable({classId: String(classId || activeClassId || ""), action, settings});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    studentGiftPoints: async ({receiverStudentId, amount}) => {
+      const result = await studentGiftPointsCallable({receiverStudentId: String(receiverStudentId || ""), amount: Number(amount)});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getCardConfig: async ({classId} = {}) => {
+      const result = await getCardConfigCallable({classId: String(classId || activeClassId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getTeacherStudentCardData: async ({classId, studentId} = {}) => {
+      const result = await getTeacherStudentCardDataCallable({classId: String(classId || activeClassId || ""), studentId: String(studentId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    saveCardConfig: async ({classId, action = "save", config} = {}) => {
+      const result = await saveCardConfigCallable({classId: String(classId || activeClassId || ""), action, config});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getStudentCardDrawData: async () => {
+      const result = await getStudentCardDrawDataCallable({});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    studentDrawCard: async ({drawOptionId}) => {
+      const result = await studentDrawCardCallable({drawOptionId: String(drawOptionId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getStudentCardCollection: async () => {
+      const result = await getStudentCardCollectionCallable({});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    setStudentRepresentativeCard: async ({cardId, rarity, abilityId}) => {
+      const result = await setStudentRepresentativeCardCallable({cardId: String(cardId || ""), rarity: String(rarity || ""), abilityId: String(abilityId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    saveCardPortrait: async ({classId, cardId, action = "save", imageData = ""} = {}) => {
+      const result = await saveCardPortraitCallable({classId: String(classId || activeClassId || ""), cardId: String(cardId || ""), action, imageData});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
     resolveStudentLogin: async ({classId, loginId}) => {
       const result = await resolveStudentLoginCallable({classId: String(classId || ""), loginId: String(loginId || "")});
       const value = result?.data && typeof result.data === "object" ? result.data : {};
@@ -722,7 +806,17 @@ try {
     loadPoints: async () => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
       const [statesSnapshot, historySnapshot] = await Promise.all([getDocs(collection(db, "classes", activeClassId, "studentPointStates")), getDocs(collection(db, "classes", activeClassId, "pointHistory"))]);
-      return { states: statesSnapshot.docs.map((stateDoc) => ({ id: stateDoc.id, points: Number(stateDoc.data()?.points) || 0 })), history: historySnapshot.docs.map((historyDoc) => ({ studentId: String(historyDoc.data()?.studentId || ""), entry: jsonSafeMap(historyDoc.data()?.entry), cloudCreatedAt: timestampIso(historyDoc.data()?.createdAt) })) };
+      return { states: statesSnapshot.docs.map((stateDoc) => ({ id: stateDoc.id, points: Number(stateDoc.data()?.points) || 0 })), history: historySnapshot.docs.map((historyDoc) => { const value = historyDoc.data() || {}; const entry = jsonSafeMap(value.entry); const entryCreatedAt = timestampIso(value.entry?.createdAt); return { studentId: String(value.studentId || ""), entry: {...entry, createdAt: entryCreatedAt || String(entry.createdAt || "")}, cloudCreatedAt: timestampIso(value.createdAt) }; }) };
+    },
+    loadStudentPoints: async (studentId) => {
+      if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
+      const id = String(studentId || ""); if (!id) throw new Error("Student id is required.");
+      const [stateSnapshot, historySnapshot] = await Promise.all([
+        getDoc(doc(db, "classes", activeClassId, "studentPointStates", id)),
+        getDocs(query(collection(db, "classes", activeClassId, "pointHistory"), where("studentId", "==", id))),
+      ]);
+      if (!stateSnapshot.exists()) throw new Error("Student point state was not found.");
+      return {id, points: Number(stateSnapshot.data()?.points) || 0, history: historySnapshot.docs.map((historyDoc) => { const value = historyDoc.data() || {}; const entry = jsonSafeMap(value.entry); const entryCreatedAt = timestampIso(value.entry?.createdAt); return {...entry, createdAt: entryCreatedAt || String(entry.createdAt || timestampIso(value.createdAt) || "")}; })};
     },
     createPointStates: async (students) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
