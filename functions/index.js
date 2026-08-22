@@ -513,6 +513,130 @@ exports.updateStudentLoginId = onCall(
     },
 );
 
+exports.resetStudentActivityData = onCall(
+    {region: "asia-northeast3", timeoutSeconds: 540, memory: "512MiB"},
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Teacher authentication is required.",
+        );
+      }
+      const classId = requiredInputString(request.data?.classId, "classId");
+      const includeObservations = request.data?.includeObservations === true;
+      const db = getFirestore();
+      const classRef = db.doc(`classes/${classId}`);
+      const classSnapshot = await classRef.get();
+      if (!classSnapshot.exists ||
+          classSnapshot.data()?.ownerUid !== request.auth.uid) {
+        throw new HttpsError(
+            "permission-denied",
+            "Only the class owner can reset student activity data.",
+        );
+      }
+
+      const deletedCollections = [
+        "pointHistory",
+        "assignmentStudentStates",
+        "dailyRoleAssignments",
+        "roleDailyUsage",
+        "studentCardInventories",
+        "cardAcquisitionHistory",
+        "pointGiftHistory",
+        "pointGiftDailyUsage",
+        "pointUseRequests",
+        "groupScoreTransactions",
+      ];
+      if (includeObservations) deletedCollections.push("observations");
+      const [studentsSnapshot, pointStatesSnapshot, groupsSnapshot,
+        groupStatesSnapshot, missionsSnapshot, ...activitySnapshots] =
+        await Promise.all([
+          classRef.collection("students").get(),
+          classRef.collection("studentPointStates").get(),
+          classRef.collection("groups").get(),
+          classRef.collection("groupScoreStates").get(),
+          classRef.collection("classMissions").get(),
+          ...deletedCollections.map((name) => classRef.collection(name).get()),
+        ]);
+
+      const timestamp = FieldValue.serverTimestamp();
+      const studentIds = new Set(studentsSnapshot.docs.map((doc) => doc.id));
+      const groupIds = new Set(groupsSnapshot.docs.map((doc) => doc.id));
+      const existingPointStates = new Map(
+          pointStatesSnapshot.docs.map((doc) => [doc.id, doc]),
+      );
+      const existingGroupStates = new Map(
+          groupStatesSnapshot.docs.map((doc) => [doc.id, doc]),
+      );
+      const resetCounts = Object.fromEntries(deletedCollections.map(
+          (name, index) => [name, activitySnapshots[index].size],
+      ));
+      resetCounts.studentPointStates = studentIds.size;
+      resetCounts.groupScoreStates = groupIds.size;
+      resetCounts.classMissions = missionsSnapshot.size;
+
+      const writer = db.bulkWriter();
+      const writes = [];
+      activitySnapshots.forEach((snapshot) => snapshot.docs.forEach((doc) => {
+        writes.push(writer.delete(doc.ref));
+      }));
+      existingPointStates.forEach((doc, id) => {
+        if (!studentIds.has(id)) writes.push(writer.delete(doc.ref));
+      });
+      studentIds.forEach((studentId) => {
+        const existing = existingPointStates.get(studentId);
+        writes.push(writer.set(
+            classRef.collection("studentPointStates").doc(studentId),
+            {
+              id: studentId,
+              points: 0,
+              createdAt: existing?.data()?.createdAt || timestamp,
+              updatedAt: timestamp,
+            },
+            {merge: true},
+        ));
+      });
+      existingGroupStates.forEach((doc, id) => {
+        if (!groupIds.has(id)) writes.push(writer.delete(doc.ref));
+      });
+      groupIds.forEach((groupId) => {
+        const existing = existingGroupStates.get(groupId);
+        writes.push(writer.set(
+            classRef.collection("groupScoreStates").doc(groupId),
+            {
+              groupId,
+              score: 0,
+              createdAt: existing?.data()?.createdAt || timestamp,
+              updatedAt: timestamp,
+            },
+            {merge: true},
+        ));
+      });
+      missionsSnapshot.docs.forEach((doc) => {
+        writes.push(writer.set(doc.ref, {
+          confirmed: false,
+          confirmedAt: null,
+          updatedAt: timestamp,
+        }, {merge: true}));
+      });
+
+      const completion = Promise.allSettled(writes);
+      await writer.close();
+      const results = await completion;
+      const failedWrites = results.filter((result) =>
+        result.status === "rejected");
+      if (failedWrites.length) {
+        console.error("Student activity reset write failures", failedWrites);
+        throw new HttpsError(
+            "internal",
+            "Student activity data could not be completely reset.",
+        );
+      }
+
+      return {ok: true, classId, includeObservations, resetCounts};
+    },
+);
+
 function studentLoginFailed() {
   return new HttpsError(
       "invalid-argument",

@@ -417,6 +417,7 @@ let firebaseStudentAccountStatusesLoading = false;
 let firebaseStudentAccountStatusesLoadFailed = false;
 let firebaseStudentPasswordResetting = false;
 let firebaseBulkStudentAccountsCreating = false;
+let firebaseStudentActivityResetting = false;
 let pendingStudentExcelRows = [];
 let pendingStudentExcelFileName = "";
 let firebaseLoadedCloudStudents = [];
@@ -1806,10 +1807,37 @@ function cloudRoleSettings() { if (!firebaseActiveClassId) return ""; if (fireba
 function cloudObservationSettings() { if (!firebaseActiveClassId) return ""; if (firebaseObservationsConnected) return `<div><button class="button secondary" disabled>관찰기록 연결됨</button><p class="muted">관찰기록과 빠른 선택 항목이 클라우드 학급과 연결되어 있습니다.</p></div>`; if (firebaseObservationsConnecting) return `<div><button class="button secondary" disabled>관찰기록 연결 중</button><p class="muted">현재 관찰기록 데이터를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-observations" ${ready ? "" : "disabled"}>관찰기록을 클라우드에 연결</button><p class="muted">관찰기록 클라우드 미연결 · ${ready ? "현재 관찰기록과 빠른 선택 항목을 저장합니다." : "학생 명단을 먼저 연결해 주세요."}</p></div>`; }
 function cloudGroupSettings() { if (!firebaseActiveClassId) return ""; if (firebaseGroupsConnected) return `<div><button class="button secondary" disabled>모둠활동 연결됨</button><p class="muted">모둠 구성, 점수, 배정, 기록과 공동 미션이 클라우드 학급과 연결되어 있습니다.</p></div>`; if (firebaseGroupsConnecting) return `<div><button class="button secondary" disabled>모둠활동 연결 중</button><p class="muted">현재 모둠활동 데이터를 클라우드에 저장하고 있습니다.</p></div>`; const ready = firebaseStudentsConnected; return `<div><button class="button ${ready ? "success" : "secondary"}" data-action="connect-cloud-groups" ${ready ? "" : "disabled"}>모둠활동을 클라우드에 연결</button><p class="muted">모둠활동 클라우드 미연결 · ${ready ? "현재 모둠 구성과 점수, 배정, 기록, 공동 미션을 저장합니다." : "학생 명단을 먼저 연결해 주세요."}</p></div>`; }
 function cloudClassSettings() { if (!firebaseTeacherSession) return ""; if (!firebaseClassChecked) return `<div><button class="button secondary" disabled>클라우드 학급 확인 중</button><p class="muted">Google 계정에 연결된 학급을 확인하고 있습니다.</p></div>`; if (firebaseClassLoadFailed) return `<div><button class="button secondary" disabled>클라우드 연결 확인 실패</button><p class="muted">로컬 데이터는 그대로 유지됩니다. 네트워크를 확인한 뒤 새로고침해 주세요.</p></div>`; if (firebaseActiveClassId) return `<div><button class="button secondary" disabled>클라우드 학급 연결됨</button><p class="muted">학급 기본정보가 이 Google 계정과 연결되어 있습니다.</p></div>${cloudStudentSettings()}${cloudAssignmentSettings()}${cloudPointSettings()}${cloudAssignmentStudentStateSettings()}${cloudRoleSettings()}${cloudObservationSettings()}${cloudGroupSettings()}`; return `<div><button class="button success" data-action="connect-cloud-class">현재 학급을 클라우드에 연결</button><p class="muted">반 이름, 선생님 이름, 프로그램 이름만 클라우드에 저장합니다.</p></div>`; }
-function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions">${cloudClassSettings()}<div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
+function dataManagementSettings() { return `<section class="card data-management-card"><h2>데이터 관리</h2><div class="data-management-actions">${cloudClassSettings()}<div><button class="button secondary" data-action="download-backup">백업 파일 다운로드</button><p class="muted">우리 반의 학생, 과제, 포인트, 카드 등 현재 데이터를 JSON 파일로 저장합니다.</p></div><div><button class="button secondary" data-action="choose-backup-file">백업 파일 복원</button><input id="backup-file-input" type="file" accept="application/json,.json" hidden><p class="muted">우리반 퀘스트 백업 JSON을 확인한 뒤 현재 데이터로 복원합니다.</p></div></div><div class="student-activity-reset"><h3>학생 활동 데이터 초기화</h3><p>학생 계정과 학급 설정은 유지하고 테스트 과정에서 생긴 학생 활동 기록만 초기화합니다.</p><button class="button danger" data-action="open-student-activity-reset" ${firebaseActiveClassId && !firebaseStudentActivityResetting ? "" : "disabled"}>학생 활동 데이터 초기화</button></div><div class="data-reset-danger"><h3>⚠ 데이터 초기화</h3><p>학생, 과제, 포인트, 관찰 기록, 카드 등 모든 데이터를 초기 상태로 되돌립니다.</p><button class="button danger" data-action="open-reset-data">모든 데이터 초기화</button></div></section>`; }
 function teacherClassSettings() { return `${teacherClassSettingsBase()}${classFeatureSettings()}${dataManagementSettings()}`; }
 function openRestoreBackupModal(payload) { const className = payload.data.classSettings?.className || payload.className || "이름 없음"; const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "날짜 정보 없음"; app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>백업 파일 복원</h2><p>현재 학급 데이터를 백업 파일의 내용으로 교체합니다.</p><dl class="backup-summary"><div><dt>학급 이름</dt><dd>${escapeHtml(className)}</dd></div><div><dt>학생 수</dt><dd>${payload.data.students.length}명</dd></div><div><dt>백업 날짜</dt><dd>${escapeHtml(exportedAt)}</dd></div></dl><div class="button-row"><button class="button danger" data-action="confirm-restore-backup">복원하기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
 function openResetDataModal() { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card reset-data-modal"><h2>모든 데이터 초기화</h2><p>학생, 과제, 포인트, 관찰 기록, 카드 등 현재 학급의 모든 데이터가 초기 상태로 돌아갑니다.</p><p class="muted">초기화 전에 백업 파일을 다운로드하는 것을 권장합니다.</p><button class="button secondary" data-action="download-backup">먼저 백업 다운로드</button><label>확인을 위해 <strong>초기화</strong>를 입력하세요.<input id="reset-data-confirmation" autocomplete="off"></label><div class="button-row"><button id="confirm-reset-data" class="button danger" data-action="confirm-reset-data" disabled>정말 초기화</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); }
+function openStudentActivityResetModal() {
+  if (!firebaseActiveClassId || firebaseStudentActivityResetting) return;
+  app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card student-activity-reset-modal"><h2>학생 활동 데이터 초기화</h2><p>학생 계정과 학급 설정은 유지됩니다.<br>포인트, 과제 활동, 1인1역 활동, 카드 보유, 친구 선물, 상품 사용, 모둠 점수 등 학생 활동 기록만 초기화합니다.</p><p class="student-activity-reset-kept">학생 이름 · 로그인 계정 · 비밀번호 · 캐릭터 · 카드/역할 설정은 유지</p><label class="check-label"><input id="student-activity-reset-observations" type="checkbox"><span>관찰기록도 함께 삭제</span></label><label>계속하려면 아래에 <strong>초기화</strong>를 입력하세요.<input id="student-activity-reset-confirmation" autocomplete="off"></label><p class="student-activity-reset-progress" hidden>학생 활동 데이터를 초기화하는 중입니다...</p><div class="button-row"><button id="confirm-student-activity-reset" class="button danger" data-action="confirm-student-activity-reset" disabled>학생 활동 초기화</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`);
+}
+
+async function resetStudentActivityData(includeObservations) {
+  const userUid = firebaseTeacherUser?.uid; const classId = firebaseActiveClassId;
+  if (!userUid || !classId || !window.ourClassFirebase?.resetStudentActivityData) throw new Error("Firebase class is not ready.");
+  const result = await window.ourClassFirebase.resetStudentActivityData({classId, includeObservations});
+  if (!result.ok || result.classId !== classId || firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId) throw new Error("Student activity reset response was invalid.");
+  data.students.forEach((student) => { student.points = 0; student.pointHistory = []; student.cards = {}; student.representativeCard = null; student.cardUpgradeHistory = []; student.cardAcquisitionHistory = []; });
+  data.assignments.forEach((assignment) => { assignment.studentStatuses = Object.fromEntries(data.students.map((student) => [student.id, "missing"])); assignment.pointAwards = {}; refreshAssignmentCompletion(assignment); });
+  data.roleApplications = []; data.pointUseRequests = []; data.pointTransfers = []; data.groupScoreTransactions = [];
+  data.groups.forEach((group) => { group.score = 0; }); data.classMissions.forEach((mission) => { mission.confirmed = false; mission.confirmedAt = null; });
+  if (includeObservations) data.observations = [];
+  teacherStudentCardData.clear(); resetFirebaseStudentHomeState(); saveData();
+  const loads = [];
+  if (firebasePointsConnected) loads.push(loadFirebasePoints(userUid, false));
+  if (firebaseAssignmentStudentStatesConnected) loads.push(loadFirebaseAssignmentStudentStates(userUid, false));
+  if (firebaseRolesConnected) loads.push(loadFirebaseRoles(userUid, false));
+  if (firebaseGroupsConnected) loads.push(loadFirebaseGroups(userUid, false));
+  if (includeObservations && firebaseObservationsConnected) loads.push(loadFirebaseObservations(userUid, false));
+  const loaded = await Promise.all(loads); if (loaded.some((value) => value !== true)) throw new Error("Reset Firebase activity data could not be reloaded.");
+  if (window.ourClassFirebase?.getPointShopData) { const shop = await window.ourClassFirebase.getPointShopData({classId, mode: "teacher"}); if (Array.isArray(shop?.items)) data.pointShopItems = shop.items; data.pointUseRequests = Array.isArray(shop?.requests) ? shop.requests : []; }
+  if (window.ourClassFirebase?.getPointGiftData) { const gift = await window.ourClassFirebase.getPointGiftData({classId, mode: "teacher"}); if (gift?.settings) data.pointTransferSettings = {enabled: gift.settings.enabled === true, maxPerTransfer: Number(gift.settings.maxPointsPerTransfer) || 10, dailyMaxAmount: Number(gift.settings.maxPointsPerDay) || 20, dailyMaxCount: Number(gift.settings.maxTransfersPerDay) || 3}; data.pointTransfers = Array.isArray(gift?.history) ? gift.history : []; }
+  saveData(); render(); return result;
+}
 
 function teacherRoleList(items = todayRoleApplications()) {
   if (!items.length) return `<div class="empty">역할 신청이 아직 없습니다.</div>`;
@@ -2964,12 +2992,22 @@ app.addEventListener("click", async (event) => {
   if (action === "choose-backup-file") { document.querySelector("#backup-file-input")?.click(); return; }
   if (action === "confirm-restore-backup") { if (!pendingBackupPayload) return; target.closest(".modal")?.remove(); restoreBackup(pendingBackupPayload); return; }
   if (action === "open-reset-data") { openResetDataModal(); return; }
+  if (action === "open-student-activity-reset") { openStudentActivityResetModal(); return; }
+  if (action === "confirm-student-activity-reset") {
+    const modal = target.closest(".student-activity-reset-modal"); if (!modal || modal.querySelector("#student-activity-reset-confirmation")?.value !== "초기화" || firebaseStudentActivityResetting) return;
+    const includeObservations = modal.querySelector("#student-activity-reset-observations")?.checked === true;
+    firebaseStudentActivityResetting = true; modal.querySelectorAll("button, input").forEach((element) => { element.disabled = true; }); const progress = modal.querySelector(".student-activity-reset-progress"); if (progress) progress.hidden = false;
+    try { await resetStudentActivityData(includeObservations); modal.closest(".modal")?.remove(); toast("학생 활동 데이터를 초기화했습니다."); }
+    catch (error) { console.error("Student activity data reset failed", error); toast("학생 활동 데이터를 초기화하지 못했습니다. 데이터 상태를 다시 확인해 주세요."); }
+    finally { firebaseStudentActivityResetting = false; if (modal.isConnected) { modal.querySelectorAll("input").forEach((element) => { element.disabled = false; }); const closeButton = modal.querySelector('[data-action="close-modal"]'); if (closeButton) closeButton.disabled = false; const confirmButton = modal.querySelector("#confirm-student-activity-reset"); if (confirmButton) confirmButton.disabled = modal.querySelector("#student-activity-reset-confirmation")?.value !== "초기화"; if (progress) progress.hidden = true; } render(); }
+    return;
+  }
   if (action === "confirm-reset-data") {
     const modal = target.closest(".reset-data-modal"); if (modal?.querySelector("#reset-data-confirmation")?.value !== "초기화") return;
     if (!confirm("현재 학급의 모든 데이터를 정말 초기화하시겠습니까?")) return;
     data = createDemoData(); teacherCardSetId = data.activeCardSetIds[0]; collectionCardSetFilter = "all"; selectedPointStudentIds.clear(); session = { mode: "teacher", studentId: null, view: "class-settings" }; saveData(); render(); toast("모든 데이터를 초기 상태로 되돌렸습니다."); return;
   }
-  if (action === "close-modal") { if (target.closest("[data-student-excel-modal]")) clearPendingStudentExcelRows(); target.closest(".modal")?.remove(); return; }
+  if (action === "close-modal") { if (firebaseStudentActivityResetting && target.closest(".student-activity-reset-modal")) return; if (target.closest("[data-student-excel-modal]")) clearPendingStudentExcelRows(); target.closest(".modal")?.remove(); return; }
 });
 
 window.addEventListener("our-class-firebase-auth", (event) => {
@@ -3039,6 +3077,7 @@ app.addEventListener("change", async (event) => {
 
 app.addEventListener("input", (event) => {
   if (event.target.id === "reset-data-confirmation") { const button = event.target.closest(".reset-data-modal")?.querySelector("#confirm-reset-data"); if (button) button.disabled = event.target.value !== "초기화"; return; }
+  if (event.target.id === "student-activity-reset-confirmation") { const button = event.target.closest(".student-activity-reset-modal")?.querySelector("#confirm-student-activity-reset"); if (button) button.disabled = event.target.value !== "초기화"; return; }
   if (event.target.id === "class-student-search") { classStudentSearch = event.target.value; const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR"); let shown = 0; document.querySelectorAll("[data-class-student-id]").forEach((row) => { const student = studentById(row.dataset.classStudentId); row.hidden = !student || Boolean(keyword && !String(studentNumber(student)).includes(keyword) && !student.name.toLocaleLowerCase("ko-KR").includes(keyword) && !student.loginId.toLocaleLowerCase("en-US").includes(keyword)); if (!row.hidden) shown += 1; }); const count = document.querySelector(".class-student-search span"); if (count) count.textContent = `${shown}명 표시`; return; }
   if (event.target.id === "group-settings-count") { document.querySelectorAll("[data-group-name-index]").forEach((input) => { pendingGroupNames[input.dataset.groupNameIndex] = input.value; }); const count = Math.min(8, Math.max(2, Number(event.target.value) || 2)); const container = document.querySelector("#group-name-settings"); if (container) container.innerHTML = groupSettingNameFields(count); return; }
   if (event.target.id === "assignment-search") { assignmentSearch = event.target.value; return; }
@@ -3063,7 +3102,7 @@ document.addEventListener("keydown", (event) => {
     const nextInput = timetableInput.form?.elements[`${dayKey}-${nextIndex}`]; if (nextInput instanceof HTMLElement) nextInput.focus();
     return;
   }
-  if (event.key === "Escape") { const modal = [...document.querySelectorAll(".modal")].at(-1); if (modal?.matches("[data-student-excel-modal]")) clearPendingStudentExcelRows(); modal?.remove(); }
+  if (event.key === "Escape") { const modal = [...document.querySelectorAll(".modal")].at(-1); if (firebaseStudentActivityResetting && modal?.querySelector(".student-activity-reset-modal")) return; if (modal?.matches("[data-student-excel-modal]")) clearPendingStudentExcelRows(); modal?.remove(); }
 });
 
 app.addEventListener("submit", async (event) => {

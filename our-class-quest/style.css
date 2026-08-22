@@ -416,6 +416,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .data-management-actions > div { padding: 15px; border: 1px solid #dfe2ed; border-radius: 13px; background: #f8f9fc; }
 .data-management-actions p { margin: 9px 0 0; }
 .data-reset-danger { margin-top: 20px; padding: 16px; border: 2px solid #e9a4a4; border-radius: 14px; background: #fff3f3; }
+.student-activity-reset { margin-top: 20px; padding: 16px; border: 1px solid #e5c98e; border-radius: 14px; background: #fffaf0; }
+.student-activity-reset h3 { margin-top: 0; color: #815d1f; }
+.student-activity-reset-modal > label { display: grid; gap: 7px; margin-top: 16px; }
+.student-activity-reset-modal .check-label { display: flex; }
+.student-activity-reset-kept { padding: 11px 13px; border-radius: 10px; color: #536078; background: #f1f3f8; font-size: .88rem; font-weight: 800; }
+.student-activity-reset-progress { color: #815d1f; font-weight: 900; }
 .data-reset-danger h3 { margin-top: 0; color: #a33434; }
 .backup-summary { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: #f4f6fa; }
 .backup-summary > div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; }
