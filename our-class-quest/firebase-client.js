@@ -773,9 +773,10 @@ try {
     },
     saveStudent: async (student, orderIndex, isNew = false) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
-      const timestamp = serverTimestamp();
-      const fields = isNew ? { ...studentFields(student, orderIndex), createdAt: timestamp } : { number: Number(student.number), name: String(student.name || ""), loginId: String(student.loginId || ""), active: student.active !== false };
-      await setDoc(doc(db, "classes", activeClassId, "students", student.id), { ...fields, updatedAt: timestamp }, { merge: true });
+      const studentRef = doc(db, "classes", activeClassId, "students", student.id); const timestamp = serverTimestamp();
+      if (isNew) { await setDoc(studentRef, { ...studentFields(student, orderIndex), createdAt: timestamp, updatedAt: timestamp }, { merge: true }); return; }
+      const snapshot = await getDoc(studentRef); const existing = snapshot.data() || {};
+      await setDoc(studentRef, { ...studentFields(student, Number.isInteger(existing.orderIndex) ? existing.orderIndex : orderIndex), createdAt: existing.createdAt || timestamp, updatedAt: timestamp });
     },
     saveStudentsBatch: async (students) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
