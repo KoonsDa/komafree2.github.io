@@ -170,6 +170,7 @@ try {
   const studentGiftPointsCallable = httpsCallable(studentFunctions, "studentGiftPoints");
   const getCardConfigCallable = httpsCallable(functions, "getCardConfig");
   const getTeacherStudentCardDataCallable = httpsCallable(functions, "getTeacherStudentCardData");
+  const getTeacherStudentRepresentativeCardsCallable = httpsCallable(functions, "getTeacherStudentRepresentativeCards");
   const saveCardConfigCallable = httpsCallable(functions, "saveCardConfig");
   const getStudentCardDrawDataCallable = httpsCallable(studentFunctions, "getStudentCardDrawData");
   const studentDrawCardCallable = httpsCallable(studentFunctions, "studentDrawCard");
@@ -225,6 +226,10 @@ try {
     },
     getTeacherStudentCardData: async ({classId, studentId} = {}) => {
       const result = await getTeacherStudentCardDataCallable({classId: String(classId || activeClassId || ""), studentId: String(studentId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    getTeacherStudentRepresentativeCards: async ({classId} = {}) => {
+      const result = await getTeacherStudentRepresentativeCardsCallable({classId: String(classId || activeClassId || "")});
       return result?.data && typeof result.data === "object" ? result.data : {};
     },
     saveCardConfig: async ({classId, action = "save", config} = {}) => {

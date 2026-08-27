@@ -378,7 +378,14 @@ let teacherStudentPointPollTimer = null;
 let teacherStudentPointPollStudentId = "";
 const teacherStudentPointRefreshes = new Map();
 const teacherStudentCardData = new Map();
+let teacherStudentRepresentativeCards = new Map();
+let teacherStudentRepresentativeCardsClassKey = "";
+let teacherStudentRepresentativeCardsLoaded = false;
+let teacherStudentRepresentativeCardsLoading = null;
+let teacherStudentRepresentativeCardsListActive = false;
+let teacherStudentRepresentativeCardsPollTimer = null;
 const TEACHER_STUDENT_POINT_POLL_INTERVAL = 5000;
+const TEACHER_STUDENT_REPRESENTATIVE_CARDS_POLL_INTERVAL = 5000;
 const studentDetailAssignmentFilters = {};
 let showAllGroupTransactions = false;
 let selectedGroupId = "";
@@ -601,7 +608,7 @@ function toast(message) { const element = document.querySelector("#toast"); elem
 function firebaseAuthMessage(error) { const code = error?.code || ""; if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return "Google 로그인 창이 닫혔습니다."; if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요."; if (code === "auth/unauthorized-domain") return "현재 도메인은 Google 로그인 허용 목록에 없습니다."; if (code === "auth/network-request-failed") return "네트워크 연결을 확인한 뒤 다시 시도해 주세요."; return "Google 로그인 중 오류가 발생했습니다."; }
 function logFirebaseAuthError(error) { console.error("Firebase Google sign-in error details", { code: error?.code, message: error?.message, name: error?.name, customData: error?.customData }); console.error("Firebase Google sign-in error object", error); }
 async function enterFirebaseTeacher() { const client = window.ourClassFirebase; if (!client?.ready) { toast(client?.error ? "Firebase 초기화에 실패했습니다." : "Google 로그인을 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; } try { const user = await client.signInTeacher(); if (!user) return; firebaseTeacherUser = user; firebaseTeacherSession = true; session = { mode: "teacher", studentId: null, view: "dashboard" }; render(); toast(`${user.displayName || user.email || "선생님"} 선생님, 로그인했습니다.`); } catch (error) { logFirebaseAuthError(error); const isLocalDevelopment = location.hostname === "localhost" || location.hostname === "127.0.0.1"; toast(isLocalDevelopment ? `Google 로그인 오류: ${error?.code || "unknown"}` : firebaseAuthMessage(error)); } }
-function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseStudentAccountCreating = false; firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoading = false; firebaseStudentAccountStatusesLoadFailed = false; firebaseStudentPasswordResetting = false; firebaseBulkStudentAccountsCreating = false; clearPendingStudentExcelRows(); firebaseLoadedCloudStudents = []; }
+function resetFirebaseStudentState() { firebaseStudentsChecked = false; firebaseStudentsConnected = false; firebaseStudentsLoadFailed = false; firebaseStudentAccountCreating = false; firebaseStudentAccountStatuses = {}; firebaseStudentAccountStatusesLoaded = false; firebaseStudentAccountStatusesLoading = false; firebaseStudentAccountStatusesLoadFailed = false; firebaseStudentPasswordResetting = false; firebaseBulkStudentAccountsCreating = false; clearPendingStudentExcelRows(); firebaseLoadedCloudStudents = []; resetTeacherStudentRepresentativeCards(); }
 function resetFirebaseAssignmentState() { firebaseAssignmentsChecked = false; firebaseAssignmentsConnected = false; firebaseAssignmentsLoadFailed = false; firebaseAssignmentStudentStatesConnected = false; firebaseAssignmentStudentStatesConnecting = false; }
 function resetFirebasePointState() { firebasePointsChecked = false; firebasePointsConnected = false; firebasePointsLoadFailed = false; pointMutationQueue = Promise.resolve(); }
 function resetFirebaseRoleState() { firebaseRolesConnected = false; firebaseRolesConnecting = false; firebaseRoleConfigurationSaving = false; firebaseRoleDailyUsageReady = false; firebaseRoleDailyUsageInitializing = false; firebaseRoleDailyUsageDate = ""; firebaseRoleApplicationMutating = false; }
@@ -1571,8 +1578,73 @@ function activeAssignmentSummary(student) { const active = data.assignments.filt
 function todayRoleSummary(student) { const items = data.roleApplications.filter((application) => application.studentId === student.id && application.status !== "cancelled" && [roleApplicationDate(application), localDateKey(application.completedAt)].includes(todayString())); return { items, completed: items.filter((item) => item.status === "completed").length, waiting: items.filter((item) => item.status === "waiting").length }; }
 function studentObservations(student) { return data.observations.filter((observation) => observation.studentId === student.id).sort((first, second) => String(second.date).localeCompare(String(first.date)) || new Date(second.createdAt) - new Date(first.createdAt)); }
 function compactDate(value) { const key = localDateKey(value); if (!key) return "날짜 없음"; const [, month, day] = key.split("-"); return `${Number(month)}/${Number(day)}`; }
-function studentRepresentativeLabel(student) { const representative = representativeCardInfo(student); return representative ? `${escapeHtml(representative.card.name)} · ${representative.rarity}<br><small>${representative.ability?.name || "특수능력 없음"}</small>` : "대표 카드 없음"; }
-function studentManagementCard(student) { const number = studentNumber(student); const assignments = activeAssignmentSummary(student); const roles = todayRoleSummary(student); const observations = studentObservations(student); const assignmentLabel = assignments.missing || assignments.review ? `미제출 ${assignments.missing} · 확인 대기 ${assignments.review}` : "모두 완료"; const roleLabel = roles.completed || roles.waiting ? `완료 ${roles.completed} · 대기 ${roles.waiting}` : "신청 없음"; return `<button class="student-overview-card" data-action="open-student-detail" data-id="${student.id}"><div class="student-overview-heading"><strong>${number}번 ${escapeHtml(student.name)}</strong><span>${student.points}P</span></div><dl><div><dt>과제</dt><dd>${assignmentLabel}</dd></div><div><dt>오늘 1인1역</dt><dd>${roleLabel}</dd></div><div><dt>학생 관찰 기록</dt><dd>${observations.length ? `${observations.length}건 · 최근 ${compactDate(observations[0].date)}` : "기록 없음"}</dd></div><div><dt>대표 카드</dt><dd>${studentRepresentativeLabel(student)}</dd></div></dl></button>`; }
+function resetTeacherStudentRepresentativeCards() {
+  stopTeacherStudentRepresentativeCardsPolling(); teacherStudentRepresentativeCards = new Map(); teacherStudentRepresentativeCardsClassKey = ""; teacherStudentRepresentativeCardsLoaded = false; teacherStudentRepresentativeCardsLoading = null; teacherStudentRepresentativeCardsListActive = false;
+}
+function teacherStudentRepresentativeCardsKey() { return firebaseTeacherUser?.uid && firebaseActiveClassId ? `${firebaseTeacherUser.uid}:${firebaseActiveClassId}` : ""; }
+function studentRepresentativeLabel(student) {
+  if (!teacherStudentRepresentativeCardsLoaded || teacherStudentRepresentativeCardsClassKey !== teacherStudentRepresentativeCardsKey()) return "확인 중...";
+  const representative = teacherStudentRepresentativeCards.get(student.id);
+  return representative ? `${escapeHtml(representative.cardName)} · ${escapeHtml(representative.representativeCard?.rarity || "")}<br><small>${escapeHtml(representative.abilityIcon || "✨")} ${escapeHtml(representative.abilityName || "삭제된 능력")}</small>` : "대표 카드 없음";
+}
+function teacherStudentRepresentativeCardsSnapshot(cards) { return JSON.stringify([...cards.entries()].sort(([firstId], [secondId]) => firstId.localeCompare(secondId))); }
+function updateTeacherStudentRepresentativeCardsDom() {
+  document.querySelectorAll("[data-student-representative-card]").forEach((element) => {
+    const student = studentById(element.dataset.studentRepresentativeCard);
+    if (student) element.innerHTML = studentRepresentativeLabel(student);
+  });
+}
+async function loadTeacherStudentRepresentativeCards(force = false) {
+  const classKey = teacherStudentRepresentativeCardsKey();
+  if (!classKey || !window.ourClassFirebase?.getTeacherStudentRepresentativeCards) return false;
+  if (teacherStudentRepresentativeCardsClassKey !== classKey) {
+    teacherStudentRepresentativeCards = new Map(); teacherStudentRepresentativeCardsClassKey = classKey; teacherStudentRepresentativeCardsLoaded = false; teacherStudentRepresentativeCardsLoading = null;
+  }
+  if (teacherStudentRepresentativeCardsLoading) return teacherStudentRepresentativeCardsLoading;
+  if (teacherStudentRepresentativeCardsLoaded && !force) return true;
+  const userUid = firebaseTeacherUser.uid; const classId = firebaseActiveClassId;
+  const promise = (async () => {
+    try {
+      const result = await window.ourClassFirebase.getTeacherStudentRepresentativeCards({classId});
+      if (firebaseTeacherUser?.uid !== userUid || firebaseActiveClassId !== classId || teacherStudentRepresentativeCardsClassKey !== classKey) return false;
+      const representatives = result?.representatives && typeof result.representatives === "object" ? result.representatives : {};
+      const nextCards = new Map(Object.entries(representatives)); const changed = !teacherStudentRepresentativeCardsLoaded || teacherStudentRepresentativeCardsSnapshot(teacherStudentRepresentativeCards) !== teacherStudentRepresentativeCardsSnapshot(nextCards);
+      teacherStudentRepresentativeCards = nextCards; teacherStudentRepresentativeCardsLoaded = true;
+      if (changed && session.mode === "teacher" && session.view === "students" && !studentDetailId) updateTeacherStudentRepresentativeCardsDom();
+      return true;
+    } catch (error) {
+      console.error("Teacher student representative cards load failed", {code: error?.code, message: error?.message});
+      return false;
+    } finally { if (teacherStudentRepresentativeCardsLoading === promise) teacherStudentRepresentativeCardsLoading = null; }
+  })();
+  teacherStudentRepresentativeCardsLoading = promise;
+  return promise;
+}
+function teacherStudentRepresentativeCardsPollingActive() { return document.visibilityState !== "hidden" && session.mode === "teacher" && session.view === "students" && !studentDetailId && Boolean(teacherStudentRepresentativeCardsKey()); }
+function stopTeacherStudentRepresentativeCardsPolling() {
+  if (teacherStudentRepresentativeCardsPollTimer !== null) clearTimeout(teacherStudentRepresentativeCardsPollTimer);
+  teacherStudentRepresentativeCardsPollTimer = null;
+}
+function scheduleTeacherStudentRepresentativeCardsPolling() {
+  stopTeacherStudentRepresentativeCardsPolling();
+  if (!teacherStudentRepresentativeCardsPollingActive()) return;
+  teacherStudentRepresentativeCardsPollTimer = setTimeout(async () => {
+    teacherStudentRepresentativeCardsPollTimer = null;
+    if (!teacherStudentRepresentativeCardsPollingActive()) return syncTeacherStudentRepresentativeCards();
+    await loadTeacherStudentRepresentativeCards(true);
+    scheduleTeacherStudentRepresentativeCardsPolling();
+  }, TEACHER_STUDENT_REPRESENTATIVE_CARDS_POLL_INTERVAL);
+}
+function syncTeacherStudentRepresentativeCards() {
+  const active = teacherStudentRepresentativeCardsPollingActive();
+  if (!active) { stopTeacherStudentRepresentativeCardsPolling(); teacherStudentRepresentativeCardsListActive = false; return; }
+  const entered = !teacherStudentRepresentativeCardsListActive; teacherStudentRepresentativeCardsListActive = true;
+  const classKey = teacherStudentRepresentativeCardsKey();
+  if (teacherStudentRepresentativeCardsClassKey !== classKey || entered || (!teacherStudentRepresentativeCardsLoaded && !teacherStudentRepresentativeCardsLoading)) {
+    stopTeacherStudentRepresentativeCardsPolling(); loadTeacherStudentRepresentativeCards(entered).finally(scheduleTeacherStudentRepresentativeCardsPolling);
+  } else if (teacherStudentRepresentativeCardsPollTimer === null && !teacherStudentRepresentativeCardsLoading) scheduleTeacherStudentRepresentativeCardsPolling();
+}
+function studentManagementCard(student) { const number = studentNumber(student); const assignments = activeAssignmentSummary(student); const roles = todayRoleSummary(student); const observations = studentObservations(student); const assignmentLabel = assignments.missing || assignments.review ? `미제출 ${assignments.missing} · 확인 대기 ${assignments.review}` : "모두 완료"; const roleLabel = roles.completed || roles.waiting ? `완료 ${roles.completed} · 대기 ${roles.waiting}` : "신청 없음"; return `<button class="student-overview-card" data-action="open-student-detail" data-id="${student.id}"><div class="student-overview-heading"><strong>${number}번 ${escapeHtml(student.name)}</strong><span>${student.points}P</span></div><dl><div><dt>과제</dt><dd>${assignmentLabel}</dd></div><div><dt>오늘 1인1역</dt><dd>${roleLabel}</dd></div><div><dt>학생 관찰 기록</dt><dd>${observations.length ? `${observations.length}건 · 최근 ${compactDate(observations[0].date)}` : "기록 없음"}</dd></div><div><dt>대표 카드</dt><dd data-student-representative-card="${escapeHtml(student.id)}">${studentRepresentativeLabel(student)}</dd></div></dl></button>`; }
 function isThisWeek(value) { if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = localDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= weekStart() && date <= new Date(); }
 function weeklyEarnedPoints(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (["1인1역", "과제"].includes(item.source) && isThisWeek(item.createdAt || item.date) ? Number(item.amount) || 0 : 0), 0); }
 function studentCollectedTypes(student) { const types = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) types.add(`${cardId}|${rarity}`); })); return types.size; }
@@ -2169,13 +2241,13 @@ function renderTeacher() {
   if (!teacherNavItems().some(([view]) => view === session.view)) session.view = "class-settings";
   app.innerHTML = shell((views[session.view] || teacherDashboard)(), true);
 }
-function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "firebase-student" ? renderFirebaseStudentLanding() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); setTimeout(() => { syncTeacherStudentPointPolling(); window.ourClassWhiteboard?.sync(); }, 0); }
+function render() { if (session.mode === "welcome" && firebaseAuthPending) return renderAuthLoading(); session.mode === "student" ? renderStudent() : session.mode === "firebase-student" ? renderFirebaseStudentLanding() : session.mode === "teacher" ? renderTeacher() : renderWelcome(); setTimeout(() => { syncTeacherStudentPointPolling(); syncTeacherStudentRepresentativeCards(); window.ourClassWhiteboard?.sync(); }, 0); }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") stopTeacherStudentPointPolling();
-  else syncTeacherStudentPointPolling(true);
+  if (document.visibilityState === "hidden") { stopTeacherStudentPointPolling(); stopTeacherStudentRepresentativeCardsPolling(); teacherStudentRepresentativeCardsListActive = false; }
+  else { syncTeacherStudentPointPolling(true); syncTeacherStudentRepresentativeCards(); }
 });
-window.addEventListener("focus", () => syncTeacherStudentPointPolling(true));
+window.addEventListener("focus", () => { syncTeacherStudentPointPolling(true); syncTeacherStudentRepresentativeCards(); });
 
 function roleCloudConnectionLocked() { if (!firebaseRolesConnecting) return false; toast("1인1역 데이터를 클라우드에 연결 중입니다. 잠시 후 다시 시도해 주세요."); return true; }
 function groupCloudConnectionLocked() { if (!firebaseGroupsConnecting) return false; toast("모둠활동을 클라우드에 연결하는 중입니다."); return true; }

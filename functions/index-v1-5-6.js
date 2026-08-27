@@ -778,6 +778,45 @@ exports.getTeacherStudentCardData = onCall({region: "asia-northeast3"}, async (r
     cardSets: cardSetsSnapshot.docs.map((doc) => ({...normalizedCardSet(doc.data(), doc.id), createdAt: cardTimestamp(doc.data()?.createdAt)}))};
 });
 
+exports.getTeacherStudentRepresentativeCards = onCall({region: "asia-northeast3"}, async (request) => {
+  const context = await verifiedTeacherClass(request, request.data?.classId);
+  const [studentsSnapshot, inventoriesSnapshot, cardsSnapshot, configSnapshot] = await Promise.all([
+    context.classRef.collection("students").get(),
+    context.classRef.collection("studentCardInventories").get(),
+    context.classRef.collection("cards").get(),
+    context.classRef.collection("cardSettings").doc("config").get(),
+  ]);
+  const activeStudentIds = new Set(studentsSnapshot.docs
+      .filter((doc) => doc.data()?.active !== false)
+      .map((doc) => doc.id));
+  const cardsById = new Map(cardsSnapshot.docs.map((doc) => [doc.id, normalizedCard(doc.data(), doc.id)]));
+  const config = normalizedCardConfig(configSnapshot.data());
+  const representatives = Object.fromEntries([...activeStudentIds].map((studentId) => [studentId, null]));
+  inventoriesSnapshot.docs.forEach((snapshot) => {
+    const studentId = snapshot.id;
+    if (!activeStudentIds.has(studentId)) return;
+    const inventory = plainObject(snapshot.data());
+    const representativeCard = plainObject(inventory.representativeCard);
+    const cardId = stringValue(representativeCard.cardId).trim();
+    const rarity = stringValue(representativeCard.rarity).trim();
+    const abilityId = stringValue(representativeCard.abilityId).trim();
+    const count = Math.max(0, Math.trunc(numberValue(
+        plainObject(plainObject(plainObject(inventory.cards)[cardId])[rarity])[abilityId],
+    )));
+    const card = cardsById.get(cardId);
+    if (!cardId || !CARD_RARITIES.includes(rarity) || !abilityId || count < 1 || !card) return;
+    const ability = config.cardAbilities.find((item) => item.id === abilityId);
+    representatives[studentId] = {
+      studentId,
+      representativeCard: {cardId, rarity, abilityId},
+      cardName: card.name,
+      abilityName: ability?.name || "삭제된 능력",
+      abilityIcon: ability?.icon || "✨",
+    };
+  });
+  return {ok: true, representatives};
+});
+
 exports.setStudentRepresentativeCard = onCall({region: "asia-northeast3"}, async (request) => {
   const context = await verifiedStudentContext(request);
   const cardId = stringValue(request.data?.cardId).trim(); const rarity = stringValue(request.data?.rarity).trim(); const abilityId = stringValue(request.data?.abilityId).trim();
