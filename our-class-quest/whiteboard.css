@@ -1,0 +1,62 @@
+.teacher-shell:has(.whiteboard-app) .layout { width: 100%; max-width: none; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 14px 18px 18px; }
+.teacher-shell:has(.whiteboard-app) .side-nav { top: 78px; gap: 3px; }
+.teacher-shell:has(.whiteboard-app) .nav-button { padding-block: 9px; }
+.whiteboard-app { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: calc(100vh - 90px); min-height: 620px; overflow: hidden; background: #eef3f1; border: 1px solid #d8e3df; border-radius: 18px; box-shadow: 0 8px 28px rgba(36, 70, 62, .09); }
+.whiteboard-toolbar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 7px 10px; background: #fff; border-bottom: 1px solid #dce5e2; }
+.whiteboard-tool-group { display: flex; align-items: center; gap: 5px; padding-right: 8px; border-right: 1px solid #dfe6e3; }
+.whiteboard-toolbar-spacer { flex: 1; }
+.whiteboard-tool, .whiteboard-width, .whiteboard-color { display: grid; place-items: center; min-width: 38px; height: 36px; padding: 0 11px; color: #44534f; background: #f1f5f3; border: 1px solid transparent; border-radius: 9px; font-weight: 800; }
+.whiteboard-tool:hover, .whiteboard-tool.active, .whiteboard-width:hover, .whiteboard-width.active { color: #0f6c5a; background: #dff4ed; border-color: #abd9ca; }
+.whiteboard-color { min-width: 32px; width: 32px; height: 32px; padding: 0; background: var(--board-color); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #bfcac6; }
+.whiteboard-color.active { box-shadow: 0 0 0 3px #27a184; }
+.whiteboard-width { width: 38px; padding: 0; }
+.whiteboard-width span { display: block; width: 22px; height: 3px; background: currentColor; border-radius: 999px; }
+.whiteboard-width[data-board-width="7"] span { height: 6px; }
+.whiteboard-width[data-board-width="14"] span { height: 10px; }
+.whiteboard-refresh-state { color: #71807b; font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.whiteboard-layout { display: grid; grid-template-columns: minmax(0, 73fr) minmax(300px, 27fr); min-height: 0; }
+.whiteboard-canvas-wrap { position: relative; min-width: 0; min-height: 0; background: #174f3a; box-shadow: inset 0 0 42px rgba(0, 20, 12, .24); }
+#whiteboard-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.whiteboard-info { min-width: 0; min-height: 0; height: 100%; max-height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: #f4f7f6; border-left: 1px solid #dce5e2; }
+.whiteboard-panel { min-height: 0; }
+.whiteboard-panel + .whiteboard-panel { border-top: 1px solid #d6e1dd; }
+.whiteboard-panel summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding: 13px 14px; cursor: pointer; list-style: none; user-select: none; }
+.whiteboard-panel summary::-webkit-details-marker { display: none; }
+.whiteboard-panel summary h2 { margin: 0; color: #183e36; font-size: clamp(1.15rem, 1.25vw, 1.5rem); }
+.whiteboard-panel summary span { color: #63746f; font-weight: 800; }
+.whiteboard-panel summary i { color: #55726a; font-size: .78rem; font-style: normal; transition: transform .18s ease; }
+.whiteboard-panel[open] summary i { transform: rotate(180deg); }
+.whiteboard-panel[open] summary { background: #e9f1ee; }
+.whiteboard-panel-list { min-height: 0; max-height: none; overflow: visible; padding: 0 14px 10px; }
+.whiteboard-empty { display: grid; place-items: center; min-height: 100%; padding: 24px; color: #84918d; text-align: center; }
+.whiteboard-info-row { display: grid; grid-template-columns: minmax(70px, .75fr) minmax(0, 1.25fr); align-items: center; gap: 10px; padding: 12px 10px; border-bottom: 1px solid #e0e7e4; }
+.whiteboard-info-row strong { overflow: hidden; color: #263d38; font-size: clamp(1rem, 1.08vw, 1.32rem); text-overflow: ellipsis; white-space: nowrap; }
+.whiteboard-info-row span { color: #334b46; font-size: clamp(.95rem, 1vw, 1.2rem); font-weight: 750; }
+.whiteboard-info-row.completed { opacity: .72; }
+.whiteboard-info-row.completed span::after { content: "  ✓ 완료"; color: #138169; font-weight: 900; }
+.whiteboard-point-group-title { margin: 10px 0 4px; color: #687872; font-size: .88rem; font-weight: 900; }
+.whiteboard-point-group-title.pending { display: flex; align-items: center; gap: 7px; margin-top: 0; padding: 9px 10px; color: #8c5600; background: #fff1c9; border-radius: 10px; }
+.whiteboard-info-row.pending { margin: 5px 0; background: #fffaf0; border: 1px solid #f0d285; border-radius: 10px; }
+.whiteboard-info-row.pending span::after { content: "  확인 필요"; color: #a86400; font-size: .8em; font-weight: 900; }
+.whiteboard-group-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 2px; border-bottom: 1px solid #dce5e2; }
+.whiteboard-group-row strong { overflow: hidden; color: #263d38; font-size: 1.05rem; text-overflow: ellipsis; white-space: nowrap; }
+.whiteboard-group-row > span { min-width: 48px; color: #156f5e; text-align: right; font-weight: 900; }
+.whiteboard-group-row div { display: flex; gap: 5px; }
+.whiteboard-group-row button { min-width: 36px; height: 30px; padding: 0 7px; color: #325149; background: #fff; border: 1px solid #bdcec8; border-radius: 8px; font-weight: 900; }
+.whiteboard-group-row button:last-child { color: #fff; background: #17846c; border-color: #17846c; }
+.whiteboard-group-row button:disabled { opacity: .5; }
+.whiteboard-app:fullscreen { width: 100vw; height: 100vh; min-height: 0; border: 0; border-radius: 0; }
+.whiteboard-confirm[hidden] { display: none; }
+.whiteboard-confirm { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgba(5, 24, 17, .54); }
+.whiteboard-confirm-card { width: min(390px, 100%); padding: 24px; color: #263d38; background: #fff; border: 1px solid #d5e1dc; border-radius: 18px; box-shadow: 0 18px 60px rgba(0, 20, 12, .3); }
+.whiteboard-confirm-card h2 { margin: 0 0 8px; font-size: 1.35rem; }
+.whiteboard-confirm-card p { margin: 0 0 20px; color: #6d7c77; }
+.whiteboard-confirm-card div { display: flex; justify-content: flex-end; gap: 9px; }
+.whiteboard-confirm-card button { padding: 10px 15px; border: 0; border-radius: 10px; font-weight: 900; }
+.whiteboard-confirm-clear { color: #fff; background: #c84f49; }
+.whiteboard-confirm-cancel { color: #44534f; background: #edf2f0; }
+@media (max-width: 1100px) {
+  .teacher-shell:has(.whiteboard-app) .layout { grid-template-columns: 1fr; }
+  .whiteboard-app { height: calc(100vh - 165px); }
+  .whiteboard-refresh-state { display: none; }
+}
