@@ -12,6 +12,7 @@
   let lastPoint = null;
   let startPoint = null;
   let shapeSnapshot = null;
+  let infoCollapsed = false;
 
   function active() { return session.mode === "teacher" && session.view === "board" && Boolean(document.querySelector("#teacher-whiteboard")); }
   function pointItemName(request) { return data.pointShopItems.find((item) => item.id === request.itemId)?.name || request.itemName || "삭제된 상품"; }
@@ -104,6 +105,7 @@
     if (button.dataset.boardColor) { color = button.dataset.boardColor; selectButtons("[data-board-color]", button); return; }
     if (button.dataset.boardWidth) { width = Number(button.dataset.boardWidth); selectButtons("[data-board-width]", button); return; }
     if (button.dataset.boardAction === "group-score") { button.disabled = true; try { await changeBoardGroupScore(button.dataset.groupId, Number(button.dataset.amount)); } finally { if (button.isConnected) button.disabled = false; } return; }
+    if (button.dataset.boardAction === "toggle-info") { infoCollapsed = !infoCollapsed; const root = document.querySelector("#teacher-whiteboard"); root?.classList.toggle("info-collapsed", infoCollapsed); button.setAttribute("aria-expanded", String(!infoCollapsed)); button.querySelector("b").textContent = infoCollapsed ? "정보 펼치기" : "정보 접기"; requestAnimationFrame(resizeCanvas); return; }
     if (button.dataset.boardAction === "clear") { const modal = document.querySelector("#whiteboard-clear-confirm"); modal.hidden = false; modal.querySelector("[data-board-action='cancel-clear']")?.focus(); return; }
     if (button.dataset.boardAction === "cancel-clear") { document.querySelector("#whiteboard-clear-confirm").hidden = true; document.querySelector("[data-board-action='clear']")?.focus(); return; }
     if (button.dataset.boardAction === "confirm-clear") { context.clearRect(0, 0, canvas.width, canvas.height); document.querySelector("#whiteboard-clear-confirm").hidden = true; document.querySelector("[data-board-action='clear']")?.focus(); return; }
