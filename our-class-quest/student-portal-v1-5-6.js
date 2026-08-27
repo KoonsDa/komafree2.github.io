@@ -14,6 +14,7 @@ let cardDraw = { loading: false, loaded: false, error: null, data: null, promise
 let cardCollection = { loading: false, loaded: false, error: null, data: null, promise: null };
 let pollTimer = null;
 let backgroundRefreshPromise = null;
+let rankingRefreshPromise = null;
 let usingPointProduct = false;
 let usingPointGift = false;
 const POINT_POLL_INTERVAL = 5000;
@@ -179,6 +180,23 @@ function pointScreenActive() {
   return document.visibilityState !== "hidden" && typeof session !== "undefined" && session.mode === "firebase-student" && Boolean(document.querySelector(".student-v159-point-main-grid"));
 }
 
+function rankingScreenActive() {
+  return typeof session !== "undefined" && session.mode === "firebase-student" && Boolean(document.querySelector("[data-student-ranking-screen]"));
+}
+
+async function refreshRankingScreen() {
+  if (rankingRefreshPromise) return rankingRefreshPromise;
+  const beforeRanking = JSON.stringify(data?.ranking || null);
+  const promise = (async () => {
+    await ensureLoaded(true, true);
+    const changed = beforeRanking !== JSON.stringify(data?.ranking || null);
+    if (changed && rankingScreenActive()) window.refreshStudentRankingDom?.();
+    return changed;
+  })().finally(() => { if (rankingRefreshPromise === promise) rankingRefreshPromise = null; });
+  rankingRefreshPromise = promise;
+  return promise;
+}
+
 function stopPolling() {
   if (pollTimer !== null) window.clearTimeout(pollTimer);
   pollTimer = null;
@@ -215,7 +233,7 @@ async function refreshPointScreen(forceRender = false) {
 }
 
 window.ourClassStudentPortal = { ensureLoaded, ensureShopLoaded, ensureGiftLoaded, ensureCardDrawLoaded, ensureCardCollectionLoaded,
-  setRepresentativeCard, usePointProduct, giftPoints, drawCard, refreshPointScreen, state };
+  setRepresentativeCard, usePointProduct, giftPoints, drawCard, refreshPointScreen, refreshRankingScreen, state };
 
 function pointGiftError(caught) {
   const message = String(caught?.message || "");
@@ -271,7 +289,10 @@ document.addEventListener("click", (event) => {
   window.setTimeout(() => {
     if (target.dataset.studentCloudView === "points" && pointScreenActive()) {
       refreshPointScreen(false).finally(() => schedulePolling());
-    } else stopPolling();
+    } else {
+      stopPolling();
+      if (target.dataset.studentCloudView === "ranking" && rankingScreenActive()) refreshRankingScreen();
+    }
   }, 0);
 }, true);
 

@@ -416,8 +416,15 @@
         body = `<div class="hall-ranking-tabs" role="tablist" aria-label="랭킹 분야">${categories.map(([id, categoryIcon, label]) => `<button type="button" role="tab" aria-selected="${id === studentRankingCategory}" data-student-ranking-category="${id}" class="${id === studentRankingCategory ? "active" : ""}" ${id === "collection" && ranking.collection?.available !== true ? "disabled" : ""}><span>${categoryIcon}</span>${label}</button>`).join("")}</div><div class="student-v156-ranking-toolbar hall-toolbar"><div><span>${icon}</span><strong>${title}</strong></div><div class="student-v156-period-buttons"><button type="button" data-student-ranking-period="week" class="${period === "week" ? "active" : ""}">이번 주</button><button type="button" data-student-ranking-period="all" class="${period === "all" ? "active" : ""}">전체</button></div></div><section class="hall-ranking-board">${rankingPodium(rows, unit)}${rankingLowerList(rows, unit)}${rankingMine(rows, unit)}</section>`;
       }
     }
-    return `<div class="student-v155-page-head hall-page-head"><div><span>🏆 명예의 전당</span><h1>우리반 명예의 전당</h1><p>다양한 활동에서 멋지게 활약한 친구들이에요!</p></div><button class="hall-help" type="button" title="랭킹은 Firebase 활동 기록을 기준으로 계산돼요." aria-label="랭킹 도움말">?</button></div>${body}`;
+    return `<div data-student-ranking-screen><div class="student-v155-page-head hall-page-head"><div><span>🏆 명예의 전당</span><h1>우리반 명예의 전당</h1><p>다양한 활동에서 멋지게 활약한 친구들이에요!</p></div><button class="hall-help" type="button" title="랭킹은 Firebase 활동 기록을 기준으로 계산돼요." aria-label="랭킹 도움말">?</button></div>${body}</div>`;
   }
+
+  window.refreshStudentRankingDom = () => {
+    const screen = document.querySelector("[data-student-ranking-screen]");
+    if (!screen || studentCloudView !== "ranking") return false;
+    screen.outerHTML = rankingContent();
+    return true;
+  };
 
   function studentCardDrawState() { return portalState().cardDraw || {}; }
 

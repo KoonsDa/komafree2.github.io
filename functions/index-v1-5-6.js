@@ -193,7 +193,8 @@ exports.getStudentPortalData = onCall(
         const activityAll = new Map();
         const activityWeek = new Map();
         pointEntries.forEach((entry) => {
-          if (!["1인1역", "과제"].includes(entry.source)) return;
+          if (!["1인1역", "과제", "교사 직접 지급"].includes(entry.source)) return;
+          if (entry.source === "교사 직접 지급" && entry.amount <= 0) return;
           activityAll.set(
               entry.studentId,
               numberValue(activityAll.get(entry.studentId)) + entry.amount,
