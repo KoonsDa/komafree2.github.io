@@ -162,6 +162,7 @@ try {
   const getStudentPointShopDataCallable = httpsCallable(studentFunctions, "getPointShopData");
   const savePointShopProductCallable = httpsCallable(functions, "savePointShopProduct");
   const studentUsePointProductCallable = httpsCallable(studentFunctions, "studentUsePointProduct");
+  const studentCancelPointUseRequestCallable = httpsCallable(studentFunctions, "studentCancelPointUseRequest");
   const resolvePointUseRequestCallable = httpsCallable(functions, "resolvePointUseRequest");
   const reversePointProductUseCallable = httpsCallable(functions, "reversePointProductUse");
   const getPointGiftDataCallable = httpsCallable(functions, "getPointGiftData");
@@ -197,6 +198,10 @@ try {
     },
     studentUsePointProduct: async ({itemId}) => {
       const result = await studentUsePointProductCallable({itemId: String(itemId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    studentCancelPointUseRequest: async ({requestId}) => {
+      const result = await studentCancelPointUseRequestCallable({requestId: String(requestId || "")});
       return result?.data && typeof result.data === "object" ? result.data : {};
     },
     resolvePointUseRequest: async ({classId, requestId, decision}) => {

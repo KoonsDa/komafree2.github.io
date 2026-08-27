@@ -293,18 +293,21 @@
   }
 
   function pointUseCards(home, label) {
-    const shopState = portalState().shop || {};
+    const portal = portalState();
+    const shopState = portal.shop || {};
     if (!shopState.loaded && !shopState.loading && !shopState.error) window.ourClassStudentPortal?.ensureShopLoaded?.();
     if (shopState.loading) return portalLoadPanel("포인트 상품을 불러오는 중이에요.");
     if (shopState.error) return `<div class="student-v159-point-use-empty"><strong>상품을 불러오지 못했어요.</strong><p>잠시 후 새로고침해 주세요.</p></div>`;
     const items = Array.isArray(shopState.data?.items) ? shopState.data.items : [];
     if (!items.length) return `<div class="student-v159-point-use-empty"><strong>현재 이용할 수 있는 상품이 없어요.</strong><p>선생님이 상품을 등록하면 여기에 표시됩니다.</p></div>`;
     const statusLabels = {pending: "승인 대기 중", "sold-out": "오늘 수량 소진", "limit-reached": "오늘 이용 완료", insufficient: "잔액 부족", inactive: "이용 불가"};
+    const cancellingRequestId = String(portal.cancellingPointUseRequestId || "");
     return `<div class="student-v159-point-use-grid">${items.map((item) => {
       const remaining = Math.max(0, Number(item.remainingStock) || 0);
       const limit = Math.max(1, Number(item.perStudentDailyLimit) || 1);
       const price = Math.max(0, Number(item.price) || 0);
       const available = item.status === "available";
+      const pendingRequestId = item.status === "pending" && item.approvalRequired === true ? String(item.pendingRequestId || "") : "";
       const reason = available ? (item.approvalRequired ? "사용 신청" : "바로 사용") : (statusLabels[item.status] || "이용 불가");
       return `<article class="student-v159-point-use-card ${available ? "" : "is-disabled"}">
         <span class="student-v159-point-use-icon" aria-hidden="true">${escapeHtml(item.icon || "🎁")}</span>
@@ -312,7 +315,7 @@
         <dl class="student-v159-point-use-meta"><div><dt>오늘 남은 수량</dt><dd>${remaining} / ${Math.max(1, Number(item.dailyStock) || 1)}</dd></div><div><dt>학생당 하루</dt><dd>${limit}회</dd></div><div><dt>처리 방식</dt><dd>${item.approvalRequired ? "교사 승인" : "즉시 사용"}</dd></div></dl>
         <div class="student-v159-point-use-action">
           <strong><span aria-hidden="true">★</span>${price}${escapeHtml(label)}</strong>
-          <button type="button" data-student-point-product="${escapeHtml(item.id)}" ${available ? "" : "disabled"}>${reason}</button>
+          ${pendingRequestId ? `<button type="button" data-student-cancel-point-request="${escapeHtml(pendingRequestId)}" ${cancellingRequestId === pendingRequestId ? "disabled" : ""}>${cancellingRequestId === pendingRequestId ? "취소 중…" : "신청 취소"}</button>` : `<button type="button" data-student-point-product="${escapeHtml(item.id)}" ${available ? "" : "disabled"}>${reason}</button>`}
         </div>
       </article>`;
     }).join("")}</div>`;

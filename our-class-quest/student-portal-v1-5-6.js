@@ -16,6 +16,7 @@ let pollTimer = null;
 let backgroundRefreshPromise = null;
 let rankingRefreshPromise = null;
 let usingPointProduct = false;
+let cancellingPointUseRequestId = "";
 let usingPointGift = false;
 const POINT_POLL_INTERVAL = 5000;
 
@@ -86,7 +87,7 @@ async function ensureLoaded(force = false, quiet = false) {
 }
 
 function state() {
-  return { loading, loaded, error, data, shop, gift, cardDraw, cardCollection };
+  return { loading, loaded, error, data, shop, gift, cardDraw, cardCollection, cancellingPointUseRequestId };
 }
 
 async function loadCardState(target, method, force = false) {
@@ -157,6 +158,15 @@ async function usePointProduct(itemId) {
   const pendingRefreshes = [backgroundRefreshPromise, refreshPromise, shop.promise].filter(Boolean);
   if (pendingRefreshes.length) await Promise.allSettled(pendingRefreshes);
   await refreshPointScreen(true);
+  return result;
+}
+
+async function cancelPointUseRequest(requestId) {
+  const result = await window.ourClassFirebase?.studentCancelPointUseRequest?.({requestId});
+  const pendingRefreshes = [backgroundRefreshPromise, shop.promise].filter(Boolean);
+  if (pendingRefreshes.length) await Promise.allSettled(pendingRefreshes);
+  await ensureShopLoaded(true, true);
+  if (typeof render === "function" && typeof session !== "undefined" && session.mode === "firebase-student") render();
   return result;
 }
 
@@ -233,7 +243,7 @@ async function refreshPointScreen(forceRender = false) {
 }
 
 window.ourClassStudentPortal = { ensureLoaded, ensureShopLoaded, ensureGiftLoaded, ensureCardDrawLoaded, ensureCardCollectionLoaded,
-  setRepresentativeCard, usePointProduct, giftPoints, drawCard, refreshPointScreen, refreshRankingScreen, state };
+  setRepresentativeCard, usePointProduct, cancelPointUseRequest, giftPoints, drawCard, refreshPointScreen, refreshRankingScreen, state };
 
 function pointGiftError(caught) {
   const message = String(caught?.message || "");
@@ -281,6 +291,30 @@ document.addEventListener("click", async (event) => {
     toast("상품 신청에 실패했습니다. 잔액과 수량을 확인해 주세요.");
     button.disabled = false;
   } finally { usingPointProduct = false; schedulePolling(); }
+}, true);
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest?.("[data-student-cancel-point-request]");
+  if (!button || button.disabled || cancellingPointUseRequestId) return;
+  event.preventDefault(); event.stopPropagation();
+  if (!window.confirm("이 사용 신청을 취소할까요?")) return;
+  const requestId = String(button.dataset.studentCancelPointRequest || "");
+  if (!requestId) return;
+  cancellingPointUseRequestId = requestId; button.disabled = true; button.textContent = "취소 중…"; stopPolling();
+  try {
+    await cancelPointUseRequest(requestId);
+    toast("사용 신청을 취소했습니다.");
+  } catch (caught) {
+    console.error("Student point product cancellation failed", caught);
+    const pendingRefreshes = [backgroundRefreshPromise, shop.promise].filter(Boolean);
+    if (pendingRefreshes.length) await Promise.allSettled(pendingRefreshes);
+    await ensureShopLoaded(true, true);
+    toast(String(caught?.message || "").includes("already-resolved") ? "이미 처리된 신청입니다." : "신청을 취소하지 못했습니다.");
+  } finally {
+    cancellingPointUseRequestId = "";
+    if (typeof render === "function" && typeof session !== "undefined" && session.mode === "firebase-student") render();
+    schedulePolling();
+  }
 }, true);
 
 document.addEventListener("click", (event) => {

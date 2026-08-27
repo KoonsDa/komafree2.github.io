@@ -315,7 +315,8 @@ function shopRequestCounts(docs, itemId, studentId = "", excludeId = "") {
       .filter((entry) => entry.id !== excludeId && entry.itemId === itemId &&
         ["pending", "completed"].includes(entry.status));
   return {total: matching.length, student: studentId ? matching.filter((entry) => entry.studentId === studentId).length : 0,
-    pending: studentId ? matching.some((entry) => entry.studentId === studentId && entry.status === "pending") : false};
+    pending: studentId ? matching.some((entry) => entry.studentId === studentId && entry.status === "pending") : false,
+    pendingRequestId: studentId ? matching.find((entry) => entry.studentId === studentId && entry.status === "pending")?.id || "" : ""};
 }
 
 function pointShopStatus(item, counts, points) {
@@ -353,7 +354,7 @@ exports.getPointShopData = onCall({region: "asia-northeast3"}, async (request) =
       .filter((item) => item.active && !item.deleted && item.name).map((item) => {
         const counts = shopRequestCounts(requestsSnapshot.docs, item.id, context.studentId);
         return {...item, remainingStock: Math.max(0, item.dailyStock - counts.total), studentUsed: counts.student,
-          status: pointShopStatus(item, counts, points)};
+          status: pointShopStatus(item, counts, points), pendingRequestId: counts.pendingRequestId};
       });
   return {ok: true, date, points, items};
 });
@@ -425,6 +426,25 @@ exports.studentUsePointProduct = onCall({region: "asia-northeast3"}, async (requ
           date: new Date().toLocaleDateString("ko-KR", {timeZone: "Asia/Seoul"}), createdAt: timestamp}, createdAt: timestamp});
     }
     return {ok: true, requestId: requestRef.id, status: baseRequest.status, points: item.approvalRequired ? points : points - item.price};
+  });
+});
+
+exports.studentCancelPointUseRequest = onCall({region: "asia-northeast3"}, async (request) => {
+  const context = await verifiedStudentContext(request);
+  const requestId = stringValue(request.data?.requestId).trim();
+  if (!requestId || requestId.includes("/")) throw new HttpsError("invalid-argument", "Valid requestId is required.");
+  const useRef = context.db.doc(`classes/${context.classId}/pointUseRequests/${requestId}`);
+  return context.db.runTransaction(async (transaction) => {
+    const useSnapshot = await transaction.get(useRef);
+    if (!useSnapshot.exists) throw new HttpsError("not-found", "point-shop/request-not-found");
+    const use = useSnapshot.data() || {};
+    if (stringValue(use.studentId) !== context.studentId || stringValue(use.classId) !== context.classId) {
+      throw new HttpsError("permission-denied", "point-shop/request-owner-mismatch");
+    }
+    if (use.status !== "pending") throw new HttpsError("failed-precondition", "point-shop/already-resolved");
+    if (use.approvalRequired !== true) throw new HttpsError("failed-precondition", "point-shop/not-approval-request");
+    transaction.update(useRef, {status: "cancelled", cancelledAt: FieldValue.serverTimestamp(), cancelledBy: "student"});
+    return {ok: true, requestId, status: "cancelled"};
   });
 });
 

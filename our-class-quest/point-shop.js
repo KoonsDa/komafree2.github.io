@@ -1,9 +1,49 @@
 (() => {
   let cloudLoading = false;
   let cloudLoadedClassId = "";
+  let teacherPointPollTimer = null;
+  let teacherPointPollClassId = "";
+  let teacherPointRenderPending = false;
+  const TEACHER_POINT_POLL_INTERVAL = 5000;
   function cloudClassId() { return window.ourClassFirebase?.getActiveClassId?.() || ""; }
   function cloudEnabled() { return Boolean(window.ourClassFirebase?.ready && window.ourClassFirebase?.getCurrentUser?.()?.uid && cloudClassId()); }
-  async function loadCloudShop(force = false) {
+  function teacherPointPollingActive() { return document.visibilityState !== "hidden" && session.mode === "teacher" && session.view === "points" && cloudEnabled(); }
+  function cloudShopSignature(items, requests) {
+    const itemKeys = ["id", "name", "description", "icon", "price", "dailyStock", "perStudentDailyLimit", "approvalRequired", "active", "deleted"];
+    const requestKeys = ["id", "status", "studentId", "itemId", "itemName", "date", "price", "approvalRequired", "createdAt", "resolvedAt", "cancelledAt", "cancelledBy"];
+    const rows = (values, keys) => (Array.isArray(values) ? values : []).map((value) => Object.fromEntries(keys.map((key) => [key, value?.[key] ?? null]))).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    return JSON.stringify({items: rows(items, itemKeys), requests: rows(requests, requestKeys)});
+  }
+  function stopTeacherPointPolling(resetClass = true) {
+    if (teacherPointPollTimer !== null) clearTimeout(teacherPointPollTimer);
+    teacherPointPollTimer = null;
+    if (resetClass) { teacherPointPollClassId = ""; teacherPointRenderPending = false; }
+  }
+  function flushTeacherPointRender() {
+    if (!teacherPointRenderPending || !teacherPointPollingActive() || document.querySelector(".modal")) return;
+    teacherPointRenderPending = false;
+    render();
+  }
+  function scheduleTeacherPointPolling() {
+    if (!teacherPointPollingActive()) return stopTeacherPointPolling();
+    if (teacherPointPollTimer !== null) return;
+    teacherPointPollTimer = setTimeout(async () => {
+      teacherPointPollTimer = null;
+      if (!teacherPointPollingActive()) return stopTeacherPointPolling();
+      await loadCloudShop(true, true);
+      flushTeacherPointRender();
+      scheduleTeacherPointPolling();
+    }, TEACHER_POINT_POLL_INTERVAL);
+  }
+  function syncTeacherPointPolling() {
+    if (!teacherPointPollingActive()) return stopTeacherPointPolling();
+    const classId = cloudClassId();
+    if (teacherPointPollClassId === classId) return scheduleTeacherPointPolling();
+    stopTeacherPointPolling(false);
+    teacherPointPollClassId = classId;
+    loadCloudShop(true, true).finally(() => scheduleTeacherPointPolling());
+  }
+  async function loadCloudShop(force = false, quiet = false) {
     const classId = cloudClassId();
     if (!cloudEnabled() || cloudLoading || (!force && cloudLoadedClassId === classId)) return;
     cloudLoading = true;
@@ -13,12 +53,19 @@
         await window.ourClassFirebase.savePointShopProduct({classId, action: "migrate", items: data.pointShopItems});
         result = await window.ourClassFirebase.getPointShopData({classId, mode: "teacher"});
       }
-      data.pointShopItems = Array.isArray(result.items) ? result.items : [];
-      data.pointUseRequests = Array.isArray(result.requests) ? result.requests : [];
+      const items = Array.isArray(result.items) ? result.items : [];
+      const requests = Array.isArray(result.requests) ? result.requests : [];
+      const changed = cloudShopSignature(data.pointShopItems, data.pointUseRequests) !== cloudShopSignature(items, requests);
+      data.pointShopItems = items;
+      data.pointUseRequests = requests;
       cloudLoadedClassId = classId;
-      saveData();
-      if (session.mode === "teacher" && session.view === "points") render();
-    } catch (error) { console.error("Point shop cloud load failed", error); toast("포인트 상품을 클라우드에서 불러오지 못했습니다."); }
+      if (changed) saveData();
+      if (changed && session.mode === "teacher" && session.view === "points") {
+        if (document.querySelector(".modal")) teacherPointRenderPending = true;
+        else render();
+      }
+      return changed;
+    } catch (error) { console.error("Point shop cloud load failed", error); if (!quiet) toast("포인트 상품을 클라우드에서 불러오지 못했습니다."); }
     finally { cloudLoading = false; }
   }
   async function saveCloudItem(item) {
@@ -64,11 +111,11 @@
   function pointShopSetItems() { return data.pointShopItems.filter((item) => !item.deleted).map(({ name, description, price, dailyStock, perStudentDailyLimit, approvalRequired, active }) => ({ name, description, price, dailyStock, perStudentDailyLimit, approvalRequired, active })); }
   function teacherShopSection() {
     const items = data.pointShopItems.filter((item) => !item.deleted);
-    const rows = items.map((item) => { const applicantCount = new Set(todayRequestsForItem(item.id).map((request) => request.studentId)).size; return `<article class="card point-shop-manage-card"><div><div class="point-shop-card-heading"><h3>${escapeHtml(item.name)}</h3><strong>${item.price}P</strong></div>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}<small>오늘 남은 수량 ${remainingStock(item)} / ${item.dailyStock} · 학생당 하루 ${item.perStudentDailyLimit}회 · ${item.approvalRequired ? "승인 필요" : "즉시 사용"}</small></div><div class="button-row"><button class="button secondary compact" data-action="view-point-shop-requests" data-id="${item.id}">신청 현황 ${applicantCount}명</button><button class="button ${item.active ? "success" : "secondary"} compact" data-action="toggle-point-shop-item" data-id="${item.id}">${item.active ? "ON" : "OFF"}</button><button class="button secondary compact" data-action="edit-point-shop-item" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-point-shop-item" data-id="${item.id}">삭제</button></div></article>`; }).join("");
+    const rows = items.map((item) => { const applicantCount = new Set(todayRequestsForItem(item.id).filter((request) => ["pending", "completed"].includes(request.status)).map((request) => request.studentId)).size; return `<article class="card point-shop-manage-card"><div><div class="point-shop-card-heading"><h3>${escapeHtml(item.name)}</h3><strong>${item.price}P</strong></div>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}<small>오늘 남은 수량 ${remainingStock(item)} / ${item.dailyStock} · 학생당 하루 ${item.perStudentDailyLimit}회 · ${item.approvalRequired ? "승인 필요" : "즉시 사용"}</small></div><div class="button-row"><button class="button secondary compact" data-action="view-point-shop-requests" data-id="${item.id}">신청 현황 ${applicantCount}명</button><button class="button ${item.active ? "success" : "secondary"} compact" data-action="toggle-point-shop-item" data-id="${item.id}">${item.active ? "ON" : "OFF"}</button><button class="button secondary compact" data-action="edit-point-shop-item" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-point-shop-item" data-id="${item.id}">삭제</button></div></article>`; }).join("");
     return `${pendingSection()}<section class="management-section"><div class="section-heading"><div><h2>포인트 상품 관리</h2><p class="muted">상품 설정은 날짜가 바뀌어도 유지됩니다.</p></div><div class="button-row"><button class="button secondary" data-action="save-point-shop-set">현재 상품을 세트로 저장</button><button class="button secondary" data-action="manage-point-shop-sets">저장된 세트 불러오기/관리</button><button class="button success" data-action="new-point-shop-item">+ 상품 추가</button></div></div>${rows ? `<div class="point-shop-manage-list">${rows}</div>` : `<div class="empty">등록된 포인트 상품이 없습니다.</div>`}</section>`;
   }
   const originalTeacherPoints = teacherPoints;
-  teacherPoints = function pointShopTeacherPoints() { if (cloudEnabled()) setTimeout(() => loadCloudShop(), 0); return `${originalTeacherPoints()}${teacherShopSection()}`; };
+  teacherPoints = function pointShopTeacherPoints() { setTimeout(() => syncTeacherPointPolling(), 0); return `${originalTeacherPoints()}${teacherShopSection()}`; };
 
   function openItemModal(id = "") {
     const item = itemById(id);
@@ -86,13 +133,14 @@
   }
   function openRenameSetModal(id) { const set = data.pointShopSets.find((item) => item.id === id); if (!set) return; app.insertAdjacentHTML("beforeend", `<div class="modal"><form id="point-shop-set-rename-form" class="modal-card form" data-id="${id}"><h2>세트 이름 수정</h2><label>세트 이름<input name="name" maxlength="60" required value="${escapeHtml(set.name)}"></label><div class="button-row"><button class="button success" type="submit">저장</button><button class="button secondary" type="button" data-action="close-modal">취소</button></div></form></div>`); }
   function openItemRequests(itemId) {
-    const item = itemById(itemId); if (!item) return; const labels = { pending: "승인 대기", completed: "사용 완료", rejected: "거절", reversed: "사용 취소됨" }; const requests = todayRequestsForItem(itemId);
+    const item = itemById(itemId); if (!item) return; const labels = { pending: "승인 대기", completed: "사용 완료", rejected: "거절", cancelled: "학생 취소", reversed: "사용 취소됨" }; const requests = todayRequestsForItem(itemId);
     const rows = requests.map((request) => { const student = studentById(request.studentId); const studentLabel = student ? `${studentNumber(student)}번 ${student.name}` : "삭제된 학생"; return `<article class="point-request-row"><div><strong>${escapeHtml(studentLabel)}</strong><span>${escapeHtml(item.name)} · ${request.price}P</span><small>${labels[request.status]} · ${new Date(request.createdAt).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}</small></div>${request.status === "pending" ? `<div class="button-row"><button class="button success compact" data-action="approve-point-use" data-id="${request.id}">승인</button><button class="button danger compact" data-action="reject-point-use" data-id="${request.id}">거절</button></div>` : ""}</article>`; }).join("");
     app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card point-shop-set-modal"><div class="section-heading"><div><h2>${escapeHtml(item.name)} 신청 현황</h2><p class="muted">오늘 신청한 학생</p></div></div>${rows ? `<div class="point-request-list">${rows}</div>` : `<div class="empty">오늘 신청한 학생이 없습니다.</div>`}<div class="button-row"><button class="button secondary" data-action="close-modal">닫기</button></div></section></div>`);
   }
 
   app.addEventListener("click", async (event) => {
     const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
+    if (action === "close-modal") { setTimeout(() => { flushTeacherPointRender(); syncTeacherPointPolling(); }, 0); return; }
     if (action === "new-point-shop-item") return openItemModal();
     if (action === "save-point-shop-set") return openSaveSetModal();
     if (action === "manage-point-shop-sets") return openSetManager();
@@ -147,5 +195,16 @@
     const form = event.target; if (form.id !== "point-shop-set-form" && form.id !== "point-shop-set-rename-form") return; event.preventDefault(); const name = String(new FormData(form).get("name") || "").trim().slice(0, 60); if (!name) return;
     const now = new Date().toISOString(); if (form.id === "point-shop-set-form") data.pointShopSets.push({ id: crypto.randomUUID(), name, items: pointShopSetItems(), createdAt: now, updatedAt: now }); else { const set = data.pointShopSets.find((item) => item.id === form.dataset.id); if (!set) return; set.name = name; set.updatedAt = now; }
     saveData(); render(); toast(form.id === "point-shop-set-form" ? "현재 상품을 세트로 저장했습니다." : "세트 이름을 수정했습니다.");
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest?.("[data-action]");
+    if (!target) return;
+    if (["firebase-logout", "go-home"].includes(target.dataset.action)) stopTeacherPointPolling();
+    setTimeout(() => syncTeacherPointPolling(), 0);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") stopTeacherPointPolling();
+    else syncTeacherPointPolling();
   });
 })();
