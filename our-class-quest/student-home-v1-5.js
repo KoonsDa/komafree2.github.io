@@ -215,7 +215,7 @@
         <div class="student-home-hero-background student-v15-welcome-background" aria-hidden="true"></div>
         <div class="student-home-hero-character student-v15-welcome-character">${characterImage(character)}</div>
         <div class="student-v15-welcome-copy">
-          <h1><strong>${escapeHtml(profile.name)}</strong>님, 반가워요!</h1>
+          <h1><span class="student-v15-greeting-name"><strong>${escapeHtml(profile.name)}</strong>님,</span><span class="student-v15-greeting-message">반가워요!</span></h1>
           <p>${escapeHtml(classInfo.className || "우리 반")}</p>
           <button class="student-character-change-button" type="button" data-student-character-open>캐릭터 변경</button>
         </div>
