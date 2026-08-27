@@ -3008,4 +3008,44 @@
     max-width:94vw;
     max-height:90vh;
   }
+  .student-character-modal .student-character-grid {
+    grid-auto-rows:minmax(158px,auto);
+    align-content:start;
+    overflow-x:hidden;
+  }
+  .student-character-modal .student-character-option {
+    box-sizing:border-box;
+    display:grid;
+    grid-template-rows:auto auto auto;
+    align-content:start;
+    height:auto;
+    min-height:158px;
+    max-height:none;
+    padding:8px 7px;
+    overflow:hidden;
+    line-height:normal;
+  }
+  .student-character-modal .student-character-option > img {
+    position:static;
+    display:block;
+    width:min(100%,92px);
+    height:92px;
+    max-width:100%;
+    max-height:92px;
+    aspect-ratio:auto;
+    justify-self:center;
+    align-self:start;
+    object-fit:contain;
+    transform:none;
+  }
+  .student-character-modal .student-character-option > strong {
+    display:-webkit-box;
+    overflow:hidden;
+    max-width:100%;
+    line-height:1.2;
+    text-align:center;
+    white-space:normal;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+  }
 }
