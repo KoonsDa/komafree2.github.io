@@ -1427,7 +1427,9 @@ function buildStudentExcelTemplateWorkbook() {
     ["초기 비밀번호", "최초 로그인용 비밀번호입니다. 현재 계정 규칙과 같이 6자 이상 작성하세요."],
     [],
     ["주의사항"],
-    ["번호와 아이디는 Excel 안에서도, 현재 학급의 기존 학생과도 중복될 수 없습니다."],
+    ["Excel 안에서는 번호와 아이디를 중복해서 입력할 수 없습니다."],
+    ["번호는 현재 활성 학생과 중복될 수 없습니다. 비활성 학생의 번호는 다시 사용할 수 있습니다."],
+    ["로그인 ID는 비활성 학생을 포함한 기존 모든 학생과 중복될 수 없습니다."],
     ["아이디와 초기 비밀번호는 Excel에서 텍스트 형식으로 입력하는 것을 권장합니다."],
     ["업로드할 때는 학생명단 Sheet만 읽습니다. 업로드한 원본 파일은 서버에 저장하지 않습니다."],
     [],
@@ -1466,11 +1468,11 @@ function validateStudentExcelRows(sourceRows) {
     const numberKey = numberText && Number.isFinite(number) ? String(number) : numberText;
     if (numberKey && numberCounts.get(numberKey) > 1) errors.push("Excel 내부 번호 중복");
     if (normalizedLoginId && loginCounts.get(normalizedLoginId) > 1) errors.push("Excel 내부 아이디 중복");
-    const existingByNumber = Number.isInteger(number) ? data.students.find((student) => studentNumber(student) === number) : null;
+    const existingActiveByNumber = Number.isInteger(number) ? data.students.find((student) => student.active !== false && studentNumber(student) === number) : null;
     const existingByLoginId = normalizedLoginId ? data.students.find((student) => String(student.loginId || "").trim().toLocaleLowerCase("en-US") === normalizedLoginId) : null;
-    const retryStudent = existingByNumber && existingByNumber === existingByLoginId && existingByNumber.active !== false && existingByNumber.name === name && firebaseStudentAccountStatusesLoaded && !firebaseStudentAccountStatuses[existingByNumber.id]?.exists ? existingByNumber : null;
+    const retryStudent = existingActiveByNumber && existingActiveByNumber === existingByLoginId && existingActiveByNumber.name === name && firebaseStudentAccountStatusesLoaded && !firebaseStudentAccountStatuses[existingActiveByNumber.id]?.exists ? existingActiveByNumber : null;
     if (!retryStudent) {
-      if (existingByNumber) errors.push("기존 학생 번호와 충돌");
+      if (existingActiveByNumber) errors.push("기존 학생 번호와 충돌");
       if (existingByLoginId) errors.push("기존 학생 아이디와 충돌");
     }
     return {rowNumber: source.rowNumber, number, name, loginId, password, errors: [...new Set(errors)], valid: errors.length === 0, retryStudentId: retryStudent?.id || ""};
