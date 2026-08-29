@@ -428,10 +428,10 @@ exports.updateStudentLoginId = onCall(
           throw new HttpsError("not-found", "Student was not found.");
         }
         const student = studentSnapshot.data();
-        if (student?.id !== studentId || student.active === false) {
+        if (student?.id !== studentId) {
           throw new HttpsError(
               "failed-precondition",
-              "Student information is invalid or inactive.",
+              "Student information is invalid.",
           );
         }
 
