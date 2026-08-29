@@ -115,6 +115,7 @@ function createDemoData() {
       { id: crypto.randomUUID(), studentId: "s3", roleId: "lunch", status: "completed", appliedAt: new Date().toISOString(), completedAt: new Date().toISOString() }
     ],
     dailyRoleApplicationLimit: 1,
+    roleApplicationOpenTime: "",
     groups: DEFAULT_GROUPS(),
     groupAssignments: {},
     groupScoreTransactions: [],
@@ -293,7 +294,7 @@ function loadData() {
     saved.classSettings = { appName: String(saved.classSettings?.appName || "우리반 퀘스트").slice(0, 50), className: String(saved.classSettings?.className || "우리 반").slice(0, 50), teacherName: String(saved.classSettings?.teacherName || "선생님").slice(0, 30), features: Object.fromEntries(Object.keys(DEFAULT_CLASS_FEATURES).map((key) => [key, saved.classSettings?.features?.[key] !== false])), ...(saved.classSettings?.studentHomeMessageTitle != null ? { studentHomeMessageTitle: String(saved.classSettings.studentHomeMessageTitle).slice(0, 100) } : {}), ...(saved.classSettings?.studentHomeMessageSubtitle != null ? { studentHomeMessageSubtitle: String(saved.classSettings.studentHomeMessageSubtitle).slice(0, 200) } : {}) };
     saved.cloudConnection = saved.cloudConnection && typeof saved.cloudConnection === "object" && !Array.isArray(saved.cloudConnection) ? { classId: String(saved.cloudConnection.classId || ""), pointsConnected: saved.cloudConnection.pointsConnected === true } : { classId: "", pointsConnected: false };
     if (!Array.isArray(saved.currentRoles)) saved.currentRoles = structuredClone(DEFAULT_ROLES);
-    saved.currentRoles = saved.currentRoles.map((role) => ({ ...role, description: role.description || "" }));
+    saved.currentRoles = saved.currentRoles.map((role) => ({ ...role, description: role.description || "", active: role.active !== false }));
     if (!Array.isArray(saved.roleTemplates)) {
       saved.roleTemplates = [{ id: crypto.randomUUID(), name: "기본 1인1역", roles: structuredClone(DEFAULT_ROLES) }];
     }
@@ -340,6 +341,7 @@ function loadData() {
     saved.pointTransfers = (Array.isArray(saved.pointTransfers) ? saved.pointTransfers : []).filter((transfer) => transfer && /^\d{4}-\d{2}-\d{2}$/.test(String(transfer.date || "")) && String(transfer.fromStudentId || "") && String(transfer.toStudentId || "") && Number.isInteger(Number(transfer.amount)) && Number(transfer.amount) > 0).map((transfer) => ({ id: String(transfer.id || crypto.randomUUID()), fromStudentId: String(transfer.fromStudentId), toStudentId: String(transfer.toStudentId), amount: Number(transfer.amount), date: String(transfer.date), createdAt: String(transfer.createdAt || new Date().toISOString()) }));
     saved.roleApplications = (Array.isArray(saved.roleApplications) ? saved.roleApplications : []).map((application) => ({ ...application, appliedAt: application.appliedAt || application.createdAt || application.completedAt || "" }));
     const savedRoleLimit = Number(saved.dailyRoleApplicationLimit); saved.dailyRoleApplicationLimit = Number.isInteger(savedRoleLimit) && savedRoleLimit >= 1 && savedRoleLimit <= 5 ? savedRoleLimit : 1;
+    saved.roleApplicationOpenTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(saved.roleApplicationOpenTime || "")) ? String(saved.roleApplicationOpenTime) : "";
     const savedGroups = Array.isArray(saved.groups) ? saved.groups : DEFAULT_GROUPS();
     saved.groups = savedGroups.map(normalizeGroup);
     if (saved.groups.filter((group) => group.active).length < 2) DEFAULT_GROUPS().slice(0, 2).forEach((fallback) => { if (!saved.groups.some((group) => group.id === fallback.id)) saved.groups.push(fallback); else saved.groups.find((group) => group.id === fallback.id).active = true; });
@@ -700,6 +702,7 @@ async function mutateCloudStudentRole(action, id) {
     else if (code === "role/capacity-reached") toast("다른 학생이 먼저 신청해 역할 정원이 찼습니다.");
     else if (code === "role/already-applied") toast("이미 신청한 역할입니다.");
     else if (["role/status-conflict", "role/usage-conflict", "role/usage-missing"].includes(code)) toast("역할 상태가 변경되어 최신 정보를 불러왔습니다.");
+    else if (code === "role/not-open-yet") toast("아직 1인1역 신청 시간이 아닙니다.");
     else if (["role/not-found", "role/disabled"].includes(code)) toast("현재 신청할 수 없는 역할입니다.");
     else { console.error("Firebase student role mutation failed", {code: error?.code, details: error?.details}); toast("역할 신청 상태를 변경하지 못했습니다. 다시 시도해 주세요."); }
   } finally { firebaseStudentRoleMutating = false; render(); }
@@ -771,6 +774,7 @@ async function loadFirebaseRoles(userUid, commit = true) {
     if (firebaseTeacherUser?.uid !== userUid) return false;
     if (!settings) throw new Error("Connected role settings were not found.");
     data.dailyRoleApplicationLimit = settings.dailyRoleApplicationLimit;
+    data.roleApplicationOpenTime = settings.roleApplicationOpenTime || "";
     data.currentRoles = settings.currentRoles;
     data.roleTemplates = templates;
     data.roleApplications = applications;
@@ -961,7 +965,7 @@ function initialRoleApplicationSnapshot(application) {
 }
 function initialRoleCloudSnapshot() {
   return {
-    settings: { dailyRoleApplicationLimit: data.dailyRoleApplicationLimit, currentRoles: structuredClone(data.currentRoles) },
+    settings: { dailyRoleApplicationLimit: data.dailyRoleApplicationLimit, roleApplicationOpenTime: data.roleApplicationOpenTime, currentRoles: structuredClone(data.currentRoles) },
     templates: structuredClone(data.roleTemplates),
     assignments: data.roleApplications.map(initialRoleApplicationSnapshot)
   };
@@ -1054,18 +1058,19 @@ async function connectGroupsToFirebase() {
     render();
   }
 }
-function roleSettingsSnapshot() { return { currentRoles: structuredClone(data.currentRoles), dailyRoleApplicationLimit: data.dailyRoleApplicationLimit }; }
+function roleSettingsSnapshot() { return { currentRoles: structuredClone(data.currentRoles), dailyRoleApplicationLimit: data.dailyRoleApplicationLimit, roleApplicationOpenTime: data.roleApplicationOpenTime }; }
 async function persistRoleSettings(previousSettings, successMessage) {
   saveData();
   if (!firebaseRolesConnected) { render(); toast(successMessage); return true; }
   firebaseRoleConfigurationSaving = true; render();
   try {
-    await window.ourClassFirebase.saveRoleSettings({ currentRoles: data.currentRoles, dailyRoleApplicationLimit: data.dailyRoleApplicationLimit });
+    await window.ourClassFirebase.saveRoleSettings({ currentRoles: data.currentRoles, dailyRoleApplicationLimit: data.dailyRoleApplicationLimit, roleApplicationOpenTime: data.roleApplicationOpenTime });
     toast(successMessage); return true;
   } catch (error) {
     console.error("Firestore role settings save failed", error);
     data.currentRoles = previousSettings.currentRoles;
     data.dailyRoleApplicationLimit = previousSettings.dailyRoleApplicationLimit;
+    data.roleApplicationOpenTime = previousSettings.roleApplicationOpenTime;
     saveData();
     toast("1인1역 설정을 클라우드에 저장하지 못했습니다. 다시 시도해 주세요.");
     return false;
@@ -1244,7 +1249,7 @@ function studentPoints() {
 function studentRoles() {
   const student = currentStudent();
   const ownActive = todayRoleApplicationsForStudent(student.id); const limit = data.dailyRoleApplicationLimit;
-  return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 ${limit}개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><section class="card role-application-limit-status"><span>오늘 신청</span><strong>${ownActive.length} / ${limit}개</strong>${ownActive.length >= limit ? `<small>오늘 신청 가능한 1인1역을 모두 신청했습니다.</small>` : `<small>${limit - ownActive.length}개 더 신청할 수 있어요.</small>`}</section><div class="grid">${data.currentRoles.map((role) => {
+  return `<h1 class="page-heading">오늘의 1인1역</h1><p class="page-description">하루에 최대 ${limit}개까지 신청할 수 있어요. 함께 교실을 빛내 주세요!</p><section class="card role-application-limit-status"><span>오늘 신청</span><strong>${ownActive.length} / ${limit}개</strong>${ownActive.length >= limit ? `<small>오늘 신청 가능한 1인1역을 모두 신청했습니다.</small>` : `<small>${limit - ownActive.length}개 더 신청할 수 있어요.</small>`}</section><div class="grid">${data.currentRoles.filter((role) => role.active !== false).map((role) => {
     const applications = todayRoleApplications().filter((item) => item.roleId === role.id);
     const mine = applications.find((item) => item.studentId === student.id);
     const shownPoints = mine ? roleForApplication(mine)?.points ?? role.points : role.points;
@@ -1922,7 +1927,7 @@ function teacherRoleList(items = todayRoleApplications()) {
 
 function roleEditorList(roles, scope, templateId = "") {
   if (!roles.length) return `<div class="empty">등록된 역할이 없습니다. 새 역할을 추가해 주세요.</div>`;
-  return `<div class="role-editor-list">${roles.map((role, index) => `<article class="role-editor-item"><div class="role-order"><button class="icon-button" data-action="move-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}" data-direction="up" ${index === 0 ? "disabled" : ""} aria-label="${escapeHtml(role.name)} 위로 이동">↑</button><button class="icon-button" data-action="move-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}" data-direction="down" ${index === roles.length - 1 ? "disabled" : ""} aria-label="${escapeHtml(role.name)} 아래로 이동">↓</button></div><div class="role-editor-info"><strong>${escapeHtml(role.name)}</strong><span class="muted">${role.capacity}명 · ${role.points}P${role.description ? ` · ${escapeHtml(role.description)}` : ""}</span></div><div class="list-actions"><button class="button secondary compact" data-action="edit-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}">수정</button><button class="button danger compact" data-action="delete-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}">삭제</button></div></article>`).join("")}</div>`;
+  return `<div class="role-editor-list">${roles.map((role, index) => `<article class="role-editor-item ${role.active === false ? "is-inactive" : ""}"><div class="role-order"><button class="icon-button" data-action="move-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}" data-direction="up" ${index === 0 ? "disabled" : ""} aria-label="${escapeHtml(role.name)} 위로 이동">↑</button><button class="icon-button" data-action="move-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}" data-direction="down" ${index === roles.length - 1 ? "disabled" : ""} aria-label="${escapeHtml(role.name)} 아래로 이동">↓</button></div><div class="role-editor-info"><strong>${escapeHtml(role.name)}</strong><span class="muted">${role.capacity}명 · ${role.points}P${role.description ? ` · ${escapeHtml(role.description)}` : ""}</span></div><div class="list-actions"><button class="button ${role.active === false ? "secondary" : "success"} compact" data-action="toggle-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}">${role.active === false ? "OFF" : "ON"}</button><button class="button secondary compact" data-action="edit-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}">수정</button><button class="button danger compact" data-action="delete-role" data-scope="${scope}" data-template="${templateId}" data-id="${role.id}">삭제</button></div></article>`).join("")}</div>`;
 }
 
 function templateEditor() {
@@ -1932,7 +1937,7 @@ function templateEditor() {
 }
 
 function teacherRoles() {
-  return `<h1 class="page-heading">1인1역 관리</h1><p class="page-description">오늘의 신청을 승인하고, 역할 구성과 템플릿을 관리할 수 있습니다.</p><section class="card role-limit-settings"><div><h2>하루 최대 신청 개수</h2><p class="muted">학생 한 명이 하루에 신청할 수 있는 최대 역할 수입니다. 기존 신청은 자동으로 취소되지 않습니다.</p></div><form id="role-limit-form" class="inline-form"><input name="limit" type="number" min="1" max="5" step="1" required value="${data.dailyRoleApplicationLimit}" aria-label="하루 최대 신청 개수"><span>개</span><button class="button" type="submit">저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>오늘 신청 현황</h2><p class="muted">완료를 누르면 학생에게 포인트가 한 번만 지급됩니다.</p></div></div>${teacherRoleList()}</section><section class="card management-section"><div class="section-heading"><div><h2>오늘의 역할 수정</h2><p class="muted">여기에서 바꾼 내용은 오늘만 적용되고 저장된 템플릿은 바뀌지 않습니다.</p></div><button class="button success" data-action="add-role" data-scope="today">+ 오늘 역할 추가</button></div>${roleEditorList(data.currentRoles, "today")}</section><section class="card management-section"><h2>현재 역할을 새 템플릿으로 저장</h2><form id="template-save-form" class="inline-form"><input name="name" maxlength="40" required placeholder="예: 우리 반 기본 1인1역"><button class="button" type="submit">템플릿 저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>역할 템플릿 관리</h2><p class="muted">저장된 템플릿은 브라우저를 다시 열어도 유지됩니다.</p></div></div><div class="template-grid">${data.roleTemplates.map((template) => `<article class="card template-card"><div><h3>${escapeHtml(template.name)}</h3><p class="muted">역할 ${template.roles.length}개</p></div><div class="button-row"><button class="button success" data-action="load-template" data-id="${template.id}">오늘의 역할로 불러오기</button><button class="button secondary" data-action="edit-template" data-id="${template.id}">템플릿 수정</button><button class="button secondary" data-action="rename-template" data-id="${template.id}">이름 변경</button><button class="button secondary" data-action="duplicate-template" data-id="${template.id}">복제</button><button class="button danger" data-action="delete-template" data-id="${template.id}">삭제</button></div></article>`).join("")}</div></section>${templateEditor()}`;
+  return `<h1 class="page-heading">1인1역 관리</h1><p class="page-description">역할을 미리 등록하고 오늘 사용할 항목만 ON으로 운영합니다.</p><section class="card role-limit-settings"><div><h2>학생 신청 설정</h2><p class="muted">시작 시간을 비워 두면 기존처럼 시간 제한 없이 신청할 수 있습니다.</p></div><form id="role-limit-form" class="inline-form time-setting-form"><label>하루 최대 <input name="limit" type="number" min="1" max="5" step="1" required value="${data.dailyRoleApplicationLimit}" aria-label="하루 최대 신청 개수">개</label><label>매일 신청 시작 <input id="role-open-time" name="openTime" type="time" value="${escapeHtml(data.roleApplicationOpenTime || "")}" aria-label="1인1역 신청 시작 시간"></label><button class="button secondary compact time-limit-clear${data.roleApplicationOpenTime ? "" : " is-clear"}" type="button" data-action="clear-time-input" data-target="role-open-time" aria-pressed="${data.roleApplicationOpenTime ? "false" : "true"}">시간 제한 없음</button><button class="button" type="submit">저장</button></form></section><section class="management-section"><div class="section-heading"><div><h2>오늘 신청 현황</h2><p class="muted">완료를 누르면 학생에게 포인트가 한 번만 지급됩니다.</p></div></div>${teacherRoleList()}</section><section class="card management-section"><div class="section-heading"><div><h2>역할 관리</h2><p class="muted">오늘 학생에게 보여줄 역할만 ON으로 설정하세요.</p></div><button class="button success" data-action="add-role" data-scope="today">+ 역할 추가</button></div>${roleEditorList(data.currentRoles, "today")}</section>`;
 }
 
 function assignmentMatchesFilter(assignment) {
@@ -2346,7 +2351,7 @@ async function applyRole(roleId) {
   const active = todayRoleApplicationsForStudent(session.studentId); const limit = data.dailyRoleApplicationLimit;
   const roleApplicants = todayRoleApplications().filter((item) => item.roleId === roleId);
   const role = roleById(roleId);
-  if (!role) return;
+  if (!role || role.active === false) return;
   if (!firebaseRolesConnected && active.length >= limit) return toast(`오늘 신청 가능한 1인1역을 모두 신청했습니다. (최대 ${limit}개)`);
   if (!firebaseRolesConnected && roleApplicants.length >= role.capacity) return toast("아쉽지만 이 역할은 모집이 끝났어요.");
   if (!firebaseRolesConnected && roleApplicants.some((item) => item.studentId === session.studentId)) return;
@@ -2725,7 +2730,8 @@ function loadTemplateForToday(templateId) {
 
 app.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]"); if (!target) return; const action = target.dataset.action;
-  const roleChangeActions = new Set(["apply-role", "confirm-student-cancel", "complete-role", "undo-complete", "cancel-role", "add-role", "edit-role", "move-role", "delete-role", "load-template", "rename-template", "duplicate-template", "delete-template"]);
+  if (action === "clear-time-input") { const input = document.getElementById(target.dataset.target); if (input?.type === "time") { input.value = ""; target.classList.add("is-clear"); target.setAttribute("aria-pressed", "true"); } return; }
+  const roleChangeActions = new Set(["apply-role", "confirm-student-cancel", "complete-role", "undo-complete", "cancel-role", "add-role", "edit-role", "toggle-role", "move-role", "delete-role", "load-template", "rename-template", "duplicate-template", "delete-template"]);
   const groupChangeActions = new Set(["open-group-settings", "move-selected-group-students", "change-selected-group-score", "change-group-score", "new-class-mission", "edit-class-mission", "ask-delete-class-mission", "confirm-delete-class-mission", "confirm-class-mission", "ask-reset-group-scores", "confirm-reset-group-scores", "confirm-delete-class-student"]);
   const observationChangeActions = new Set(["new-observation", "edit-observation", "add-observation-quick", "save-observation-quick", "delete-observation-quick", "confirm-delete-observation-quick", "ask-delete-observation", "confirm-delete-observation"]);
   const observationSettingsActions = new Set(["add-observation-quick", "save-observation-quick", "delete-observation-quick", "confirm-delete-observation-quick"]);
@@ -3012,6 +3018,14 @@ app.addEventListener("click", async (event) => {
   if (action === "reset-observation-search") { observationFilters = { studentId: "", category: "", keyword: "" }; render(); return; }
   if (action === "add-role") return openRoleModal(target.dataset.scope, target.dataset.template || "");
   if (action === "edit-role") return openRoleModal(target.dataset.scope, target.dataset.template || "", target.dataset.id);
+  if (action === "toggle-role") {
+    const roles = rolesForScope(target.dataset.scope, target.dataset.template); const role = roles?.find((item) => item.id === target.dataset.id); if (!role) return;
+    const previous = target.dataset.scope === "today" ? roleSettingsSnapshot() : structuredClone(data.roleTemplates);
+    role.active = role.active === false;
+    if (target.dataset.scope === "today") persistRoleSettings(previous, `${role.name} 역할을 ${role.active ? "ON" : "OFF"}로 변경했습니다.`);
+    else { const template = structuredClone(data.roleTemplates.find((item) => item.id === target.dataset.template)); persistRoleTemplateChange(previous, () => window.ourClassFirebase.saveRoleTemplate(template), "템플릿 역할 상태를 변경했습니다."); }
+    return;
+  }
   if (action === "move-role") {
     const roles = rolesForScope(target.dataset.scope, target.dataset.template); if (!roles) return;
     const index = roles.findIndex((role) => role.id === target.dataset.id); const nextIndex = index + (target.dataset.direction === "up" ? -1 : 1);
@@ -3152,6 +3166,7 @@ app.addEventListener("change", async (event) => {
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.matches('.time-setting-form input[type="time"]')) { const button = event.target.closest(".time-setting-form")?.querySelector(".time-limit-clear"); if (button) { const empty = !event.target.value; button.classList.toggle("is-clear", empty); button.setAttribute("aria-pressed", String(empty)); } return; }
   if (event.target.id === "reset-data-confirmation") { const button = event.target.closest(".reset-data-modal")?.querySelector("#confirm-reset-data"); if (button) button.disabled = event.target.value !== "초기화"; return; }
   if (event.target.id === "student-activity-reset-confirmation") { const button = event.target.closest(".student-activity-reset-modal")?.querySelector("#confirm-student-activity-reset"); if (button) button.disabled = event.target.value !== "초기화"; return; }
   if (event.target.id === "class-student-search") { classStudentSearch = event.target.value; const keyword = classStudentSearch.trim().toLocaleLowerCase("ko-KR"); let shown = 0; document.querySelectorAll("[data-class-student-id]").forEach((row) => { const student = studentById(row.dataset.classStudentId); row.hidden = !student || Boolean(keyword && !String(studentNumber(student)).includes(keyword) && !student.name.toLocaleLowerCase("ko-KR").includes(keyword) && !student.loginId.toLocaleLowerCase("en-US").includes(keyword)); if (!row.hidden) shown += 1; }); const count = document.querySelector(".class-student-search span"); if (count) count.textContent = `${shown}명 표시`; return; }
@@ -3412,8 +3427,9 @@ app.addEventListener("submit", async (event) => {
   }
   if (form.id === "role-limit-form") {
     const limit = Number(formData.get("limit")); if (!Number.isInteger(limit) || limit < 1 || limit > 5) { toast("하루 최대 신청 개수는 1~5 사이의 정수로 입력해 주세요."); return; }
+    const openTime = String(formData.get("openTime") || ""); if (openTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(openTime)) { toast("신청 시작 시간을 확인해 주세요."); return; }
     const previousSettings = roleSettingsSnapshot();
-    data.dailyRoleApplicationLimit = limit; persistRoleSettings(previousSettings, `하루 최대 신청 개수를 ${limit}개로 저장했습니다.`);
+    data.dailyRoleApplicationLimit = limit; data.roleApplicationOpenTime = openTime; persistRoleSettings(previousSettings, "학생 신청 설정을 저장했습니다.");
   }
   if (form.id === "template-save-form") {
     const name = formData.get("name").trim(); if (!name) return;
@@ -3427,7 +3443,7 @@ app.addEventListener("submit", async (event) => {
     const previous = form.dataset.scope === "today" ? roleSettingsSnapshot() : structuredClone(data.roleTemplates);
     const existing = roles.find((role) => role.id === form.dataset.id);
     if (existing) { if (form.dataset.scope === "today") preserveCurrentRoleApplicationSnapshots(); Object.assign(existing, { name, capacity, points, description }); }
-    else roles.push({ id: crypto.randomUUID(), name, capacity, points, description });
+    else roles.push({ id: crypto.randomUUID(), name, capacity, points, description, active: true });
     const successMessage = existing ? "역할을 수정했습니다." : "새 역할을 추가했습니다.";
     if (form.dataset.scope === "today") persistRoleSettings(previous, successMessage);
     else { const template = structuredClone(data.roleTemplates.find((item) => item.id === form.dataset.template)); persistRoleTemplateChange(previous, () => window.ourClassFirebase.saveRoleTemplate(template), successMessage); }

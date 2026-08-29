@@ -288,7 +288,9 @@ document.addEventListener("click", async (event) => {
     toast(result?.status === "pending" ? "사용 승인을 신청했습니다." : "상품을 사용했습니다.");
   } catch (caught) {
     console.error("Student point product request failed", caught);
-    toast("상품 신청에 실패했습니다. 잔액과 수량을 확인해 주세요.");
+    const message = String(caught?.message || "");
+    const code = String(caught?.details?.code || "");
+    toast(code === "point-shop/not-open-yet" || message.includes("point-shop/not-open-yet") ? "아직 포인트 상품 사용 시간이 아닙니다." : "상품 신청에 실패했습니다. 잔액과 수량을 확인해 주세요.");
     button.disabled = false;
   } finally { usingPointProduct = false; schedulePolling(); }
 }, true);

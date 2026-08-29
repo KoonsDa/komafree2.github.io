@@ -13,6 +13,36 @@
   let studentRepresentativeMutating = false;
   let studentCharacterDraftId = "";
   let studentCharacterMutating = false;
+  let studentDailyOpenTimer = null;
+
+  function dailyOpenState(source = {}) {
+    const openTime = String(source.applicationOpenTime || source.openTime || "");
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(openTime)) return {open: true, openTime: "", waitMillis: 0};
+    const serverNow = Number(source.serverNowMillis) || Date.now();
+    const receivedAt = Number(source.receivedAtMillis) || Date.now();
+    const now = new Date(serverNow + Math.max(0, Date.now() - receivedAt) + 9 * 60 * 60 * 1000);
+    const [hour, minute] = openTime.split(":").map(Number);
+    const currentMinute = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const openMinute = hour * 60 + minute;
+    return {open: currentMinute >= openMinute, openTime,
+      waitMillis: Math.max(0, (openMinute - currentMinute) * 60000 - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds())};
+  }
+
+  function dailyOpenLabel(openTime) {
+    const [hour, minute] = openTime.split(":").map(Number);
+    return `${hour < 12 ? "오전" : "오후"} ${hour % 12 || 12}:${String(minute).padStart(2, "0")}`;
+  }
+
+  function scheduleDailyOpenRefresh(...states) {
+    if (studentDailyOpenTimer !== null) clearTimeout(studentDailyOpenTimer);
+    studentDailyOpenTimer = null;
+    const waits = states.map(dailyOpenState).filter((state) => !state.open && state.waitMillis > 0).map((state) => state.waitMillis);
+    if (!waits.length) return;
+    studentDailyOpenTimer = setTimeout(() => {
+      studentDailyOpenTimer = null;
+      if (typeof session !== "undefined" && session.mode === "firebase-student" && document.visibilityState !== "hidden") render();
+    }, Math.min(...waits) + 100);
+  }
 
   const studentDrawRarityMeta = {
     "일반": { className: "student-v158-rarity-common", stars: "★★", frame: "assets/card-ui/초록빛_황금_장식_카드_프레임.png" },
@@ -109,13 +139,13 @@
     </article>`;
   }
 
-  function roleCard(role, activeApplications, dailyLimit) {
+  function roleCard(role, activeApplications, dailyLimit, openState) {
     const mine = activeApplications.find((application) => application.roleId === role.id);
     const full = role.currentCount >= role.capacity;
     const limitReached = activeApplications.length >= dailyLimit;
     const completed = mine?.status === "completed";
     const waiting = mine?.status === "waiting";
-    const unavailable = full || (limitReached && !mine);
+    const unavailable = full || (limitReached && !mine) || (!openState.open && !mine);
 
     let button = "";
     if (completed) {
@@ -123,11 +153,11 @@
     } else if (waiting) {
       button = `<button class="student-v15-role-button is-cancel" type="button" data-action="open-cloud-role-cancel" data-id="${escapeHtml(mine.id)}" ${firebaseStudentRoleMutating ? "disabled" : ""}>신청 취소</button>`;
     } else {
-      const label = full ? "신청 불가" : limitReached ? "오늘 신청 완료" : "신청하기";
+      const label = !openState.open ? `${dailyOpenLabel(openState.openTime)}부터` : full ? "신청 불가" : limitReached ? "오늘 신청 완료" : "신청하기";
       button = `<button class="student-v15-role-button ${unavailable ? "is-disabled" : ""}" type="button" data-action="apply-cloud-role" data-id="${escapeHtml(role.id)}" ${unavailable || firebaseStudentRoleMutating ? "disabled" : ""}>${label}</button>`;
     }
 
-    const state = completed ? "완료" : waiting ? "신청 대기" : full ? "마감" : "신청 가능";
+    const state = completed ? "완료" : waiting ? "신청 대기" : !openState.open ? "시작 전" : full ? "마감" : "신청 가능";
     const stateClass = completed ? "submitted" : waiting ? "review" : full ? "closed" : "open";
     const capacityText = full ? "정원 마감" : `${role.currentCount} / ${role.capacity}명`;
 
@@ -190,13 +220,15 @@
   function roleSection(home, homeOnly = false) {
     const activeApplications = home.myRoleApplications.filter((application) => application.status !== "cancelled");
     const dailyLimit = Number(home.roleSettings.dailyLimit) || 1;
+    const openState = dailyOpenState(home.roleSettings);
     return `<section class="student-v15-section student-v15-role-section">
       <div class="student-v15-section-heading-row">
         <div class="student-v15-section-title"><span class="student-v15-title-icon shield">⭐</span><h2>오늘의 1인1역</h2></div>
         <div class="student-v155-heading-actions"><span class="student-v15-role-summary">나의 신청 ${activeApplications.length} / ${dailyLimit}</span>${homeOnly ? `<button type="button" class="student-v155-section-link" data-student-cloud-view="roles">전체 보기 →</button>` : ""}</div>
       </div>
+      ${!openState.open ? `<p class="student-daily-open-notice">${dailyOpenLabel(openState.openTime)}부터 신청할 수 있어요.</p>` : ""}
       ${home.roleSettings.roles.length
-        ? `<div class="student-v15-role-grid">${home.roleSettings.roles.map((role) => roleCard(role, activeApplications, dailyLimit)).join("")}</div>`
+        ? `<div class="student-v15-role-grid">${home.roleSettings.roles.map((role) => roleCard(role, activeApplications, dailyLimit, openState)).join("")}</div>`
         : `<div class="student-v15-empty">현재 신청 가능한 역할이 없습니다.</div>`}
     </section>`;
   }
@@ -302,13 +334,14 @@
     if (!items.length) return `<div class="student-v159-point-use-empty"><strong>현재 이용할 수 있는 상품이 없어요.</strong><p>선생님이 상품을 등록하면 여기에 표시됩니다.</p></div>`;
     const statusLabels = {pending: "승인 대기 중", "sold-out": "오늘 수량 소진", "limit-reached": "오늘 이용 완료", insufficient: "잔액 부족", inactive: "이용 불가"};
     const cancellingRequestId = String(portal.cancellingPointUseRequestId || "");
-    return `<div class="student-v159-point-use-grid">${items.map((item) => {
+    const openState = dailyOpenState(shopState.data);
+    return `${!openState.open ? `<p class="student-daily-open-notice">${dailyOpenLabel(openState.openTime)}부터 사용할 수 있어요.</p>` : ""}<div class="student-v159-point-use-grid">${items.map((item) => {
       const remaining = Math.max(0, Number(item.remainingStock) || 0);
       const limit = Math.max(1, Number(item.perStudentDailyLimit) || 1);
       const price = Math.max(0, Number(item.price) || 0);
-      const available = item.status === "available";
+      const available = item.status === "available" && openState.open;
       const pendingRequestId = item.status === "pending" && item.approvalRequired === true ? String(item.pendingRequestId || "") : "";
-      const reason = available ? (item.approvalRequired ? "사용 신청" : "바로 사용") : (statusLabels[item.status] || "이용 불가");
+      const reason = !openState.open ? `${dailyOpenLabel(openState.openTime)}부터` : available ? (item.approvalRequired ? "사용 신청" : "바로 사용") : (statusLabels[item.status] || "이용 불가");
       return `<article class="student-v159-point-use-card ${available ? "" : "is-disabled"}">
         <span class="student-v159-point-use-icon" aria-hidden="true">${escapeHtml(item.icon || "🎁")}</span>
         <div class="student-v159-point-use-copy"><h3>${escapeHtml(item.name || "이름 없는 상품")}</h3>${String(item.description || "").trim() ? `<p>${escapeHtml(String(item.description).trim())}</p>` : ""}</div>
@@ -797,6 +830,10 @@
     if (event.key === "Escape" && !studentCharacterMutating) document.querySelector(".student-character-modal")?.remove();
   }, true);
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && typeof session !== "undefined" && session.mode === "firebase-student") render();
+  });
+
   renderFirebaseStudentLanding = function renderFirebaseStudentLandingV155() {
     if (firebaseStudentHomeLoading) {
       document.title = "우리반 퀘스트";
@@ -814,6 +851,7 @@
     const profile = home.profile;
     const classInfo = home.classInfo;
     const features = classInfo.features || {};
+    scheduleDailyOpenRefresh(home.roleSettings || {}, window.ourClassStudentPortal?.state?.()?.shop?.data || {});
 
     document.title = classInfo.appName || "우리반 퀘스트";
     app.innerHTML = `

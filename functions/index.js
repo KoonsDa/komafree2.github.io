@@ -688,6 +688,25 @@ function seoulDateKey() {
   }).format(new Date());
 }
 
+function normalizedOpenTime(value) {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : "";
+}
+
+function seoulMinuteOfDay(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
+function beforeDailyOpenTime(openTime, now = new Date()) {
+  const normalized = normalizedOpenTime(openTime);
+  if (!normalized) return false;
+  const [hour, minute] = normalized.split(":").map(Number);
+  return seoulMinuteOfDay(now) < hour * 60 + minute;
+}
+
 function assignmentStudentStateId(assignmentId, studentId) {
   return encodeURIComponent(JSON.stringify([String(assignmentId), String(studentId)]));
 }
@@ -840,8 +859,9 @@ exports.getStudentHomeData = onCall(
         capacity: Math.max(1, Number(role?.capacity) || 1),
         description: typeof role?.description === "string" ?
           role.description : "",
+        active: role?.active !== false,
         currentCount: Math.max(0, Number(roleCounts[role?.id]) || 0),
-      })).filter((role) => role.id && role.name);
+      })).filter((role) => role.id && role.name && role.active);
       const myRoleApplications = roleApplicationsSnapshot.docs.map((snapshot) => {
         const value = snapshot.data();
         return {
@@ -881,7 +901,9 @@ exports.getStudentHomeData = onCall(
         },
         points: Number.isFinite(pointValue) ? pointValue : 0,
         assignments,
-        roleSettings: {dailyLimit, roles},
+        roleSettings: {dailyLimit, roles,
+          applicationOpenTime: normalizedOpenTime(roleSettings?.roleApplicationOpenTime),
+          serverNowMillis: Date.now()},
         myRoleApplications,
       };
     },
@@ -1016,6 +1038,13 @@ exports.studentApplyRole = onCall(
           throw callableMutationError("role/status-conflict", "Role application already exists.");
         }
         const settings = settingsSnapshot.data();
+        const roleApplicationOpenTime = normalizedOpenTime(settings?.roleApplicationOpenTime);
+        if (beforeDailyOpenTime(roleApplicationOpenTime)) {
+          throw callableMutationError(
+              "role/not-open-yet",
+              `1인1역 신청은 ${roleApplicationOpenTime}부터 가능합니다.`,
+          );
+        }
         const rawLimit = Number(settings?.dailyRoleApplicationLimit);
         if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 5) {
           throw callableMutationError("role/settings-invalid", "Role settings are invalid.");
@@ -1024,7 +1053,7 @@ exports.studentApplyRole = onCall(
           settings.currentRoles : [];
         const role = rawRoles.find((item) => item?.id === roleId);
         const capacity = Number(role?.capacity);
-        if (!role || !Number.isInteger(capacity) || capacity < 1) {
+        if (!role || role.active === false || !Number.isInteger(capacity) || capacity < 1) {
           throw callableMutationError("role/not-found", "Current role was not found.", "not-found");
         }
         const usage = usageSnapshot.data();

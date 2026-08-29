@@ -51,12 +51,13 @@ function assignmentStudentStateFields(value) {
 
 function roleFields(value) {
   const points = Number(value?.points); const capacity = Number(value?.capacity);
-  return { id: String(value?.id || ""), name: String(value?.name || ""), points: Number.isInteger(points) && points >= 0 ? points : 0, capacity: Number.isInteger(capacity) && capacity >= 1 ? capacity : 1, description: String(value?.description || "") };
+  return { id: String(value?.id || ""), name: String(value?.name || ""), points: Number.isInteger(points) && points >= 0 ? points : 0, capacity: Number.isInteger(capacity) && capacity >= 1 ? capacity : 1, description: String(value?.description || ""), active: value?.active !== false };
 }
 
 function roleSettingsFields(value) {
   const limit = Number(value?.dailyRoleApplicationLimit);
-  return { dailyRoleApplicationLimit: Number.isInteger(limit) && limit >= 1 && limit <= 5 ? limit : 1, currentRoles: (Array.isArray(value?.currentRoles) ? value.currentRoles : []).map(roleFields) };
+  const openTime = String(value?.roleApplicationOpenTime || "");
+  return { dailyRoleApplicationLimit: Number.isInteger(limit) && limit >= 1 && limit <= 5 ? limit : 1, roleApplicationOpenTime: /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(openTime) ? openTime : "", currentRoles: (Array.isArray(value?.currentRoles) ? value.currentRoles : []).map(roleFields) };
 }
 
 function roleTemplateFields(value) {
@@ -158,6 +159,7 @@ try {
   const studentRequestAssignmentReviewCallable = httpsCallable(studentFunctions, "studentRequestAssignmentReview");
   const studentApplyRoleCallable = httpsCallable(studentFunctions, "studentApplyRole");
   const studentCancelRoleCallable = httpsCallable(studentFunctions, "studentCancelRole");
+  const saveRoleSettingsCallable = httpsCallable(functions, "saveRoleSettings");
   const getPointShopDataCallable = httpsCallable(functions, "getPointShopData");
   const getStudentPointShopDataCallable = httpsCallable(studentFunctions, "getPointShopData");
   const savePointShopProductCallable = httpsCallable(functions, "savePointShopProduct");
@@ -190,10 +192,10 @@ try {
     getPointShopData: async ({classId, mode = "teacher"} = {}) => {
       const callable = mode === "student" ? getStudentPointShopDataCallable : getPointShopDataCallable;
       const result = await callable(mode === "student" ? {mode: "student"} : {mode: "teacher", classId: String(classId || activeClassId || "")});
-      return result?.data && typeof result.data === "object" ? result.data : {};
+      return result?.data && typeof result.data === "object" ? {...result.data, receivedAtMillis: Date.now()} : {};
     },
-    savePointShopProduct: async ({classId, action = "save", item, items} = {}) => {
-      const result = await savePointShopProductCallable({classId: String(classId || activeClassId || ""), action, item, items});
+    savePointShopProduct: async ({classId, action = "save", item, items, openTime} = {}) => {
+      const result = await savePointShopProductCallable({classId: String(classId || activeClassId || ""), action, item, items, openTime: String(openTime || "")});
       return result?.data && typeof result.data === "object" ? result.data : {};
     },
     studentUsePointProduct: async ({itemId}) => {
@@ -285,7 +287,7 @@ try {
         classInfo: {className: String(classInfo.className || ""), appName: String(classInfo.appName || ""), features: {assignments: features.assignments !== false, roles: features.roles !== false, points: features.points !== false}},
         points: Number(value.points) || 0,
         assignments: (Array.isArray(value.assignments) ? value.assignments : []).map((assignment) => ({id: String(assignment?.id || ""), title: String(assignment?.title || ""), subject: String(assignment?.subject || ""), description: String(assignment?.description || ""), dueDate: String(assignment?.dueDate || ""), points: Number(assignment?.points) || 0, important: assignment?.important === true, assignmentState: assignment?.assignmentState === "completed" ? "completed" : "active", status: ["missing", "review", "submitted"].includes(assignment?.status) ? assignment.status : "missing"})),
-        roleSettings: {dailyLimit: Number(roleSettings.dailyLimit) || 1, roles: (Array.isArray(roleSettings.roles) ? roleSettings.roles : []).map((role) => ({id: String(role?.id || ""), name: String(role?.name || ""), points: Number(role?.points) || 0, capacity: Number(role?.capacity) || 1, description: String(role?.description || ""), currentCount: Number(role?.currentCount) || 0}))},
+        roleSettings: {dailyLimit: Number(roleSettings.dailyLimit) || 1, applicationOpenTime: String(roleSettings.applicationOpenTime || ""), serverNowMillis: Number(roleSettings.serverNowMillis) || Date.now(), receivedAtMillis: Date.now(), roles: (Array.isArray(roleSettings.roles) ? roleSettings.roles : []).map((role) => ({id: String(role?.id || ""), name: String(role?.name || ""), points: Number(role?.points) || 0, capacity: Number(role?.capacity) || 1, description: String(role?.description || ""), currentCount: Number(role?.currentCount) || 0}))},
         myRoleApplications: (Array.isArray(value.myRoleApplications) ? value.myRoleApplications : []).map((application) => ({id: String(application?.id || ""), roleId: String(application?.roleId || ""), status: ["waiting", "completed", "cancelled"].includes(application?.status) ? application.status : "waiting", date: String(application?.date || "")})),
       };
     },
@@ -422,8 +424,8 @@ try {
     },
     saveRoleSettings: async (value) => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");
-      const settingsRef = doc(db, "classes", activeClassId, "roleSettings", "current"); const snapshot = await getDoc(settingsRef); const timestamp = serverTimestamp();
-      await setDoc(settingsRef, { ...roleSettingsFields(value), ...(!snapshot.exists() ? { createdAt: timestamp } : {}), updatedAt: timestamp }, { merge: true });
+      const result = await saveRoleSettingsCallable({classId: activeClassId, ...roleSettingsFields(value)});
+      return result?.data;
     },
     loadRoleSettings: async () => {
       if (!auth.currentUser || !activeClassId) throw new Error("Connected Firebase class was not found.");

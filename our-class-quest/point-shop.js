@@ -4,15 +4,16 @@
   let teacherPointPollTimer = null;
   let teacherPointPollClassId = "";
   let teacherPointRenderPending = false;
+  let pointShopOpenTime = "";
   const TEACHER_POINT_POLL_INTERVAL = 5000;
   function cloudClassId() { return window.ourClassFirebase?.getActiveClassId?.() || ""; }
   function cloudEnabled() { return Boolean(window.ourClassFirebase?.ready && window.ourClassFirebase?.getCurrentUser?.()?.uid && cloudClassId()); }
   function teacherPointPollingActive() { return document.visibilityState !== "hidden" && session.mode === "teacher" && session.view === "points" && cloudEnabled(); }
-  function cloudShopSignature(items, requests) {
+  function cloudShopSignature(items, requests, openTime = pointShopOpenTime) {
     const itemKeys = ["id", "name", "description", "icon", "price", "dailyStock", "perStudentDailyLimit", "approvalRequired", "active", "deleted"];
     const requestKeys = ["id", "status", "studentId", "itemId", "itemName", "date", "price", "approvalRequired", "createdAt", "resolvedAt", "cancelledAt", "cancelledBy"];
     const rows = (values, keys) => (Array.isArray(values) ? values : []).map((value) => Object.fromEntries(keys.map((key) => [key, value?.[key] ?? null]))).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    return JSON.stringify({items: rows(items, itemKeys), requests: rows(requests, requestKeys)});
+    return JSON.stringify({openTime, items: rows(items, itemKeys), requests: rows(requests, requestKeys)});
   }
   function stopTeacherPointPolling(resetClass = true) {
     if (teacherPointPollTimer !== null) clearTimeout(teacherPointPollTimer);
@@ -55,9 +56,11 @@
       }
       const items = Array.isArray(result.items) ? result.items : [];
       const requests = Array.isArray(result.requests) ? result.requests : [];
-      const changed = cloudShopSignature(data.pointShopItems, data.pointUseRequests) !== cloudShopSignature(items, requests);
+      const nextOpenTime = String(result.openTime || "");
+      const changed = cloudShopSignature(data.pointShopItems, data.pointUseRequests, pointShopOpenTime) !== cloudShopSignature(items, requests, nextOpenTime);
       data.pointShopItems = items;
       data.pointUseRequests = requests;
+      pointShopOpenTime = nextOpenTime;
       cloudLoadedClassId = classId;
       if (changed) saveData();
       if (changed && session.mode === "teacher" && session.view === "points") {
@@ -112,7 +115,7 @@
   function teacherShopSection() {
     const items = data.pointShopItems.filter((item) => !item.deleted);
     const rows = items.map((item) => { const applicantCount = new Set(todayRequestsForItem(item.id).filter((request) => ["pending", "completed"].includes(request.status)).map((request) => request.studentId)).size; return `<article class="card point-shop-manage-card"><div><div class="point-shop-card-heading"><h3>${escapeHtml(item.name)}</h3><strong>${item.price}P</strong></div>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}<small>오늘 남은 수량 ${remainingStock(item)} / ${item.dailyStock} · 학생당 하루 ${item.perStudentDailyLimit}회 · ${item.approvalRequired ? "승인 필요" : "즉시 사용"}</small></div><div class="button-row"><button class="button secondary compact" data-action="view-point-shop-requests" data-id="${item.id}">신청 현황 ${applicantCount}명</button><button class="button ${item.active ? "success" : "secondary"} compact" data-action="toggle-point-shop-item" data-id="${item.id}">${item.active ? "ON" : "OFF"}</button><button class="button secondary compact" data-action="edit-point-shop-item" data-id="${item.id}">수정</button><button class="button danger compact" data-action="ask-delete-point-shop-item" data-id="${item.id}">삭제</button></div></article>`; }).join("");
-    return `${pendingSection()}<section class="management-section"><div class="section-heading"><div><h2>포인트 상품 관리</h2><p class="muted">상품 설정은 날짜가 바뀌어도 유지됩니다.</p></div><div class="button-row"><button class="button secondary" data-action="save-point-shop-set">현재 상품을 세트로 저장</button><button class="button secondary" data-action="manage-point-shop-sets">저장된 세트 불러오기/관리</button><button class="button success" data-action="new-point-shop-item">+ 상품 추가</button></div></div>${rows ? `<div class="point-shop-manage-list">${rows}</div>` : `<div class="empty">등록된 포인트 상품이 없습니다.</div>`}</section>`;
+    return `${pendingSection()}<section class="card management-section"><div class="section-heading"><div><h2>학생 사용 시작 시간</h2><p class="muted">비워 두면 기존처럼 시간 제한 없이 사용할 수 있습니다.</p></div><form id="point-shop-time-form" class="inline-form time-setting-form"><input id="point-shop-open-time" name="openTime" type="time" value="${escapeHtml(pointShopOpenTime)}" aria-label="포인트 상품 사용 시작 시간"><button class="button secondary compact time-limit-clear${pointShopOpenTime ? "" : " is-clear"}" type="button" data-action="clear-time-input" data-target="point-shop-open-time" aria-pressed="${pointShopOpenTime ? "false" : "true"}">시간 제한 없음</button><button class="button" type="submit">저장</button></form></div></section><section class="management-section"><div class="section-heading"><div><h2>포인트 상품 관리</h2><p class="muted">상품을 미리 등록하고 오늘 사용할 항목만 ON으로 설정하세요.</p></div><div class="button-row"><button class="button success" data-action="new-point-shop-item">+ 상품 추가</button></div></div>${rows ? `<div class="point-shop-manage-list">${rows}</div>` : `<div class="empty">등록된 포인트 상품이 없습니다.</div>`}</section>`;
   }
   const originalTeacherPoints = teacherPoints;
   teacherPoints = function pointShopTeacherPoints() { setTimeout(() => syncTeacherPointPolling(), 0); return `${originalTeacherPoints()}${teacherShopSection()}`; };
@@ -185,7 +188,9 @@
   });
 
   app.addEventListener("submit", async (event) => {
-    const form = event.target; if (form.id !== "point-shop-item-form") return; event.preventDefault(); const values = new FormData(form); const name = String(values.get("name") || "").trim(); const description = String(values.get("description") || "").trim(); const price = Number(values.get("price")); const dailyStock = Number(values.get("dailyStock")); const perStudentDailyLimit = Number(values.get("perStudentDailyLimit"));
+    const form = event.target;
+    if (form.id === "point-shop-time-form") { event.preventDefault(); const openTime = String(new FormData(form).get("openTime") || ""); if (openTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(openTime)) return toast("사용 시작 시간을 확인해 주세요."); try { await window.ourClassFirebase.savePointShopProduct({classId: cloudClassId(), action: "save-settings", openTime}); pointShopOpenTime = openTime; await loadCloudShop(true); toast("포인트 상품 사용 시작 시간을 저장했습니다."); } catch (error) { console.error(error); toast("사용 시작 시간을 저장하지 못했습니다."); } return; }
+    if (form.id !== "point-shop-item-form") return; event.preventDefault(); const values = new FormData(form); const name = String(values.get("name") || "").trim(); const description = String(values.get("description") || "").trim(); const price = Number(values.get("price")); const dailyStock = Number(values.get("dailyStock")); const perStudentDailyLimit = Number(values.get("perStudentDailyLimit"));
     if (!name || !Number.isInteger(price) || price < 0 || !Number.isInteger(dailyStock) || dailyStock < 1 || !Number.isInteger(perStudentDailyLimit) || perStudentDailyLimit < 1) return toast("상품 설정값을 확인해 주세요.");
     const now = new Date().toISOString(); const existing = itemById(form.dataset.id); const update = { name: name.slice(0, 80), description: description.slice(0, 300), price, dailyStock, perStudentDailyLimit, approvalRequired: values.has("approvalRequired"), active: values.has("active"), updatedAt: now };
     const savedItem = existing || { id: crypto.randomUUID(), deleted: false, createdAt: now }; Object.assign(savedItem, update); if (!existing) data.pointShopItems.push(savedItem); saveData(); render();

@@ -283,6 +283,25 @@ function seoulDateKey(now = new Date()) {
   }).format(now);
 }
 
+function normalizedOpenTime(value) {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : "";
+}
+
+function seoulMinuteOfDay(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
+function beforeDailyOpenTime(openTime, now = new Date()) {
+  const normalized = normalizedOpenTime(openTime);
+  if (!normalized) return false;
+  const [hour, minute] = normalized.split(":").map(Number);
+  return seoulMinuteOfDay(now) < hour * 60 + minute;
+}
+
 function normalizedShopItem(value, fallbackId = "") {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const id = stringValue(source.id) || fallbackId;
@@ -307,8 +326,39 @@ async function verifiedTeacherClass(request, classIdInput) {
   if (!classSnapshot.exists || classSnapshot.data()?.ownerUid !== request.auth.uid) {
     throw new HttpsError("permission-denied", "Class owner permission is required.");
   }
-  return {db, classId, classRef, uid: request.auth.uid};
+  return {db, classId, classRef, uid: request.auth.uid,
+    classData: classSnapshot.data() || {}};
 }
+
+exports.saveRoleSettings = onCall({region: "asia-northeast3"}, async (request) => {
+  const context = await verifiedTeacherClass(request, request.data?.classId);
+  const rawLimit = Number(request.data?.dailyRoleApplicationLimit);
+  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 5) {
+    throw new HttpsError("invalid-argument", "dailyRoleApplicationLimit must be an integer from 1 to 5.");
+  }
+  const openTimeInput = stringValue(request.data?.roleApplicationOpenTime).trim();
+  const openTime = openTimeInput ? normalizedOpenTime(openTimeInput) : "";
+  if (openTimeInput && !openTime) {
+    throw new HttpsError("invalid-argument", "roleApplicationOpenTime must use HH:mm format.");
+  }
+  const roles = (Array.isArray(request.data?.currentRoles) ? request.data.currentRoles : []).slice(0, 200).map((value) => ({
+    id: stringValue(value?.id).trim(),
+    name: stringValue(value?.name).trim().slice(0, 40),
+    points: Math.max(0, Math.trunc(numberValue(value?.points))),
+    capacity: Math.max(1, Math.trunc(numberValue(value?.capacity) || 1)),
+    description: stringValue(value?.description).trim().slice(0, 160),
+    active: value?.active !== false,
+  })).filter((role) => role.id && role.name);
+  const settingsRef = context.classRef.collection("roleSettings").doc("current");
+  const snapshot = await settingsRef.get();
+  const timestamp = FieldValue.serverTimestamp();
+  await settingsRef.set({dailyRoleApplicationLimit: rawLimit,
+    roleApplicationOpenTime: openTime, currentRoles: roles,
+    createdAt: snapshot.exists && snapshot.data()?.createdAt ? snapshot.data().createdAt : timestamp,
+    updatedAt: timestamp}, {merge: true});
+  return {ok: true, dailyRoleApplicationLimit: rawLimit,
+    roleApplicationOpenTime: openTime, currentRoles: roles};
+});
 
 function shopRequestCounts(docs, itemId, studentId = "", excludeId = "") {
   const matching = docs.map((doc) => ({id: doc.id, ...(doc.data() || {})}))
@@ -337,7 +387,10 @@ exports.getPointShopData = onCall({region: "asia-northeast3"}, async (request) =
       context.classRef.collection("pointShopItems").get(),
       context.classRef.collection("pointUseRequests").where("date", "==", date).get(),
     ]);
-    return {ok: true, date, items: itemsSnapshot.docs.map((doc) => ({...normalizedShopItem(doc.data(), doc.id),
+    return {ok: true, date,
+      openTime: normalizedOpenTime(context.classData.pointShopOpenTime),
+      serverNowMillis: Date.now(),
+      items: itemsSnapshot.docs.map((doc) => ({...normalizedShopItem(doc.data(), doc.id),
       createdAt: timestampMillis(doc.data()?.createdAt) ? new Date(timestampMillis(doc.data().createdAt)).toISOString() : "",
       updatedAt: timestampMillis(doc.data()?.updatedAt) ? new Date(timestampMillis(doc.data().updatedAt)).toISOString() : ""})),
     requests: requestsSnapshot.docs.map((doc) => ({id: doc.id, ...(doc.data() || {}), createdAt: timestampMillis(doc.data()?.createdAt) ? new Date(timestampMillis(doc.data().createdAt)).toISOString() : "", resolvedAt: timestampMillis(doc.data()?.resolvedAt) ? new Date(timestampMillis(doc.data().resolvedAt)).toISOString() : null}))};
@@ -356,12 +409,24 @@ exports.getPointShopData = onCall({region: "asia-northeast3"}, async (request) =
         return {...item, remainingStock: Math.max(0, item.dailyStock - counts.total), studentUsed: counts.student,
           status: pointShopStatus(item, counts, points), pendingRequestId: counts.pendingRequestId};
       });
-  return {ok: true, date, points, items};
+  const openTime = normalizedOpenTime(context.classData.pointShopOpenTime);
+  return {ok: true, date, points, items, openTime,
+    isOpen: !beforeDailyOpenTime(openTime), serverNowMillis: Date.now()};
 });
 
 exports.savePointShopProduct = onCall({region: "asia-northeast3"}, async (request) => {
   const context = await verifiedTeacherClass(request, request.data?.classId);
   const action = stringValue(request.data?.action) || "save";
+  if (action === "save-settings") {
+    const openTimeInput = stringValue(request.data?.openTime).trim();
+    const openTime = openTimeInput ? normalizedOpenTime(openTimeInput) : "";
+    if (openTimeInput && !openTime) {
+      throw new HttpsError("invalid-argument", "pointShopOpenTime must use HH:mm format.");
+    }
+    await context.classRef.set({pointShopOpenTime: openTime,
+      updatedAt: FieldValue.serverTimestamp()}, {merge: true});
+    return {ok: true, openTime};
+  }
   if (action === "migrate") {
     const items = Array.isArray(request.data?.items) ? request.data.items.slice(0, 200) : [];
     const collectionRef = context.classRef.collection("pointShopItems");
@@ -401,9 +466,14 @@ exports.studentUsePointProduct = onCall({region: "asia-northeast3"}, async (requ
   const historyRef = classRef.collection("pointHistory").doc(`${context.studentId}_${randomUUID()}`);
   return context.db.runTransaction(async (transaction) => {
     const dailyQuery = classRef.collection("pointUseRequests").where("date", "==", date);
-    const [itemSnapshot, pointSnapshot, studentSnapshot, requestsSnapshot] = await Promise.all([
-      transaction.get(itemRef), transaction.get(pointRef), transaction.get(studentRef), transaction.get(dailyQuery),
+    const [classSnapshot, itemSnapshot, pointSnapshot, studentSnapshot, requestsSnapshot] = await Promise.all([
+      transaction.get(classRef), transaction.get(itemRef), transaction.get(pointRef), transaction.get(studentRef), transaction.get(dailyQuery),
     ]);
+    const openTime = normalizedOpenTime(classSnapshot.data()?.pointShopOpenTime);
+    if (beforeDailyOpenTime(openTime)) {
+      throw new HttpsError("failed-precondition", `point-shop/not-open-yet:${openTime}`,
+          {code: "point-shop/not-open-yet", openTime});
+    }
     const item = itemSnapshot.exists ? normalizedShopItem(itemSnapshot.data(), itemSnapshot.id) : null;
     if (!item || !item.name || !item.active || item.deleted) throw new HttpsError("failed-precondition", "point-shop/inactive");
     if (!studentSnapshot.exists || studentSnapshot.data()?.active === false) throw new HttpsError("permission-denied", "Student is inactive.");

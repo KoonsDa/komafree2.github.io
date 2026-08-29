@@ -217,7 +217,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .role-limit-settings { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
 .role-limit-settings h2, .role-limit-settings p { margin-block: 0 6px; }
 .role-limit-settings .inline-form { flex: 0 0 auto; }
-.role-limit-settings input { width: 82px; }
+.role-limit-settings input[type="number"] { width: 82px; }
+.time-setting-form { align-items: center; flex-wrap: wrap; }
+.time-setting-form input[type="time"] { flex: 0 0 138px; width: 138px; min-width: 138px; }
+.time-limit-clear { white-space: nowrap; }
+.time-limit-clear.is-clear { color: #5848b8; background: #f0edff; border-color: #c9c0ff; }
 .role-application-limit-status { display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; gap: 4px 12px; margin-bottom: 16px; background: #f3f1ff; }
 .role-application-limit-status span { color: #697087; font-weight: 800; }
 .role-application-limit-status strong { font-size: 1.25rem; }
@@ -1015,6 +1019,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .role-order { align-self: stretch; }
   .icon-button { width: 100%; }
   .inline-form { flex-direction: column; }
+  .time-setting-form { align-items: flex-start; flex-direction: row; }
   .assignment-overview-grid, .assignment-toolbar, .completed-assignment-toolbar { grid-template-columns: 1fr; }
   .assignment-card-top { flex-direction: column; }
   .assignment-meta { align-items: flex-start; flex-direction: column; }
