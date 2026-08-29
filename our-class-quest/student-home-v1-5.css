@@ -3145,8 +3145,12 @@
     word-break:keep-all;
     overflow-wrap:normal;
   }
+  .student-v157-chest-art {
+    --student-v157-chest-offset:-14px;
+    transform:translateX(var(--student-v157-chest-offset));
+  }
   .student-v157-draw-option.special .student-v157-chest-art {
-    transform:translateX(-2px);
+    --student-v157-chest-offset:-16px;
   }
   .collection-album-grid {
     gap:8px;
