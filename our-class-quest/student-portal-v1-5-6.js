@@ -112,6 +112,11 @@ async function setRepresentativeCard(cardId, rarity, abilityId) {
   if (result?.ok !== true) throw new Error("Representative card response was invalid.");
   await ensureCardCollectionLoaded(true); return result;
 }
+async function upgradeCard(cardId, rarity) {
+  const result = await window.ourClassFirebase?.studentUpgradeCard?.({cardId, rarity});
+  if (result?.ok !== true) throw new Error("Card upgrade response was invalid.");
+  await ensureCardCollectionLoaded(true); return result;
+}
 
 async function ensureGiftLoaded(force = false, quiet = false) {
   if (!force && gift.loaded && gift.data) return gift.data;
@@ -243,7 +248,7 @@ async function refreshPointScreen(forceRender = false) {
 }
 
 window.ourClassStudentPortal = { ensureLoaded, ensureShopLoaded, ensureGiftLoaded, ensureCardDrawLoaded, ensureCardCollectionLoaded,
-  setRepresentativeCard, usePointProduct, cancelPointUseRequest, giftPoints, drawCard, refreshPointScreen, refreshRankingScreen, state };
+  setRepresentativeCard, upgradeCard, usePointProduct, cancelPointUseRequest, giftPoints, drawCard, refreshPointScreen, refreshRankingScreen, state };
 
 function pointGiftError(caught) {
   const message = String(caught?.message || "");

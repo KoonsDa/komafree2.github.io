@@ -177,6 +177,7 @@ try {
   const saveCardConfigCallable = httpsCallable(functions, "saveCardConfig");
   const getStudentCardDrawDataCallable = httpsCallable(studentFunctions, "getStudentCardDrawData");
   const studentDrawCardCallable = httpsCallable(studentFunctions, "studentDrawCard");
+  const studentUpgradeCardCallable = httpsCallable(studentFunctions, "studentUpgradeCard");
   const getStudentCardCollectionCallable = httpsCallable(studentFunctions, "getStudentCardCollection");
   const setStudentRepresentativeCardCallable = httpsCallable(studentFunctions, "setStudentRepresentativeCard");
   const saveCardPortraitCallable = httpsCallable(functions, "saveCardPortrait");
@@ -249,6 +250,10 @@ try {
     },
     studentDrawCard: async ({drawOptionId}) => {
       const result = await studentDrawCardCallable({drawOptionId: String(drawOptionId || "")});
+      return result?.data && typeof result.data === "object" ? result.data : {};
+    },
+    studentUpgradeCard: async ({cardId, rarity}) => {
+      const result = await studentUpgradeCardCallable({cardId: String(cardId || ""), rarity: String(rarity || "")});
       return result?.data && typeof result.data === "object" ? result.data : {};
     },
     getStudentCardCollection: async () => {

@@ -755,6 +755,12 @@ exports.studentGiftPoints = onCall({region: "asia-northeast3"}, async (request) 
 });
 
 const CARD_RARITIES = ["일반", "희귀", "영웅", "전설", "고대"];
+const CARD_UPGRADE_STEPS = {
+  "일반": {to: "희귀", key: "commonToRare"},
+  "희귀": {to: "영웅", key: "rareToEpic"},
+  "영웅": {to: "전설", key: "epicToLegendary"},
+  "전설": {to: "고대", key: "legendaryToAncient"},
+};
 const CARD_RATE_KEYS = {"일반": "common", "희귀": "rare", "영웅": "epic", "전설": "legendary", "고대": "ancient"};
 const FIXED_CARD_DRAW_OPTION_IDS = new Set(["draw-basic", "draw-premium"]);
 
@@ -1075,6 +1081,60 @@ exports.studentDrawCard = onCall({region: "asia-northeast3"}, async (request) =>
     return {ok: true, historyId, points: points - option.price, drawOptionId: option.id, drawOptionName: option.name,
       card: {id: card.id, name: card.name, era: card.era, achievement: card.achievement, imageData: card.imageUrl || card.imageData,
         cardSetId: card.cardSetId, rarity, ability: effect, abilityId: ability.id, count: previousCount + 1, totalOwned}};
+  });
+});
+
+exports.studentUpgradeCard = onCall({region: "asia-northeast3"}, async (request) => {
+  const context = await verifiedStudentContext(request);
+  const cardId = stringValue(request.data?.cardId).trim(); const rarity = stringValue(request.data?.rarity).trim();
+  if (!cardId || !CARD_RARITIES.includes(rarity)) throw new HttpsError("invalid-argument", "card-upgrade/card-not-found");
+  const step = CARD_UPGRADE_STEPS[rarity];
+  if (!step) throw new HttpsError("failed-precondition", "card-upgrade/max-rarity");
+  const classRef = context.db.doc(`classes/${context.classId}`);
+  const inventoryRef = classRef.collection("studentCardInventories").doc(context.studentId);
+  const cardRef = classRef.collection("cards").doc(cardId); const configRef = classRef.collection("cardSettings").doc("config");
+  const historyId = randomUUID();
+  return context.db.runTransaction(async (transaction) => {
+    const [inventorySnapshot, cardSnapshot, configSnapshot] = await Promise.all([
+      transaction.get(inventoryRef), transaction.get(cardRef), transaction.get(configRef),
+    ]);
+    if (!cardSnapshot.exists) throw new HttpsError("not-found", "card-upgrade/card-not-found");
+    if (!configSnapshot.exists) throw new HttpsError("failed-precondition", "card-upgrade/not-configured");
+    const card = normalizedCard(cardSnapshot.data(), cardSnapshot.id); const config = normalizedCardConfig(configSnapshot.data());
+    const required = Math.max(2, Math.trunc(numberValue(config.cardUpgradeSettings[step.key])));
+    const abilities = config.cardAbilities.filter((ability) => ability.active && !ability.deleted);
+    const grantedAbility = secureWeightedPick(abilities, (ability) => ability.weight);
+    if (!grantedAbility) throw new HttpsError("failed-precondition", "card-upgrade/no-active-ability");
+    const inventory = inventorySnapshot.exists ? plainObject(inventorySnapshot.data()) : {};
+    const inventoryCards = structuredClone(plainObject(inventory.cards)); const cardInventory = plainObject(inventoryCards[cardId]);
+    const sourceInventory = plainObject(cardInventory[rarity]);
+    Object.entries(sourceInventory).forEach(([abilityId, value]) => {
+      if (Math.max(0, Math.trunc(numberValue(value))) < 1) delete sourceInventory[abilityId];
+    });
+    const sourceEntries = Object.entries(sourceInventory).map(([abilityId, value]) => ({abilityId, count: Math.max(0, Math.trunc(numberValue(value)))})).filter((entry) => entry.count > 0);
+    const total = sourceEntries.reduce((sum, entry) => sum + entry.count, 0);
+    if (total < required) throw new HttpsError("failed-precondition", "card-upgrade/not-enough-cards");
+    const representative = plainObject(inventory.representativeCard); const protectedAbilityId =
+      representative.cardId === cardId && representative.rarity === rarity ? stringValue(representative.abilityId) : "";
+    sourceEntries.sort((first, second) => Number(first.abilityId === protectedAbilityId) - Number(second.abilityId === protectedAbilityId) || first.abilityId.localeCompare(second.abilityId));
+    let remaining = required; const consumed = {};
+    sourceEntries.forEach((entry) => {
+      if (!remaining) return; const count = Math.min(entry.count, remaining); remaining -= count; consumed[entry.abilityId] = count;
+      const nextCount = entry.count - count; if (nextCount > 0) sourceInventory[entry.abilityId] = nextCount; else delete sourceInventory[entry.abilityId];
+    });
+    if (Object.keys(sourceInventory).length) cardInventory[rarity] = sourceInventory; else delete cardInventory[rarity];
+    const targetInventory = plainObject(cardInventory[step.to]);
+    targetInventory[grantedAbility.id] = Math.max(0, Math.trunc(numberValue(targetInventory[grantedAbility.id]))) + 1;
+    cardInventory[step.to] = targetInventory; inventoryCards[cardId] = cardInventory;
+    const representativeCount = protectedAbilityId ? Math.max(0, Math.trunc(numberValue(sourceInventory[protectedAbilityId]))) : 0;
+    const representativeCard = protectedAbilityId && representativeCount < 1 ? null : inventory.representativeCard || null;
+    const createdAt = new Date().toISOString(); const history = Array.isArray(inventory.cardUpgradeHistory) ? [...inventory.cardUpgradeHistory] : [];
+    history.push({id: historyId, studentId: context.studentId, cardId, cardName: card.name, fromRarity: rarity, toRarity: step.to,
+      usedCount: required, materials: consumed, resultAbilityId: grantedAbility.id, resultAbilityName: grantedAbility.name, createdAt});
+    transaction.update(inventoryRef, {id: context.studentId, studentId: context.studentId, cards: inventoryCards,
+      representativeCard, cardUpgradeHistory: history, updatedAt: FieldValue.serverTimestamp()});
+    return {ok: true, historyId, cardId, cardName: card.name, fromRarity: rarity, toRarity: step.to,
+      consumedCount: required, grantedAbility: abilityEffect(config, step.to, grantedAbility), representativeCard};
   });
 });
 

@@ -11,6 +11,7 @@
   let studentRankingExpanded = false;
   let studentCollectionCardSetFilter = "all";
   let studentRepresentativeMutating = false;
+  let studentCardUpgradeMutating = false;
   let studentCharacterDraftId = "";
   let studentCharacterMutating = false;
   let studentDailyOpenTimer = null;
@@ -660,7 +661,7 @@
     const equipped = representative?.cardId === cardId && representative?.rarity === rarity && representative?.abilityId === selected.abilityId;
     const chips = owned.map((item) => `<button class="collection-ability-chip ${item.abilityId === selected.abilityId ? "selected" : ""}" type="button" data-student-collection-ability="${escapeHtml(item.abilityId)}" data-card-id="${escapeHtml(cardId)}" data-rarity="${rarity}">${escapeHtml(item.ability?.icon || "✨")} ${escapeHtml(item.ability?.name || "특수능력")} ×${Number(item.count) || 0}</button>`).join("");
     const step = studentCollectionUpgradeSteps[rarity]; const needed = step ? Number(model.data.cardUpgradeSettings?.[step.key]) || 0 : 0;
-    const upgrade = step ? quantity >= needed && needed > 0 ? `<button class="button secondary compact" type="button" disabled title="Firebase 저장 연결이 필요합니다">⬆ ${step.to}로 업그레이드 · 연결 필요</button>` : `<span class="muted">업그레이드 ${quantity} / ${needed || "-"}장</span>` : `<span class="muted">최고 등급 카드</span>`;
+    const upgrade = step ? quantity >= needed && needed > 0 ? `<button class="button secondary compact" type="button" data-student-upgrade-card data-card-id="${escapeHtml(cardId)}" data-card-name="${escapeHtml(card.name)}" data-rarity="${rarity}" data-target-rarity="${step.to}" data-required="${needed}" ${studentCardUpgradeMutating ? "disabled" : ""}>${studentCardUpgradeMutating ? "업그레이드 중…" : `⬆ ${step.to}로 업그레이드`}</button>` : `<span class="muted">업그레이드 ${quantity} / ${needed || "-"}장</span>` : `<span class="muted">최고 등급 카드</span>`;
     app.insertAdjacentHTML("beforeend", `<div class="student-v157-modal" role="presentation"><section class="student-v157-modal-card collection-card-modal" role="dialog" aria-modal="true" aria-labelledby="student-collection-detail-title"><div class="section-heading"><div><h2 id="student-collection-detail-title">카드 상세</h2><p class="muted">카드 또는 뒤집기 버튼을 눌러 앞·뒷면을 확인하세요.</p></div><button class="icon-button" type="button" data-student-draw-close aria-label="카드 상세 닫기">×</button></div><div class="collection-detail-stage ${showBack ? "show-back" : ""}" data-student-collection-flip role="button" tabindex="0" aria-label="카드 앞뒷면 전환"><article class="collection-detail-face collection-detail-front rarity-${studentCollectionRarityClasses[rarity]}">${collectionFrameCard(card, rarity, "detail")}<span class="collection-detail-rarity pill rarity-${studentCollectionRarityClasses[rarity]}">${rarity}</span><strong class="collection-detail-owned">보유 ${quantity}장</strong>${equipped ? `<span class="representative-card-mark">대표</span>` : ""}</article><article class="collection-detail-face collection-detail-back rarity-${studentCollectionRarityClasses[rarity]}"><span class="pill rarity-${studentCollectionRarityClasses[rarity]}">${rarity}</span><div class="collection-detail-ability-icon">${escapeHtml(selected.ability?.icon || "✨")}</div><h2>${escapeHtml(selected.ability?.name || "특수능력")}</h2><p>${escapeHtml(selected.ability?.summary || "설정된 능력 효과가 없습니다.")}</p><strong>이 능력 보유 ${Number(selected.count) || 0}장</strong>${equipped ? `<span class="representative-card-mark">대표 카드</span>` : ""}</article></div><div class="collection-modal-controls"><button class="button" type="button" data-student-collection-flip>${showBack ? "앞면 보기" : "뒤집기"}</button><div class="collection-ability-picker"><strong>보유 능력 선택</strong><div>${chips}</div></div><div class="button-row collection-detail-action-row"><button class="button ${equipped ? "secondary" : "success"} compact" type="button" data-student-set-representative data-card-id="${escapeHtml(cardId)}" data-rarity="${rarity}" data-ability-id="${escapeHtml(selected.abilityId)}" ${equipped || studentRepresentativeMutating ? "disabled" : ""}>${equipped ? "현재 대표 카드" : studentRepresentativeMutating ? "설정 중…" : "대표 카드로 설정"}</button>${upgrade}</div></div></section></div>`);
     const detailModal = app.querySelector(".student-v157-modal:last-child"); window.requestAnimationFrame(() => fitStudentCardTitle(detailModal));
   }
@@ -754,6 +755,26 @@
     const ability = event.target.closest?.("[data-student-collection-ability]");
     const flip = event.target.closest?.("[data-student-collection-flip]");
     const representative = event.target.closest?.("[data-student-set-representative]");
+    const upgrade = event.target.closest?.("[data-student-upgrade-card]");
+    if (upgrade) {
+      event.preventDefault(); event.stopPropagation(); if (studentCardUpgradeMutating || upgrade.disabled) return;
+      const cardName = String(upgrade.dataset.cardName || "카드"); const rarity = String(upgrade.dataset.rarity || "");
+      const targetRarity = String(upgrade.dataset.targetRarity || ""); const required = Number(upgrade.dataset.required) || 0;
+      if (!confirm(`${cardName} ${rarity} 카드 ${required}장을 사용해\n${targetRarity} 카드 1장으로 업그레이드할까요?`)) return;
+      studentCardUpgradeMutating = true; upgrade.disabled = true; upgrade.textContent = "업그레이드 중…";
+      window.ourClassStudentPortal?.upgradeCard?.(upgrade.dataset.cardId, rarity)
+        .then((result) => { upgrade.closest(".student-v157-modal")?.remove(); if (typeof render === "function") render(); toast(`${cardName} ${targetRarity} 카드로 업그레이드했어요! 새 능력: ${result.grantedAbility?.icon || "✨"} ${result.grantedAbility?.name || "특수능력"}`); })
+        .catch((caught) => {
+          console.error("Card upgrade failed", caught); const message = String(caught?.message || "");
+          if (message.includes("not-enough-cards")) toast("업그레이드에 필요한 카드가 부족합니다.");
+          else if (message.includes("max-rarity")) toast("최고 등급 카드는 더 이상 업그레이드할 수 없습니다.");
+          else if (message.includes("no-active-ability")) toast("현재 업그레이드로 부여할 수 있는 특수능력이 없습니다.");
+          else toast("카드를 업그레이드하지 못했습니다.");
+          window.ourClassStudentPortal?.ensureCardCollectionLoaded?.(true);
+        })
+        .finally(() => { studentCardUpgradeMutating = false; });
+      return;
+    }
     if (representative) {
       event.preventDefault(); event.stopPropagation(); if (studentRepresentativeMutating || representative.disabled) return;
       studentRepresentativeMutating = true; representative.disabled = true; representative.textContent = "설정 중…";
