@@ -6,6 +6,7 @@
   };
 
   let studentCloudView = "home";
+  let studentNavScrollLeft = 0;
   let studentRankingPeriod = "month";
   let studentRankingCategory = "activity";
   let studentRankingExpanded = false;
@@ -197,6 +198,26 @@
         ${item.badge ? `<small>${escapeHtml(item.badge)}</small>` : ""}
       </button>`).join("")}
     </nav>`;
+  }
+
+  function rememberStudentNavScroll() {
+    const nav = document.querySelector(".student-v155-nav");
+    if (nav) studentNavScrollLeft = nav.scrollLeft;
+  }
+
+  function restoreStudentNavScroll() {
+    requestAnimationFrame(() => {
+      const nav = document.querySelector(".student-v155-nav");
+      if (!nav) return;
+      nav.scrollLeft = studentNavScrollLeft;
+      const active = nav.querySelector(".student-v155-nav-item.active");
+      if (!active) return;
+      const navRect = nav.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      if (activeRect.left < navRect.left) nav.scrollLeft -= navRect.left - activeRect.left;
+      else if (activeRect.right > navRect.right) nav.scrollLeft += activeRect.right - navRect.right;
+      studentNavScrollLeft = nav.scrollLeft;
+    });
   }
 
   function assignmentSection(home, homeOnly = false) {
@@ -694,6 +715,7 @@
     if (!target || typeof session === "undefined" || session.mode !== "firebase-student") return;
     event.preventDefault();
     event.stopPropagation();
+    rememberStudentNavScroll();
     studentCloudView = String(target.dataset.studentCloudView || "home");
     if (["points", "ranking"].includes(studentCloudView)) window.ourClassStudentPortal?.ensureLoaded?.();
     if (studentCloudView === "draw") window.ourClassStudentPortal?.ensureCardDrawLoaded?.(true);
@@ -858,6 +880,7 @@
   });
 
   renderFirebaseStudentLanding = function renderFirebaseStudentLandingV155() {
+    rememberStudentNavScroll();
     if (firebaseStudentHomeLoading) {
       document.title = "우리반 퀘스트";
       app.innerHTML = `<main class="welcome"><section class="welcome-card auth-loading"><div class="brand-mark">⚔</div><h1>우리반 퀘스트</h1><p>학생 정보를 불러오는 중...</p></section></main>`;
@@ -896,5 +919,6 @@
           <main class="cloud-student-home student-home-v15-main student-v155-main">${viewContent(home)}</main>
         </div>
       </div>`;
+    restoreStudentNavScroll();
   };
 })();
