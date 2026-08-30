@@ -24,15 +24,13 @@ function timestampMillis(value) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
-function seoulWeekStartMillis(now = Date.now()) {
+function seoulMonthStartMillis(now = Date.now()) {
   const SEOUL_OFFSET = 9 * 60 * 60 * 1000;
   const shifted = new Date(now + SEOUL_OFFSET);
-  const day = shifted.getUTCDay();
-  const daysSinceMonday = day === 0 ? 6 : day - 1;
   const localMidnightUtc = Date.UTC(
       shifted.getUTCFullYear(),
       shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysSinceMonday,
+      1,
       0, 0, 0, 0,
   );
   return localMidnightUtc - SEOUL_OFFSET;
@@ -137,7 +135,7 @@ exports.getStudentPortalData = onCall(
         !Array.isArray(classData.features) ? classData.features : {};
       const rankingsEnabled = featureSource.rankings !== false;
       const pointsEnabled = featureSource.points !== false;
-      const weekStart = seoulWeekStartMillis();
+      const now = Date.now(); const monthStart = seoulMonthStartMillis(now);
 
       const [studentsSnapshot, pointHistorySnapshot,
         assignmentStatesSnapshot, roleApplicationsSnapshot,
@@ -182,16 +180,16 @@ exports.getStudentPortalData = onCall(
 
       const ranking = {
         enabled: rankingsEnabled,
-        weekStart: new Date(weekStart).toISOString(),
-        activity: {week: [], all: []},
-        roles: {week: [], all: []},
-        assignments: {week: [], all: []},
-        collection: {available: false, week: [], all: []},
+        monthStart: new Date(monthStart).toISOString(),
+        activity: {month: [], all: []},
+        roles: {month: [], all: []},
+        assignments: {month: [], all: []},
+        collection: {available: false, month: [], all: []},
       };
 
       if (rankingsEnabled) {
         const activityAll = new Map();
-        const activityWeek = new Map();
+        const activityMonth = new Map();
         pointEntries.forEach((entry) => {
           if (!["1인1역", "과제", "교사 직접 지급"].includes(entry.source)) return;
           if (entry.source === "교사 직접 지급" && entry.amount <= 0) return;
@@ -199,69 +197,71 @@ exports.getStudentPortalData = onCall(
               entry.studentId,
               numberValue(activityAll.get(entry.studentId)) + entry.amount,
           );
-          if (timestampMillis(entry.createdAt) >= weekStart) {
-            activityWeek.set(
+          if (timestampMillis(entry.createdAt) >= monthStart && timestampMillis(entry.createdAt) <= now) {
+            activityMonth.set(
                 entry.studentId,
-                numberValue(activityWeek.get(entry.studentId)) + entry.amount,
+                numberValue(activityMonth.get(entry.studentId)) + entry.amount,
             );
           }
         });
 
         const rolesAll = new Map();
-        const rolesWeek = new Map();
+        const rolesMonth = new Map();
         (roleApplicationsSnapshot?.docs || []).forEach((snapshot) => {
           const value = snapshot.data() || {};
           if (value.status !== "completed") return;
           const id = stringValue(value.studentId);
           if (!id) return;
           rolesAll.set(id, numberValue(rolesAll.get(id)) + 1);
-          if (timestampMillis(value.completedAt) >= weekStart) {
-            rolesWeek.set(id, numberValue(rolesWeek.get(id)) + 1);
+          if (timestampMillis(value.completedAt) >= monthStart && timestampMillis(value.completedAt) <= now) {
+            rolesMonth.set(id, numberValue(rolesMonth.get(id)) + 1);
           }
         });
 
         const assignmentsAll = new Map();
-        const assignmentsWeek = new Map();
+        const assignmentsMonth = new Map();
         (assignmentStatesSnapshot?.docs || []).forEach((snapshot) => {
           const value = snapshot.data() || {};
           if (value.status !== "submitted") return;
           const id = stringValue(value.studentId);
           if (!id) return;
           assignmentsAll.set(id, numberValue(assignmentsAll.get(id)) + 1);
-          if (timestampMillis(value.pointAward?.awardedAt) >= weekStart) {
-            assignmentsWeek.set(id, numberValue(assignmentsWeek.get(id)) + 1);
+          if (timestampMillis(value.pointAward?.awardedAt) >= monthStart && timestampMillis(value.pointAward?.awardedAt) <= now) {
+            assignmentsMonth.set(id, numberValue(assignmentsMonth.get(id)) + 1);
           }
         });
 
         ranking.activity = {
-          week: rankedRows(students, activityWeek),
+          month: rankedRows(students, activityMonth),
           all: rankedRows(students, activityAll),
         };
         ranking.roles = {
-          week: rankedRows(students, rolesWeek),
+          month: rankedRows(students, rolesMonth),
           all: rankedRows(students, rolesAll),
         };
         ranking.assignments = {
-          week: rankedRows(students, assignmentsWeek),
+          month: rankedRows(students, assignmentsMonth),
           all: rankedRows(students, assignmentsAll),
         };
         const collectionAll = new Map();
-        (cardInventoriesSnapshot?.docs || []).forEach((snapshot) => {
-          const value = snapshot.data() || {}; const student = stringValue(value.studentId) || snapshot.id;
-          const total = Object.values(plainObject(value.cards)).reduce((cardSum, byRarity) =>
-            cardSum + Object.values(plainObject(byRarity)).reduce((raritySum, byAbility) =>
-              raritySum + Object.values(plainObject(byAbility)).reduce((abilitySum, count) =>
-                abilitySum + Math.max(0, Math.trunc(numberValue(count))), 0), 0), 0);
-          collectionAll.set(student, total);
-        });
-        const collectionWeek = new Map();
+        const collectionMonth = new Map();
         (cardAcquisitionSnapshot?.docs || []).forEach((snapshot) => {
-          const value = snapshot.data() || {}; const student = stringValue(value.studentId);
-          if (!student || timestampMillis(value.createdAt) < weekStart) return;
-          collectionWeek.set(student, numberValue(collectionWeek.get(student)) + 1);
+          const value = snapshot.data() || {}; const student = stringValue(value.studentId); const createdAt = timestampMillis(value.createdAt);
+          if (!student || !stringValue(value.cardId) || !createdAt) return;
+          collectionAll.set(student, numberValue(collectionAll.get(student)) + 1);
+          if (createdAt >= monthStart && createdAt <= now) collectionMonth.set(student, numberValue(collectionMonth.get(student)) + 1);
         });
-        ranking.collection = {available: true, metric: "total-count",
-          week: rankedRows(students, collectionWeek), all: rankedRows(students, collectionAll)};
+        (cardInventoriesSnapshot?.docs || []).forEach((snapshot) => {
+          const value = snapshot.data() || {}; const fallbackStudentId = stringValue(value.studentId) || snapshot.id;
+          (Array.isArray(value.cardUpgradeHistory) ? value.cardUpgradeHistory : []).forEach((item) => {
+            const history = plainObject(item); const student = stringValue(history.studentId) || fallbackStudentId; const createdAt = timestampMillis(history.createdAt);
+            if (!student || !stringValue(history.cardId) || !stringValue(history.fromRarity) || !stringValue(history.toRarity) || !createdAt) return;
+            collectionAll.set(student, numberValue(collectionAll.get(student)) + 1);
+            if (createdAt >= monthStart && createdAt <= now) collectionMonth.set(student, numberValue(collectionMonth.get(student)) + 1);
+          });
+        });
+        ranking.collection = {available: true, metric: "cumulative-acquisitions",
+          month: rankedRows(students, collectionMonth), all: rankedRows(students, collectionAll)};
       }
 
       return {

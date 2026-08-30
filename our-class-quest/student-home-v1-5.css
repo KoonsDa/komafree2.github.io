@@ -1736,19 +1736,6 @@
 .place-2 .hall-rank-fallback { background: #8492a8; }
 .place-3 .hall-rank-fallback { background: #b86f43; }
 .hall-rank-badge.asset-failed .hall-rank-fallback { display: grid; }
-.hall-ranking-crown {
-  position: absolute;
-  z-index: 7;
-  top: -48px;
-  left: 50%;
-  width: 70px;
-  height: 70px;
-  pointer-events: none;
-  transform: translateX(-50%);
-  filter: drop-shadow(0 6px 7px rgba(174,108,0,.2));
-}
-.hall-ranking-crown img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.hall-ranking-crown.asset-failed { visibility: hidden; }
 .hall-my-label {
   top: 12px;
   left: 16px;
@@ -1771,7 +1758,6 @@
   .hall-podium-card.place-3 .hall-rank-badge { top: auto; }
   .hall-podium-card.place-3 .hall-rank-badge { bottom: 12px; }
   .hall-rank-fallback { width: 32px; height: 32px; margin: 13px; border-width: 2px; font-size: .95rem; }
-  .hall-ranking-crown { top: -46px; width: 52px; height: 52px; }
   .hall-my-label { top: 10px; left: 12px; width: 122px; height: 43px; }
   .hall-my-rank { padding-top: 48px; }
 }
@@ -1779,7 +1765,6 @@
 @media (max-width: 360px) {
   .hall-podium-card .hall-rank-badge { width: 52px; height: 52px; }
   .hall-podium-card.place-1 .hall-rank-badge { width: 60px; height: 60px; }
-  .hall-ranking-crown { width: 46px; height: 46px; }
 }
 
 /* Ranking layout polish: medal-led podiums and a balanced personal summary. */
@@ -2818,7 +2803,18 @@
 .collection-detail-front .collection-detail-owned { position: absolute; z-index: 5; top: 83%; left: 50%; right: auto; bottom: auto; transform: translateX(-50%); padding: 3px 8px; color: #564d67; background: rgba(255,255,255,.7); border-radius: 999px; font-size: .68rem; font-weight: 700; white-space: nowrap; }
 .collection-detail-front > .representative-card-mark { position: absolute; z-index: 5; top: 6.8%; right: 10%; bottom: auto; left: auto; padding: 4px 7px; font-size: .7rem; }
 .collection-bonus-summary .collection-frame-card.representative { margin-right: 2px; }
+.collection-bonus-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; }
+.collection-representative-summary { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.collection-representative-summary > div { display: grid; min-width: 0; gap: 3px; }
+.collection-representative-summary span, .collection-representative-summary small { overflow-wrap: anywhere; }
+.collection-representative-summary small { color: #706a91; }
+.collection-owned-total { display: grid; align-content: center; justify-items: end; min-width: 112px; padding-left: 20px; border-left: 1px solid #dcd6f7; }
+.collection-owned-total span { color: #706a91; font-size: .78rem; }
+.collection-owned-total strong { color: #5140c1; font-size: 1.2rem; }
 @media (max-width: 760px) {
+  .collection-bonus-summary { grid-template-columns: 1fr; }
+  .collection-owned-total { grid-template-columns: 1fr auto; align-items: center; justify-items: start; min-width: 0; padding: 10px 0 0; border-top: 1px solid #dcd6f7; border-left: 0; }
+  .collection-owned-total strong { justify-self: end; }
   .collection-frame-card.compact { width: 66px; }
   .collection-detail-stage { width: min(300px, 76vw); min-height: 0; }
   .collection-frame-info b { font-size: 1.1rem; }

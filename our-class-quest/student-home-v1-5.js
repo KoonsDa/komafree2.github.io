@@ -6,7 +6,7 @@
   };
 
   let studentCloudView = "home";
-  let studentRankingPeriod = "week";
+  let studentRankingPeriod = "month";
   let studentRankingCategory = "activity";
   let studentRankingExpanded = false;
   let studentCollectionCardSetFilter = "all";
@@ -420,7 +420,7 @@
   function rankingPodium(rows, unit) {
     if (!rows.length) return `<div class="student-v15-empty hall-empty">아직 랭킹 기록이 없습니다.</div>`;
     const slots = [[rows[1], 2], [rows[0], 1], [rows[2], 3]];
-    return `<div class="hall-podium" aria-label="상위 3명">${slots.map(([row, place]) => row ? `<article class="hall-podium-card place-${place} ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}">${place === 1 ? `<span class="hall-ranking-crown" aria-hidden="true"><img src="assets/common-ui/badges/rank-crown-gold.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"></span>` : ""}<span class="hall-rank-badge" aria-label="${place}위"><img src="assets/common-ui/badges/rank-medal-${place === 1 ? "gold" : place === 2 ? "silver" : "bronze"}.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"><span class="hall-rank-fallback" aria-hidden="true">${place}</span></span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}</strong><b>${rankingValue(row, unit)}</b></article>` : `<div class="hall-podium-card place-${place} empty" aria-hidden="true"></div>`).join("")}</div>`;
+    return `<div class="hall-podium" aria-label="상위 3명">${slots.map(([row, place]) => row ? `<article class="hall-podium-card place-${place} ${row.studentId === firebaseStudentHomeData?.profile?.studentId ? "is-me" : ""}"><span class="hall-rank-badge" aria-label="${place}위"><img src="assets/common-ui/badges/rank-medal-${place === 1 ? "gold" : place === 2 ? "silver" : "bronze"}.png" alt="" onerror="this.parentElement.classList.add('asset-failed');this.remove()"><span class="hall-rank-fallback" aria-hidden="true">${place}</span></span>${rankingAvatar(row)}<strong>${escapeHtml(row.name)}</strong><b>${rankingValue(row, unit)}</b></article>` : `<div class="hall-podium-card place-${place} empty" aria-hidden="true"></div>`).join("")}</div>`;
   }
   function rankingLowerList(rows, unit) {
     const lower = rows.slice(3); if (!lower.length) return ""; const shown = studentRankingExpanded ? lower : lower.slice(0, 5);
@@ -442,7 +442,7 @@
       const ranking = state.data.ranking || {};
       if (ranking.enabled === false) body = `<div class="student-v15-empty">선생님이 현재 랭킹 공개를 꺼두셨어요.</div>`;
       else {
-        const period = studentRankingPeriod === "all" ? "all" : "week";
+        const period = studentRankingPeriod === "all" ? "all" : "month";
         const categories = [
           ["activity", "◆", "획득 포인트", ranking.activity?.[period] || [], pointUnit()],
           ["roles", "✓", "1인1역 활동", ranking.roles?.[period] || [], "회"],
@@ -450,7 +450,7 @@
           ["collection", "▦", "카드 수집", ranking.collection?.[period] || [], "장"]
         ];
         const selected = categories.find(([id]) => id === studentRankingCategory) || categories[0]; const [, icon, title, rows, unit] = selected;
-        body = `<div class="hall-ranking-tabs" role="tablist" aria-label="랭킹 분야">${categories.map(([id, categoryIcon, label]) => `<button type="button" role="tab" aria-selected="${id === studentRankingCategory}" data-student-ranking-category="${id}" class="${id === studentRankingCategory ? "active" : ""}" ${id === "collection" && ranking.collection?.available !== true ? "disabled" : ""}><span>${categoryIcon}</span>${label}</button>`).join("")}</div><div class="student-v156-ranking-toolbar hall-toolbar"><div><span>${icon}</span><strong>${title}</strong></div><div class="student-v156-period-buttons"><button type="button" data-student-ranking-period="week" class="${period === "week" ? "active" : ""}">이번 주</button><button type="button" data-student-ranking-period="all" class="${period === "all" ? "active" : ""}">전체</button></div></div><section class="hall-ranking-board">${rankingPodium(rows, unit)}${rankingLowerList(rows, unit)}${rankingMine(rows, unit)}</section>`;
+        body = `<div class="hall-ranking-tabs" role="tablist" aria-label="랭킹 분야">${categories.map(([id, categoryIcon, label]) => `<button type="button" role="tab" aria-selected="${id === studentRankingCategory}" data-student-ranking-category="${id}" class="${id === studentRankingCategory ? "active" : ""}" ${id === "collection" && ranking.collection?.available !== true ? "disabled" : ""}><span>${categoryIcon}</span>${label}</button>`).join("")}</div><div class="student-v156-ranking-toolbar hall-toolbar"><div><span>${icon}</span><strong>${title}</strong></div><div class="student-v156-period-buttons"><button type="button" data-student-ranking-period="month" class="${period === "month" ? "active" : ""}">이번 달</button><button type="button" data-student-ranking-period="all" class="${period === "all" ? "active" : ""}">전체</button></div></div><section class="hall-ranking-board">${rankingPodium(rows, unit)}${rankingLowerList(rows, unit)}${rankingMine(rows, unit)}</section>`;
       }
     }
     return `<div data-student-ranking-screen><div class="student-v155-page-head hall-page-head"><div><span>🏆 명예의 전당</span><h1>우리반 명예의 전당</h1><p>다양한 활동에서 멋지게 활약한 친구들이에요!</p></div><button class="hall-help" type="button" title="랭킹은 Firebase 활동 기록을 기준으로 계산돼요." aria-label="랭킹 도움말">?</button></div>${body}</div>`;
@@ -649,7 +649,9 @@
     const representativeItem = representative ? model.items.find((item) => item.cardId === representative.cardId && item.rarity === representative.rarity && item.abilityId === representative.abilityId) : null;
     const representativeText = representativeItem ? `${escapeHtml(representativeItem.cardName)} · ${escapeHtml(representativeItem.rarity)} · ${escapeHtml(representativeItem.ability?.name || "특수능력")}` : "없음";
     const representativeImage = representativeItem ? collectionFrameCard({...representativeItem, name: representativeItem.cardName}, representativeItem.rarity, "representative") : "";
-    return `<div class="student-v155-page-head"><div><span>📚 위인도감</span><h1>나의 카드 컬렉션</h1><p>획득한 카드를 등급별로 모아 보고, 눌러서 앞면과 능력을 확인하세요.</p></div></div><div class="collection-bonus-summary">${representativeImage}<strong>현재 대표 카드</strong><span>${representativeText}</span></div><div class="collection-filters" aria-label="카드셋 필터">${filters}</div>${sections}`;
+    const representativeAbilitySummary = representativeItem?.ability?.summary ? escapeHtml(representativeItem.ability.summary) : "";
+    const totalOwnedCards = model.items.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+    return `<div class="student-v155-page-head"><div><span>📚 위인도감</span><h1>나의 카드 컬렉션</h1><p>획득한 카드를 등급별로 모아 보고, 눌러서 앞면과 능력을 확인하세요.</p></div></div><div class="collection-bonus-summary"><div class="collection-representative-summary">${representativeImage}<div><strong>현재 대표 카드</strong><span>${representativeText}</span>${representativeAbilitySummary ? `<small>능력 효과 · ${representativeAbilitySummary}</small>` : ""}</div></div><div class="collection-owned-total"><span>현재 보유 카드</span><strong>총 ${totalOwnedCards}장</strong></div></div><div class="collection-filters" aria-label="카드셋 필터">${filters}</div>${sections}`;
   }
 
   function openStudentCollectionCard(cardId, rarity, abilityId = "", showBack = false) {
@@ -734,7 +736,7 @@
     const target = event.target.closest?.("[data-student-ranking-period]");
     if (!target || typeof session === "undefined" || session.mode !== "firebase-student") return;
     event.preventDefault();
-    studentRankingPeriod = target.dataset.studentRankingPeriod === "all" ? "all" : "week";
+    studentRankingPeriod = target.dataset.studentRankingPeriod === "all" ? "all" : "month";
     studentRankingExpanded = false;
     if (typeof render === "function") render();
   }, true);

@@ -371,7 +371,7 @@ let studentAssignmentFilter = "todo";
 let showAllStudentPoints = false;
 let observationFilters = { studentId: "", category: "", keyword: "" };
 let classStudentSearch = "";
-let rankingPeriod = "week";
+let rankingPeriod = "month";
 let dashboardSelectedDate = todayString();
 let dashboardMonth = dashboardSelectedDate.slice(0, 7);
 let studentManagementSearch = "";
@@ -1319,14 +1319,15 @@ function studentRanking() {
 
 function completedCount(studentId) { return data.roleApplications.filter((item) => item.studentId === studentId && item.status === "completed").length; }
 function weekStart() { const date = new Date(); const day = date.getDay(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - (day === 0 ? 6 : day - 1)); return date; }
-function dateInRankingPeriod(value) { if (rankingPeriod === "all") return true; if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = historyDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= weekStart() && date <= new Date(); }
+function rankingMonthStart() { const date = new Date(); date.setDate(1); date.setHours(0, 0, 0, 0); return date; }
+function dateInRankingPeriod(value) { if (rankingPeriod === "all") return true; if (!value) return false; let date = new Date(value); if (Number.isNaN(date.getTime())) { const key = historyDateKey(value); date = key ? new Date(`${key}T00:00:00`) : date; } return !Number.isNaN(date.getTime()) && date >= rankingMonthStart() && date <= new Date(); }
 function activityPointValue(student) { return (student.pointHistory || []).reduce((sum, item) => sum + (["1인1역", "과제"].includes(item.source) && dateInRankingPeriod(item.createdAt || item.date) ? Number(item.amount) || 0 : 0), 0); }
 function roleRankingValue(student) { return data.roleApplications.filter((application) => application.studentId === student.id && application.status === "completed" && (rankingPeriod === "all" || dateInRankingPeriod(application.completedAt))).length; }
 function assignmentRankingValue(student) { return data.assignments.filter((assignment) => assignmentStatusForStudent(assignment, student.id) === "submitted" && (rankingPeriod === "all" || dateInRankingPeriod(assignment.pointAwards?.[student.id]?.awardedAt))).length; }
-function collectionRankingValue(student) { const owned = new Set(); Object.keys(student.cards || {}).forEach((cardId) => CARD_RARITIES.forEach((rarity) => { if (rarityInventoryCount(student, cardId, rarity) > 0) owned.add(`${cardId}|${rarity}`); })); if (rankingPeriod === "all") return owned.size; const weekly = new Set((student.cardAcquisitionHistory || []).filter((item) => dateInRankingPeriod(item.createdAt)).map((item) => `${item.cardId}|${item.rarity}`)); return [...owned].filter((key) => weekly.has(key)).length; }
+function collectionRankingValue(student) { return (student.cardAcquisitionHistory || []).filter((item) => item?.cardId && item?.rarity && dateInRankingPeriod(item.createdAt)).length; }
 function rankingValue(type, student) { return type === "activity" ? activityPointValue(student) : type === "roles" ? roleRankingValue(student) : type === "assignments" ? assignmentRankingValue(student) : collectionRankingValue(student); }
 function rankedStudents(type) { const sorted = activeStudents().map((student) => ({ student, value: rankingValue(type, student) })).sort((first, second) => second.value - first.value || first.student.name.localeCompare(second.student.name, "ko")); let previousValue; let previousRank = 0; return sorted.map((item, index) => { const rank = item.value === previousValue ? previousRank : index + 1; previousValue = item.value; previousRank = rank; return { ...item, rank }; }); }
-function rankingPeriodButtons() { return `<div class="ranking-period"><button class="button ${rankingPeriod === "week" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="week">이번 주</button><button class="button ${rankingPeriod === "all" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="all">전체</button></div>`; }
+function rankingPeriodButtons() { return `<div class="ranking-period"><button class="button ${rankingPeriod === "month" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="month">이번 달</button><button class="button ${rankingPeriod === "all" ? "success" : "secondary"} compact" data-action="set-ranking-period" data-period="all">전체</button></div>`; }
 function rankingRow(item, unit, mine = false) { return `<div class="ranking-row ${mine ? "mine" : ""}"><strong>${item.rank}위</strong><span>${escapeHtml(item.student.name)}</span><b>${item.value}${unit}</b></div>`; }
 function studentRankingCard(ranking) { const rows = rankedStudents(ranking.id); const top = rows.slice(0, 5); const mine = rows.find((item) => item.student.id === session.studentId); return `<article class="card ranking-card"><div class="ranking-card-title"><span>${ranking.icon}</span><h2>${ranking.title}</h2></div><div class="ranking-list">${top.map((item) => rankingRow(item, ranking.unit, item.student.id === session.studentId)).join("")}</div>${mine && !top.some((item) => item.student.id === mine.student.id) ? `<div class="my-ranking"><small>내 순위</small>${rankingRow(mine, ranking.unit, true)}</div>` : ""}</article>`; }
 function pointHistoryRow(item) { return `<div class="list-row"><div class="list-main"><strong>${escapeHtml(item.reason)}</strong><small class="muted">${item.date}</small></div><strong class="${item.amount >= 0 ? "points" : ""}">${item.amount >= 0 ? "+" : ""}${item.amount}P</strong></div>`; }
@@ -2830,7 +2831,7 @@ app.addEventListener("click", async (event) => {
   if (action === "edit-daily-note") return openDailyNoteModal();
   if (action === "reset-date-timetable") { app.insertAdjacentHTML("beforeend", `<div class="modal"><section class="modal-card"><h2>기본 시간표로 되돌리기</h2><p>${selectedDateTitle(dashboardSelectedDate)}의 예외 시간표를 삭제하고 기본 시간표를 사용하시겠습니까?</p><div class="button-row"><button class="button danger" data-action="confirm-reset-date-timetable" data-date="${dashboardSelectedDate}">되돌리기</button><button class="button secondary" data-action="close-modal">취소</button></div></section></div>`); return; }
   if (action === "confirm-reset-date-timetable") { delete data.dateTimetableOverrides[target.dataset.date]; saveData(); render(); toast("기본 시간표로 되돌렸습니다."); return; }
-  if (action === "set-ranking-period") { rankingPeriod = target.dataset.period === "all" ? "all" : "week"; return render(); }
+  if (action === "set-ranking-period") { rankingPeriod = target.dataset.period === "all" ? "all" : "month"; return render(); }
   if (action === "apply-role") return applyRole(target.dataset.id);
   if (action === "open-student-cancel") return openStudentCancelModal(target.dataset.id);
   if (action === "confirm-student-cancel") return cancelOwnRole(target.dataset.id);
