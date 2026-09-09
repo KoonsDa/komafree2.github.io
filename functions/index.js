@@ -1031,9 +1031,6 @@ exports.studentApplyRole = onCall(
         if (!settingsSnapshot.exists) {
           throw callableMutationError("role/settings-missing", "Role settings were not found.");
         }
-        if (!usageSnapshot.exists || usageSnapshot.data()?.date !== today) {
-          throw callableMutationError("role/usage-missing", "Role daily usage was not initialized.");
-        }
         if (applicationSnapshot.exists) {
           throw callableMutationError("role/status-conflict", "Role application already exists.");
         }
@@ -1056,7 +1053,32 @@ exports.studentApplyRole = onCall(
         if (!role || role.active === false || !Number.isInteger(capacity) || capacity < 1) {
           throw callableMutationError("role/not-found", "Current role was not found.", "not-found");
         }
-        const usage = usageSnapshot.data();
+        let usage = usageSnapshot.data();
+        if (!usageSnapshot.exists) {
+          // Rebuild with the teacher initializer's counting/normalization rules.
+          // Read inside this transaction so recovery and the new claim are atomic.
+          const assignmentsSnapshot = await transaction.get(
+              classRef.collection("dailyRoleAssignments").where("date", "==", today),
+          );
+          usage = {date: today, roleCounts: {}, studentCounts: {}, activeClaims: {}};
+          assignmentsSnapshot.docs.forEach((applicationDoc) => {
+            const application = applicationDoc.data();
+            const status = ["waiting", "completed", "cancelled"].includes(application.status) ?
+              application.status : "waiting";
+            if (status === "cancelled") return;
+            const studentId = String(application.studentId || "");
+            const assignedRoleId = String(application.roleId || "");
+            const claimKey = dailyRoleClaimKey(today, studentId, assignedRoleId);
+            if (usage.activeClaims[claimKey]) {
+              throw callableMutationError("role/usage-duplicate", "Duplicate active role claims were found.");
+            }
+            usage.roleCounts[assignedRoleId] = (usage.roleCounts[assignedRoleId] || 0) + 1;
+            usage.studentCounts[studentId] = (usage.studentCounts[studentId] || 0) + 1;
+            usage.activeClaims[claimKey] = applicationDoc.id;
+          });
+        } else if (usage?.date !== today) {
+          throw callableMutationError("role/usage-conflict", "Role usage date does not match its document.");
+        }
         const roleCounts = safeMap(usage?.roleCounts);
         const studentCounts = safeMap(usage?.studentCounts);
         const activeClaims = safeMap(usage?.activeClaims);
