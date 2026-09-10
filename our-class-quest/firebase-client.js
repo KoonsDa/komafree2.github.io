@@ -19,7 +19,7 @@ function publicUser(user) {
 }
 
 function classSettings(value) {
-  return { className: String(value?.className || ""), teacherName: String(value?.teacherName || ""), appName: String(value?.appName || "") };
+  return { autoApproveAt21: value?.autoApproveAt21 !== false, className: String(value?.className || ""), teacherName: String(value?.teacherName || ""), appName: String(value?.appName || "") };
 }
 
 function studentFields(value, orderIndex) {
