@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>우리반 퀘스트 · 전자칠판</title><link rel="stylesheet" href="toolbar.css"></head>
+<body>
+  <header><strong>우리반 퀘스트</strong><button id="collapse" aria-label="패널 접기">접기</button><button id="quit">종료</button></header>
+  <main>
+    <div class="modes" role="group" aria-label="입력 모드"><button data-command="mode" data-value="draw">✏ 필기</button><button data-command="mode" data-value="interact">👆 화면 조작</button></div>
+    <div id="monitor-picker" hidden><select id="monitors" aria-label="필기 대상 모니터" title="필기는 모니터별로 보관됩니다."></select></div>
+    <p id="mode-status" class="mode-status">뒤 화면을 조작할 수 있어요</p>
+    <div id="expanded">
+      <section class="tools" aria-label="필기 도구">
+        <div class="row"><button data-command="color" data-value="#111111">● 검정</button><button class="red" data-command="color" data-value="#d52b38">● 빨강</button><button class="blue" data-command="color" data-value="#2164df">● 파랑</button></div>
+        <div class="row" aria-label="펜 굵기"><button data-command="width" data-value="3">3</button><button data-command="width" data-value="6">6</button><button data-command="width" data-value="10">10</button></div>
+        <div class="row"><button data-command="tool" data-value="pen">✏ 펜</button><button data-command="tool" data-value="eraser">🧽 지우개</button></div>
+        <div class="row"><button data-command="undo">↶ 실행 취소</button><button data-command="clear">전체 지우기</button></div>
+      </section>
+      <section class="classroom" aria-label="교실 패널">
+        <h1>교실</h1>
+        <div class="account"><button id="login">교사 로그인</button><button id="logout" hidden>로그아웃</button><span id="teacher"></span></div>
+        <label id="class-label" hidden>내 학급<select id="classes" aria-label="내 학급"><option value="">학급 선택</option></select></label>
+        <p id="connection" role="status" aria-live="polite">학급을 연결하려면 교사 로그인이 필요합니다.</p>
+        <button id="reconnect" hidden>다시 연결</button>
+        <div role="tablist" aria-label="교실 현황" class="tabs"><button role="tab" data-tab="roles" aria-selected="true">1인1역</button><button role="tab" data-tab="points" aria-selected="false">포인트</button><button role="tab" data-tab="groups" aria-selected="false">모둠</button></div>
+        <div id="class-content" role="tabpanel"></div>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="toolbar.js"></script>
+</body></html>

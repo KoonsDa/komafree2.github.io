@@ -6,6 +6,7 @@ const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {getStorage} = require("firebase-admin/storage");
 const {randomUUID, randomInt} = require("node:crypto");
+const {resolvePointUse, normalizedShopItem, shopRequestCounts} = require("./point-approval");
 
 function stringValue(value) {
   return typeof value === "string" ? value : "";
@@ -302,20 +303,6 @@ function beforeDailyOpenTime(openTime, now = new Date()) {
   return seoulMinuteOfDay(now) < hour * 60 + minute;
 }
 
-function normalizedShopItem(value, fallbackId = "") {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const id = stringValue(source.id) || fallbackId;
-  const name = stringValue(source.name).trim().slice(0, 80);
-  const description = stringValue(source.description).trim().slice(0, 300);
-  const icon = stringValue(source.icon).trim().slice(0, 12) || "🎁";
-  const price = Math.max(0, Math.trunc(numberValue(source.price)));
-  const dailyStock = Math.max(1, Math.trunc(numberValue(source.dailyStock) || 1));
-  const perStudentDailyLimit = Math.max(1, Math.trunc(numberValue(source.perStudentDailyLimit) || 1));
-  return {id, name, description, icon, price, dailyStock, perStudentDailyLimit,
-    approvalRequired: source.approvalRequired !== false,
-    active: source.active !== false, deleted: source.deleted === true};
-}
-
 async function verifiedTeacherClass(request, classIdInput) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Teacher authentication is required.");
   const classId = stringValue(classIdInput).trim();
@@ -359,15 +346,6 @@ exports.saveRoleSettings = onCall({region: "asia-northeast3"}, async (request) =
   return {ok: true, dailyRoleApplicationLimit: rawLimit,
     roleApplicationOpenTime: openTime, currentRoles: roles};
 });
-
-function shopRequestCounts(docs, itemId, studentId = "", excludeId = "") {
-  const matching = docs.map((doc) => ({id: doc.id, ...(doc.data() || {})}))
-      .filter((entry) => entry.id !== excludeId && entry.itemId === itemId &&
-        ["pending", "completed"].includes(entry.status));
-  return {total: matching.length, student: studentId ? matching.filter((entry) => entry.studentId === studentId).length : 0,
-    pending: studentId ? matching.some((entry) => entry.studentId === studentId && entry.status === "pending") : false,
-    pendingRequestId: studentId ? matching.find((entry) => entry.studentId === studentId && entry.status === "pending")?.id || "" : ""};
-}
 
 function pointShopStatus(item, counts, points) {
   if (!item.active || item.deleted) return "inactive";
@@ -523,39 +501,7 @@ exports.resolvePointUseRequest = onCall({region: "asia-northeast3"}, async (requ
   const requestId = stringValue(request.data?.requestId).trim();
   const decision = stringValue(request.data?.decision);
   if (!requestId || !["approve", "reject"].includes(decision)) throw new HttpsError("invalid-argument", "Valid requestId and decision are required.");
-  const useRef = context.classRef.collection("pointUseRequests").doc(requestId);
-  return context.db.runTransaction(async (transaction) => {
-    const useSnapshot = await transaction.get(useRef);
-    if (!useSnapshot.exists || useSnapshot.data()?.status !== "pending") throw new HttpsError("failed-precondition", "point-shop/already-resolved");
-    const use = useSnapshot.data();
-    const timestamp = FieldValue.serverTimestamp();
-    if (decision === "reject") {
-      transaction.update(useRef, {status: "rejected", resolvedAt: timestamp, resolvedBy: context.uid});
-      return {ok: true, status: "rejected"};
-    }
-    const itemRef = context.classRef.collection("pointShopItems").doc(stringValue(use.itemId));
-    const pointRef = context.classRef.collection("studentPointStates").doc(stringValue(use.studentId));
-    const studentRef = context.classRef.collection("students").doc(stringValue(use.studentId));
-    const dailyQuery = context.classRef.collection("pointUseRequests").where("date", "==", stringValue(use.date));
-    const [itemSnapshot, pointSnapshot, studentSnapshot, requestsSnapshot] = await Promise.all([
-      transaction.get(itemRef), transaction.get(pointRef), transaction.get(studentRef), transaction.get(dailyQuery),
-    ]);
-    const item = itemSnapshot.exists ? normalizedShopItem(itemSnapshot.data(), itemSnapshot.id) : null;
-    if (!item || !item.active || item.deleted || item.price !== numberValue(use.price)) throw new HttpsError("failed-precondition", "point-shop/product-changed");
-    if (!studentSnapshot.exists || studentSnapshot.data()?.active === false) throw new HttpsError("failed-precondition", "point-shop/student-inactive");
-    const points = Math.max(0, Math.trunc(numberValue(pointSnapshot.data()?.points)));
-    if (points < item.price) throw new HttpsError("failed-precondition", "point-shop/insufficient");
-    const counts = shopRequestCounts(requestsSnapshot.docs, item.id, stringValue(use.studentId), requestId);
-    if (counts.total >= item.dailyStock) throw new HttpsError("failed-precondition", "point-shop/sold-out");
-    if (counts.student >= item.perStudentDailyLimit) throw new HttpsError("failed-precondition", "point-shop/limit-reached");
-    const historyRef = context.classRef.collection("pointHistory").doc(`${use.studentId}_${randomUUID()}`);
-    transaction.set(pointRef, {id: use.studentId, points: points - item.price, updatedAt: timestamp}, {merge: true});
-    transaction.update(useRef, {status: "completed", resolvedAt: timestamp, resolvedBy: context.uid});
-    transaction.create(historyRef, {id: historyRef.id, studentId: use.studentId,
-      entry: {id: historyRef.id, amount: -item.price, reason: item.name, source: "포인트 상품", relatedId: requestId,
-        date: new Date().toLocaleDateString("ko-KR", {timeZone: "Asia/Seoul"}), createdAt: timestamp}, createdAt: timestamp});
-    return {ok: true, status: "completed", points: points - item.price};
-  });
+  return resolvePointUse(context, requestId, decision);
 });
 
 exports.reversePointProductUse = onCall({region: "asia-northeast3"}, async (request) => {
@@ -1163,3 +1109,10 @@ exports.getStudentCardCollection = onCall({region: "asia-northeast3"}, async (re
     activeCardSetIds: config.activeCardSetIds,
     cardUpgradeSettings: config.cardUpgradeSettings};
 });
+
+// Server-side schedule; no browser or desktop process is required.
+exports.autoApproveDaily = require("firebase-functions/v2/scheduler").onSchedule({
+  schedule: "0 21 * * *", timeZone: "Asia/Seoul", region: "asia-northeast3",
+  timeoutSeconds: 540, memory: "256MiB", maxInstances: 1, concurrency: 1,
+  retryCount: 3, minBackoffSeconds: 60, maxBackoffSeconds: 300,
+}, event => require("./nightly-approval").runNightlyApproval({db: getFirestore(), scheduleTime: event.scheduleTime}));

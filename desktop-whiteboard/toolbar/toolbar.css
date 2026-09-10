@@ -1,0 +1,52 @@
+:root { font-family: "Malgun Gothic", "Segoe UI", sans-serif; font-size: 17px; color: #1e2e43; background: #f6f7fb; }
+* { box-sizing: border-box; }
+body { margin: 0; border: 1px solid #cdd5df; height: 100vh; overflow: hidden; }
+header { display: flex; align-items: center; gap: 6px; height: 58px; padding: 5px 10px; background: #243751; color: white; -webkit-app-region: drag; }
+header strong { flex: 1; font-size: 16px; }
+button, select { font: inherit; }
+button { min-height: 48px; min-width: 48px; padding: 9px 10px; border: 1px solid #c4cfdd; border-radius: 10px; background: white; color: inherit; font-weight: 700; cursor: pointer; touch-action: manipulation; -webkit-app-region: no-drag; }
+button:hover:not(:disabled) { background: #eaf1fb; }
+button:focus-visible, select:focus-visible { outline: 3px solid #f1ab24; outline-offset: 1px; }
+button:disabled { opacity: .5; cursor: default; }
+header button { min-height: 44px; padding: 6px 9px; font-size: 14px; color: #243751; }
+main { height: calc(100vh - 58px); padding: 10px; overflow-y: auto; scrollbar-gutter: stable; }
+.modes, .row, .tabs { display: flex; gap: 7px; margin-bottom: 7px; }
+.modes button, .row button, .tabs button { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+.modes { position: sticky; top: 0; z-index: 2; background: #f6f7fb; padding-bottom: 3px; }
+.modes button { font-size: 19px; min-height: 55px; }
+#monitor-picker select { margin: 0 0 7px; min-height: 44px; font-size: 15px; }
+body.collapsed #monitor-picker { display: none; }
+button[aria-pressed="true"], button[aria-selected="true"] { background: #244f88; border-color: #244f88; color: white; }
+.mode-status { margin: 4px 0 12px; font-size: 14px; color: #495d76; }
+.red { color: #b22230; }.blue { color: #2164df; }
+.classroom { margin-top: 15px; border-top: 1px solid #d5dce6; padding-top: 12px; }
+h1 { font-size: 20px; margin: 0 0 10px; }
+.account { display: flex; gap: 10px; align-items: center; }
+#teacher { font-size: 15px; overflow-wrap: anywhere; }
+label { display: block; margin-top: 10px; font-size: 15px; }
+select { width: 100%; min-height: 48px; border: 1px solid #c4cfdd; background: white; border-radius: 8px; padding: 6px; margin-top: 5px; }
+#connection { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.tabs { margin-top: 12px; }
+.card { padding: 13px; border: 1px solid #d4dce7; border-radius: 12px; background: white; margin-top: 10px; }
+.card strong, .card .detail { display: block; font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
+.status, .hint { font-size: 14px; line-height: 1.6; color: #536580; }
+.status { display: inline-block; padding: 3px 9px; margin: 7px 0; border-radius: 6px; background: #edf2f9; }
+.actions { display: flex; gap: 10px; margin-top: 8px; }.actions button { flex: 1; }
+.score { font-size: 27px; font-weight: 800; }
+#class-content:has(.group-card) { container-type: inline-size; }
+.group-card { display: grid; grid-template-columns: minmax(0, 1fr) auto 102px; align-items: center; gap: 8px; padding: 7px 9px; margin-top: 6px; }
+.group-card strong { min-width: 0; margin: 0; font-size: 17px; line-height: 1.25; }
+.group-card .score { margin: 0; font-size: 26px; line-height: 1.15; white-space: nowrap; }
+.group-card .actions { margin: 0; gap: 6px; }
+.group-card .actions button { min-width: 48px; min-height: 48px; padding: 5px; white-space: nowrap; }
+@container (max-width: 300px) {
+  .group-card { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; }
+  .group-card .actions { grid-column: 1 / -1; }
+}
+.empty { padding: 18px 8px; font-size: 16px; line-height: 1.7; color: #596b83; }
+[hidden] { display: none !important; }
+body.collapsed header strong { display: none; }
+body.collapsed header { justify-content: flex-end; }
+body.collapsed main { overflow: hidden; padding: 7px; }
+body.collapsed .modes button { font-size: 16px; min-height: 52px; padding: 5px; }
+body.collapsed #mode-status, body.collapsed #expanded { display: none; }
