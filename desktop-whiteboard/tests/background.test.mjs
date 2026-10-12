@@ -31,3 +31,13 @@ test('grid numbers are optional teaching units and spacing changes density', () 
   assert(small.calls.some(c=>c[0]==='fillText'&&c[1]==='0'));
   assert(!large.calls.some(c=>c[0]==='fillText'));
 });
+test('grid origin is viewport center with signed x and upward-positive y at all spacings',()=>{
+  for(const spacing of [24,48,72,96]){
+    const {canvas,calls}=setup();drawBackground(canvas,1280,720,1.5,{background:'grid',spacing,gridLabels:true});
+    assert(calls.some(c=>c[0]==='moveTo'&&c[1]===640&&c[2]===0));
+    assert(calls.some(c=>c[0]==='moveTo'&&c[1]===0&&c[2]===360));
+    assert(calls.some(c=>c[0]==='fillText'&&c[1]==='0'&&c[2]===630&&c[3]===380));
+    assert(calls.some(c=>c[0]==='fillText'&&c[1]==='-1'&&c[2]===640-spacing&&c[3]===380));
+    assert(calls.some(c=>c[0]==='fillText'&&c[1]==='1'&&c[2]===630&&c[3]===360-spacing+5));
+  }
+});

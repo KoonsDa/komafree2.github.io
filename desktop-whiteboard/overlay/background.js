@@ -16,20 +16,25 @@ export function drawBackground(canvas, width, height, ratio, {background = 'desk
   };
   const margin = size;
   if (background === 'grid' || background === 'dots') {
+    const cx = width / 2, cy = height / 2;
+    const left = Math.ceil(-cx / size), right = Math.floor(cx / size);
+    const bottom = Math.ceil(-cy / size), top = Math.floor(cy / size);
     if (background === 'grid') {
-      for (let x = margin; x < width; x += size) line(x, margin, x, height, '#bdd3e6');
-      for (let y = margin; y < height; y += size) line(margin, y, width, y, '#bdd3e6');
+      for (let i = left; i <= right; i++) line(cx + i * size, 0, cx + i * size, height);
+      for (let i = bottom; i <= top; i++) line(0, cy - i * size, width, cy - i * size);
     } else {
       ctx.fillStyle = '#88a9c6';
-      for (let x = margin; x < width; x += size) for (let y = margin; y < height; y += size) {
-        ctx.beginPath(); ctx.arc(x, y, 1.7, 0, Math.PI * 2); ctx.fill();
+      for (let i = left; i <= right; i++) for (let j = bottom; j <= top; j++) {
+        ctx.beginPath(); ctx.arc(cx + i * size, cy - j * size, 1.7, 0, Math.PI * 2); ctx.fill();
       }
     }
     if (gridLabels) {
+      line(0, cy, width, cy, '#627e99'); line(cx, 0, cx, height, '#627e99');
       ctx.fillStyle = '#4c6580'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-      for (let x = margin, i = 0; x < width; x += size, i++) ctx.fillText(String(i), x, margin - 12);
+      for (let i = left; i <= right; i++) if (i && cx + i * size > 12 && cx + i * size < width - 12) ctx.fillText(String(i), cx + i * size, cy + 20);
       ctx.textAlign = 'right';
-      for (let y = margin, i = 0; y < height; y += size, i++) ctx.fillText(String(i), margin - 10, y + 5);
+      for (let i = bottom; i <= top; i++) if (i && cy - i * size > 16 && cy - i * size < height - 8) ctx.fillText(String(i), cx - 10, cy - i * size + 5);
+      ctx.fillText('0', cx - 10, cy + 20);
     }
   } else if (background === 'music') {
     const gap = size / 4;

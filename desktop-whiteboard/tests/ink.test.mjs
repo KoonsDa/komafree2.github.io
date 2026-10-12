@@ -40,3 +40,23 @@ test('monitor histories, eraser and undo remain separate across DPI changes',()=
   ink.clear();ink.selectSurface(2);ink.resize(2560,1440,1.5);assert.equal(canvas.width,3840);assert.equal(ink.history[0].points[0].x,300);
   ink.selectSurface(1);assert.equal(ink.history.length,0);
 });
+test('shape preview replaces previous endpoint and commits as one undo action', () => {
+  for (const tool of ['line','triangle','rectangle','square','circle','ellipse']) {
+    const {ink,calls}=setup(); ink.resize(1280,720,1.5);
+    ink.begin({x:100,y:100},{tool,color:'#2164df',width:3});
+    ink.move({x:200,y:160});ink.move({x:300,y:220});
+    assert.equal(ink.history.length,0); assert.equal(ink.current.points.length,2);
+    assert.deepEqual(ink.current.points[1],{x:300,y:220});
+    ink.finish();assert.equal(ink.history.length,1);
+    if(tool==='square') assert(calls.some(c=>c[0]==='rect'&&c[3]===200&&c[4]===200));
+    if(tool==='circle') assert(calls.some(c=>c[0]==='ellipse'&&c[3]===100&&c[4]===100));
+    ink.undo();assert.equal(ink.history.length,0);
+  }
+});
+test('reverse shape drags have positive radii and remain separate from pen and eraser',()=>{
+  const {ink,calls}=setup();ink.resize(1280,720,1);
+  ink.begin({x:300,y:250},{tool:'circle',color:'#111111',width:6});ink.move({x:100,y:150});ink.finish();
+  assert(calls.some(c=>c[0]==='ellipse'&&c[1]===200&&c[2]===150&&c[3]===100&&c[4]===100));
+  ink.begin({x:200,y:150},{tool:'eraser',color:'#111111',width:6});ink.finish();
+  ink.undo();assert.equal(ink.history[0].tool,'circle');assert.equal(ink.history.length,1);
+});

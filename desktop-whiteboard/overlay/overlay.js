@@ -20,9 +20,10 @@ function receive(next) {
   renderBackground();
   if (geometryChanged) requestAnimationFrame(resize);
 }
-window.whiteboard.onState(receive);
+let liveStateReceived = false;
+window.whiteboard.onState(next => { liveStateReceived = true; receive(next); });
 window.whiteboard.onInk(command => { finish(); if (command === 'undo') ink.undo(); if (command === 'clear') ink.clear(); });
-window.whiteboard.state().then(receive);
+window.whiteboard.state().then(next => { if (!liveStateReceived) receive(next); });
 const point = event => { const rect = canvas.getBoundingClientRect(); return {x: event.clientX - rect.left, y: event.clientY - rect.top}; };
 canvas.addEventListener('pointerdown', event => {
   if (state.mode !== 'draw' || pointer !== null || event.button !== 0) return;

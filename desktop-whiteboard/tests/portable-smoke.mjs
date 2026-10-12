@@ -51,8 +51,8 @@ try {
     await run("window.whiteboard.command('collapse')");await frame();result.restored=control.getBounds().width===expanded.width&&control.getBounds().height===expanded.height;
     await run("window.whiteboard.command('mode','draw')");
     await overlay.webContents.executeJavaScript("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
-    await overlay.webContents.executeJavaScript("{const c=document.querySelector('canvas');c.setPointerCapture=()=>{};c.hasPointerCapture=()=>false;for(const [type,x] of [['pointerdown',100],['pointermove',180],['pointerup',200]])c.dispatchEvent(new PointerEvent(type,{pointerId:1,button:0,clientX:x,clientY:120}));}");
-    const pixel="document.querySelector('canvas').getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]";
+    await overlay.webContents.executeJavaScript("{const c=document.querySelector('#ink');c.setPointerCapture=()=>{};c.hasPointerCapture=()=>false;for(const [type,x] of [['pointerdown',100],['pointermove',180],['pointerup',200]])c.dispatchEvent(new PointerEvent(type,{pointerId:1,button:0,clientX:x,clientY:120}));}");
+    const pixel="document.querySelector('#ink').getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]";
     result.ink=(await overlay.webContents.executeJavaScript(pixel))>0;
     await run("window.whiteboard.command('clear')");await frame();result.clear=(await overlay.webContents.executeJavaScript(pixel))===0;
     await run("window.whiteboard.command('mode','interact')"); result.interact=(await run('window.whiteboard.state()')).mode==='interact';

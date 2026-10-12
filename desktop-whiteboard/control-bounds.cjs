@@ -1,6 +1,6 @@
 const defaults = {width: 420, height: 920};
 const minimum = {width: 380, height: 480};
-const compact = {width: 280, height: 132};
+const compact = {width: 320, height: 600};
 function fitBounds(bounds, area) {
   const width = Math.min(bounds.width, Math.max(1, area.width - 16));
   const height = Math.min(bounds.height, Math.max(1, area.height - 16));

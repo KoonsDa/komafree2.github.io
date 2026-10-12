@@ -3,20 +3,70 @@ import {login, logout} from '../classroom/firebase.js';
 const $ = selector => document.querySelector(selector);
 let board, activeTab = 'roles', loginBusy = false, authError = '', classroom;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+const iconPaths = {
+  draw: '<path d="M4 3h12v6 M4 3v18h9 M11 18l3-1 7-7-2-2-7 7Z"/>',
+  pen: '<path d="m4 20 4-1L20 7l-3-3L5 16Z M14 7l3 3"/>',
+  cursor: '<path d="m5 3 14 10-7 1-4 7Z"/>',
+  eraser: '<path d="m3 14 9-10 9 8-8 9H9Z M7 10l9 8 M13 21h8"/>',
+  line: '<path d="M4 20 20 4"/>', triangle: '<path d="M12 3 22 21H2Z"/>',
+  rectangle: '<rect x="2" y="5" width="20" height="14" rx="1"/>',
+  square: '<rect x="4" y="4" width="16" height="16" rx="1"/>',
+  circle: '<circle cx="12" cy="12" r="9"/>', ellipse: '<ellipse cx="12" cy="12" rx="10" ry="6"/>',
+  undo: '<path d="M9 4 3 10l6 6 M3 10h11a6 6 0 0 1 0 12"/>',
+  clear: '<path d="M3 6h18 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7"/>'
+};
+const compactItems = [
+  ['mode','draw','필기 모드','draw'],['mode','interact','컴퓨터 화면 조작','cursor'],
+  ['tool','pen','자유 필기 펜','pen'],['tool','eraser','지우개','eraser'],['undo',undefined,'실행 취소','undo'],
+  ...[['line','직선'],['triangle','삼각형'],['rectangle','직사각형'],['square','정사각형'],['circle','원'],['ellipse','타원']].map(([v,label])=>['tool',v,label,v]),
+  ...[['#111111','검정'],['#d52b38','빨강'],['#2164df','파랑'],['#ffffff','흰색']].map(([v,label])=>['color',v,label+' 펜 색',null]),
+  ...[3,6,10].map(v=>['width',String(v),'펜 굵기 '+v,null]),['clear',undefined,'현재 판서 전체 지우기','clear']
+];
+const toolGroups = new Map();
+for (const [id,label] of [['drawing','필기 · 화면'],['shapes','도형'],['colors','색'],['widths','굵기'],['editing','편집']]) {
+  const section=document.createElement('section');section.className='icon-group';section.dataset.group=id;
+  const heading=document.createElement('h2');heading.textContent=label;section.append(heading);
+  const buttons=document.createElement('div');buttons.className='group-buttons';section.append(buttons);
+  $('#compact-buttons').append(section);toolGroups.set(id,buttons);
+}
+for (const [key,value,label,icon] of compactItems) {
+  const button=document.createElement('button'); button.dataset.command=key;
+  if(value!==undefined) button.dataset.value=value;
+  button.title=label; button.setAttribute('aria-label',label);
+  if(icon) button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true">'+iconPaths[icon]+'</svg>';
+  else if(key==='color') {
+    const swatch=document.createElement('span'); swatch.className='color-swatch'; swatch.style.backgroundColor=value;button.append(swatch);
+  } else button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16" stroke-width="'+value+'"/></svg>';
+  const group=key==='mode'||(key==='tool'&&['pen','eraser'].includes(value)) ? 'drawing' : key==='tool' ? 'shapes' : key==='color' ? 'colors' : key==='width' ? 'widths' : 'editing';
+  toolGroups.get(group).append(button);
+}
+$('#compact-background').innerHTML=$('#backgrounds').innerHTML;
+$('#compact-spacing').innerHTML=$('#spacing').innerHTML;
 function receive(state) {
+  document.body.dataset.layout=state.toolbarLayout || 'side';
+  $('#toolbar-layout').value=state.toolbarLayout || 'side';
   board = state; document.body.classList.toggle('collapsed', state.collapsed);
   const monitors = $('#monitors');
   const displays = state.displays || [];
   const options = displays.map((display, index) => `<option value="${display.id}">🖥 모니터 ${index + 1}${display.label ? ' · ' + escape(display.label) : ''}</option>`).join('');
   if (monitors.innerHTML !== options) monitors.innerHTML = options;
   monitors.value = String(state.displayId);
+  $('#compact-monitor').innerHTML=options; $('#compact-monitor').value=String(state.displayId);
+  $('#compact-monitor-label').hidden=displays.length<2;
   $('#monitor-picker').hidden = displays.length < 2;
   $('#backgrounds').value = state.background || 'desktop';
+  $('#compact-background').value=state.background || 'desktop';
+  $('#compact-spacing').value=String(state.spacing || 48);
+  $('#compact-spacing').disabled=['desktop','white','black'].includes(state.background || 'desktop');
+  $('#compact-grid').checked=Boolean(state.gridLabels);
+  $('#compact-grid').disabled=!['grid','dots'].includes(state.background);
   $('#spacing').value = String(state.spacing || 48);
   $('#spacing-label').hidden = ['desktop', 'white', 'black'].includes(state.background || 'desktop');
   $('#grid-labels-label').hidden = !['grid', 'dots'].includes(state.background);
   $('#grid-labels').checked = Boolean(state.gridLabels);
-  $('#collapse').textContent = state.collapsed ? '펼치기' : '접기';
+  $('#collapse').textContent = state.collapsed ? '↗' : '접기';
+  $('#collapse').title=state.collapsed ? '전체 패널 펼치기' : '아이콘 도구막대로 접기';
+  $('#quit').textContent=state.collapsed ? '×' : '종료'; $('#quit').title='프로그램 종료';
   $('#collapse').setAttribute('aria-label', state.collapsed ? '패널 펼치기' : '패널 접기');
   $('#mode-status').textContent = state.mode === 'draw' ? '필기 중 · ESC로 컴퓨터 화면 보기' : '뒤 화면을 조작할 수 있어요';
   document.querySelectorAll('[data-command]').forEach(button => {
@@ -24,8 +74,9 @@ function receive(state) {
     if (['mode', 'tool', 'color', 'width'].includes(key)) button.setAttribute('aria-pressed', String(state[key]) === button.dataset.value ? 'true' : 'false');
   });
 }
-window.whiteboard.onState(receive);
-window.whiteboard.state().then(receive);
+let liveStateReceived = false;
+window.whiteboard.onState(next => { liveStateReceived = true; receive(next); });
+window.whiteboard.state().then(next => { if (!liveStateReceived) receive(next); });
 async function command(key, value) {
   try { await window.whiteboard.command(key, value); }
   catch { $('#mode-status').textContent = '도구를 변경하지 못했습니다.'; }
@@ -33,6 +84,11 @@ async function command(key, value) {
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => {
   const {command: key, value} = button.dataset; command(key, key === 'width' ? Number(value) : value);
 }));
+$('#compact-background').onchange=event=>command('background',event.target.value);
+$('#compact-spacing').onchange=event=>command('spacing',Number(event.target.value));
+$('#compact-grid').onchange=event=>command('gridLabels',event.target.checked);
+$('#compact-monitor').onchange=event=>command('display',Number(event.target.value));
+$('#toolbar-layout').onchange=event=>command('toolbarLayout',event.target.value);
 $('#collapse').onclick = () => command('collapse');
 $('#quit').onclick = () => command('quit');
 $('#backgrounds').onchange = event => command('background', event.target.value);

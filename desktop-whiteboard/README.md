@@ -65,3 +65,44 @@ npm run test:electron
 - 판서는 현재 실행 중에만 보관됩니다. 프로그램 종료 후 복원/저장은 이번 변경에 포함되지 않습니다.
 
 Windows 전자칠판에서 터치펜, 화면 조작 복귀, 듀얼 모니터 및 배율을 실제 확인한 뒤 수업에 사용하세요.
+
+### 중앙 원점과 도형
+모눈·점격자는 화면 중앙을 격자 원점으로 사용합니다. 눈금 표시를 켜면 중앙에 0,
+오른쪽/위쪽에 양수, 왼쪽/아래쪽에 음수를 표시합니다.
+직선·삼각형·직사각형·정사각형·원·타원은 도구를 선택한 뒤 드래그합니다.
+정사각형과 원은 드래그 영역의 가로/세로 중 큰 길이에 맞춰 같은 폭과 높이를 사용합니다.
+도형도 선택한 색·굵기를 적용하고, 실행 취소로 하나씩 지울 수 있습니다.
+
+### 아이콘 도구막대
+접기 버튼은 주요 도구 19개와 배경·간격·중앙 눈금·모니터 선택을 담은 아이콘 패널로 전환합니다. 각 아이콘에 마우스를 올리면 도구 이름이 표시됩니다. 버튼은 터치용 48px 높이이며, 우측 상단 화살표로 전체 패널을 복원합니다.
+
+도구막대는 필기·화면 / 도형 / 색 / 굵기 / 편집 영역을 구분선으로 나눕니다. 접힌 패널 상단에서 세로형 또는 하단 가로형을 선택합니다. 하단 가로형은 현재 도구 패널 모니터의 작업 영역 아래에 배치됩니다. 화면이 좁으면 도구가 줄바꿈되며 스크롤로 모든 도구에 접근할 수 있습니다.
+
+## 다른 PC에서 최신 작업 이어가기
+
+이번 과목별 배경·중앙 원점·도형·필기 시작 보완·아이콘 도구막대 및 하단 배치 작업은
+`feature/subject-whiteboard-backgrounds-v2` 브랜치에 있습니다. `main`에 합쳐진 상태는 아닙니다.
+
+기존 저장소 폴더에서 작업 파일을 먼저 확인한 뒤 다음 명령을 실행합니다.
+
+```bash
+git status
+git fetch origin
+git switch --track origin/feature/subject-whiteboard-backgrounds-v2
+cd desktop-whiteboard
+npm ci
+npm start
+```
+
+이미 해당 브랜치가 있으면 `git switch feature/subject-whiteboard-backgrounds-v2` 후
+`git pull --ff-only`를 사용합니다. 다른 PC에서 수정 중인 파일이 있다면 먼저 보관하고 전환합니다.
+
+Windows 포터블 실행 파일 제작:
+
+```bash
+npm run dist:portable
+```
+
+결과 파일은 `desktop-whiteboard/dist/portable/OurClassQuest-Whiteboard.exe`입니다.
+검사는 `npm test`, `npm run test:electron`, 패키지 생성 후 `node tools/verify-package.mjs`로 실행합니다.
+실제 Windows 터치펜 및 듀얼 모니터 검사는 별도로 필요합니다.

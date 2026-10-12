@@ -5,7 +5,7 @@ const path = require('node:path');
 const {defaults, minimum, compact, fitBounds} = require('./control-bounds.cjs');
 const {createDisplaySelection} = require('./display-selection.cjs');
 
-const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false, background: 'desktop', spacing: 48, gridLabels: false};
+const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false, background: 'desktop', spacing: 48, gridLabels: false, toolbarLayout: 'side'};
 const colors = ['#111111', '#d52b38', '#2164df', '#ffffff'];
 const backgrounds = ['desktop', 'white', 'black', 'grid', 'dots', 'music', 'english', 'korean'];
 const csp = "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://our-class-quest.firebaseapp.com https://asia-northeast3-our-class-quest.cloudfunctions.net; frame-src https://our-class-quest.firebaseapp.com https://apis.google.com; object-src 'none'; base-uri 'none'; form-action 'none'";
@@ -69,11 +69,13 @@ async function createWhiteboard() {
   const placeControl = () => {
     placingControl = true;
     const area = screen.getDisplayMatching(control.getBounds()).workArea;
-    const limits = state.collapsed ? compact : minimum;
+    const compactSize=state.toolbarLayout==='bottom' ? {width: Math.min(1120,area.width-16),height: area.width<1120 ? 300 : 220} : compact;
+    const limits = state.collapsed ? compactSize : minimum;
     control.setResizable(!state.collapsed);
     control.setMinimumSize(Math.min(limits.width, area.width - 16), Math.min(limits.height, area.height - 16));
     control.setMaximumSize(area.width - 16, area.height - 16);
-    const target = state.collapsed ? {...control.getBounds(), ...compact} : expandedBounds;
+    const target = state.collapsed ? {...control.getBounds(), ...compactSize} : expandedBounds;
+    if(state.collapsed && state.toolbarLayout==='bottom') { target.x=area.x+(area.width-target.width)/2; target.y=area.y+area.height-target.height-8; }
     const bounds = fitBounds(target, area);
     control.setBounds(bounds);
     if (!state.collapsed) expandedBounds = bounds;
@@ -84,8 +86,9 @@ async function createWhiteboard() {
   control.on('move', rememberBounds);
   function setMode(mode) {
     state.mode = mode;
-    overlay.setIgnoreMouseEvents(mode === 'interact', {forward: true});
     overlay.setFocusable(mode === 'draw');
+    overlay.setIgnoreMouseEvents(mode === 'interact', {forward: true});
+    if (mode === 'draw') { overlay.moveTop(); overlay.focus(); }
     // ESC is registered only while drawing, so it does not consume other apps' ESC.
     globalShortcut.unregister('Escape');
     if (mode === 'draw') globalShortcut.register('Escape', () => setMode('interact'));
@@ -106,10 +109,11 @@ async function createWhiteboard() {
     }
     else if (command === 'spacing' && [24, 48, 72, 96].includes(value)) { state.spacing = value; broadcast(); }
     else if (command === 'gridLabels' && typeof value === 'boolean') { state.gridLabels = value; broadcast(); }
-    else if (command === 'tool' && ['pen', 'eraser'].includes(value)) { state.tool = value; broadcast(); }
-    else if (command === 'color' && colors.includes(value)) { state.color = value; state.tool = 'pen'; broadcast(); }
+    else if (command === 'tool' && ['pen', 'eraser', 'line', 'triangle', 'rectangle', 'square', 'circle', 'ellipse'].includes(value)) { state.tool = value; setMode('draw'); }
+    else if (command === 'color' && colors.includes(value)) { state.color = value; if (state.tool === 'eraser') state.tool = 'pen'; setMode('draw'); }
     else if (command === 'width' && [3, 6, 10].includes(value)) { state.width = value; broadcast(); }
     else if (['undo', 'clear'].includes(command)) overlay.webContents.send('board:ink', command);
+    else if (command === 'toolbarLayout' && ['side','bottom'].includes(value)) { state.toolbarLayout=value;state.collapsed=true;placeControl();broadcast(); }
     else if (command === 'collapse') { state.collapsed = !state.collapsed; placeControl(); broadcast(); }
     else if (command === 'quit') app.quit();
     else throw Error('Invalid command');
@@ -220,7 +224,7 @@ async function createWhiteboard() {
   };
   app.once('before-quit', cleanup);
   await Promise.all([overlay.loadURL(origin + '/overlay/index.html'), control.loadURL(origin + '/toolbar/index.html')]);
-  placeControl(); overlay.showInactive(); control.show();
+  placeControl(); overlay.showInactive(); control.show(); broadcast();
   return {overlay, control, origin, getState: () => ({...state})};
 }
 

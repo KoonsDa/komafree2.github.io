@@ -1,11 +1,17 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>우리반 퀘스트 · 전자칠판</title><link rel="stylesheet" href="toolbar.css"></head>
 <body>
-  <header><strong>우리반 퀘스트</strong><button id="collapse" aria-label="패널 접기">접기</button><button id="quit">종료</button></header>
+  <header><strong>우리반 퀘스트</strong><select id="toolbar-layout" aria-label="도구막대 배치" title="도구막대 배치"><option value="side">세로형</option><option value="bottom">하단 가로형</option></select><button id="collapse" aria-label="패널 접기">접기</button><button id="quit">종료</button></header>
   <main>
     <div class="modes" role="group" aria-label="입력 모드"><button data-command="mode" data-value="draw">✏ 필기</button><button data-command="mode" data-value="interact">👆 화면 조작</button></div>
     <div id="monitor-picker" hidden><select id="monitors" aria-label="필기 대상 모니터" title="필기는 모니터별로 보관됩니다."></select></div>
     <p id="mode-status" class="mode-status">뒤 화면을 조작할 수 있어요</p>
+    <section id="compact-tools" aria-label="아이콘 도구막대">
+      <div id="compact-buttons" class="icon-grid"></div>
+      <div class="compact-settings"><label>칠판 배경<select id="compact-background" aria-label="칠판 배경"></select></label>
+      <div class="compact-options"><label>간격<select id="compact-spacing" aria-label="칸·줄 간격"></select></label><label class="compact-check"><input id="compact-grid" type="checkbox"> 중앙 눈금</label></div>
+      <label id="compact-monitor-label" hidden>모니터<select id="compact-monitor" aria-label="필기 대상 모니터"></select></label></div>
+    </section>
     <div id="expanded">
       <section class="backgrounds" aria-label="과목별 칠판 배경">
         <h1>수업 칠판</h1>
@@ -15,7 +21,7 @@
           <option value="english">영어 · 4선 공책</option><option value="korean">국어 · 칸 공책</option>
         </select></label>
         <label id="spacing-label">칸·줄 간격<select id="spacing"><option value="24">촘촘</option><option value="48">보통</option><option value="72">넓게</option><option value="96">아주 넓게</option></select></label>
-        <label id="grid-labels-label"><input id="grid-labels" type="checkbox"> 모눈 눈금 표시 (한 칸 = 1)</label>
+        <label id="grid-labels-label"><input id="grid-labels" type="checkbox"> 중앙 원점·눈금 표시 (한 칸 = 1)</label>
         <p class="hint">화면 조작으로 컴퓨터 화면을 보고, 필기로 칠판에 돌아와요. 판서는 배경별로 보관돼요.</p>
       </section>
       <section class="tools" aria-label="필기 도구">
@@ -23,6 +29,10 @@
         <div class="row"><button data-command="color" data-value="#ffffff">○ 흰색 펜</button></div>
         <div class="row" aria-label="펜 굵기"><button data-command="width" data-value="3">3</button><button data-command="width" data-value="6">6</button><button data-command="width" data-value="10">10</button></div>
         <div class="row"><button data-command="tool" data-value="pen">✏ 펜</button><button data-command="tool" data-value="eraser">🧽 지우개</button></div>
+        <div class="row"><button data-command="tool" data-value="line">직선</button><button data-command="tool" data-value="triangle">삼각형</button></div>
+        <div class="row"><button data-command="tool" data-value="rectangle">직사각형</button><button data-command="tool" data-value="square">정사각형</button></div>
+        <div class="row"><button data-command="tool" data-value="circle">원</button><button data-command="tool" data-value="ellipse">타원</button></div>
+        <p class="hint">도형을 선택하고 화면에서 드래그해요. 색과 굵기도 바꿀 수 있어요.</p>
         <div class="row"><button data-command="undo">↶ 실행 취소</button><button data-command="clear">전체 지우기</button></div>
       </section>
       <section class="classroom" aria-label="교실 패널">
