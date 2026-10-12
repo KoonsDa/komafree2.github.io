@@ -11,12 +11,13 @@ function receive(state) {
   if (monitors.innerHTML !== options) monitors.innerHTML = options;
   monitors.value = String(state.displayId);
   $('#monitor-picker').hidden = displays.length < 2;
+  $('#grid-size').value = String(state.gridSize || 40);
   $('#collapse').textContent = state.collapsed ? '펼치기' : '접기';
   $('#collapse').setAttribute('aria-label', state.collapsed ? '패널 펼치기' : '패널 접기');
   $('#mode-status').textContent = state.mode === 'draw' ? '화면 위에 필기 중 · ESC로 화면 조작' : '뒤 화면을 조작할 수 있어요';
   document.querySelectorAll('[data-command]').forEach(button => {
     const key = button.dataset.command;
-    if (['mode', 'tool', 'color', 'width'].includes(key)) button.setAttribute('aria-pressed', String(state[key]) === button.dataset.value ? 'true' : 'false');
+    if (['mode', 'tool', 'color', 'width', 'background'].includes(key)) button.setAttribute('aria-pressed', String(state[key]) === button.dataset.value ? 'true' : 'false');
   });
 }
 window.whiteboard.onState(receive);
@@ -31,6 +32,7 @@ document.querySelectorAll('[data-command]').forEach(button => button.addEventLis
 $('#collapse').onclick = () => command('collapse');
 $('#quit').onclick = () => command('quit');
 $('#monitors').onchange = event => command('display', Number(event.target.value));
+$('#grid-size').onchange = event => command('gridSize', Number(event.target.value));
 window.addEventListener('keydown', event => { if (event.key === 'Escape') command('escape'); });
 
 function render(state, pending) {
