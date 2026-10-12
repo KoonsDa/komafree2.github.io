@@ -48,3 +48,20 @@ npm run test:electron
 참고: [Electron 보안](https://www.electronjs.org/docs/latest/tutorial/security), [Firebase Google 로그인](https://firebase.google.com/docs/auth/web/google-signin), [Google embedded user-agent 정책](https://developers.google.com/identity/protocols/oauth2/policies).
 
 설치 프로그램, 자동 업데이트, 자동 시작, 여러 모니터 설정은 포함하지 않습니다. 기존 웹 UI, Functions, Rules, Auth 설정은 변경하지 않습니다.
+
+
+## 과목별 수업 칠판
+
+도구 패널의 **수업 칠판 → 배경**에서 컴퓨터 화면, 흰/검은 칠판,
+수학 모눈/점격자, 음악 오선, 영어 4선, 국어 칸 공책을 선택합니다.
+배경을 선택하면 필기 모드로 전환됩니다. 칸·줄 간격은 네 단계로 조절합니다.
+검은 칠판은 검정 펜을 흰색으로, 밝은 배경은 흰색 펜을 검정으로 자동 변경합니다.
+
+- **화면 조작 / ESC**: 과목 칠판을 숨기고 뒤의 PPT·PDF·웹을 조작합니다.
+- **필기**: 선택한 칠판과 판서를 다시 표시합니다.
+- 필기는 모니터와 배경별로 분리됩니다. 실행 취소와 전체 지우기는 현재 판서에만 적용됩니다.
+- 배경 줄은 지우개로 지워지지 않습니다.
+- 모눈 눈금은 **한 칸 = 1**인 수업용 단위입니다. 화면의 실제 cm를 뜻하지 않습니다.
+- 판서는 현재 실행 중에만 보관됩니다. 프로그램 종료 후 복원/저장은 이번 변경에 포함되지 않습니다.
+
+Windows 전자칠판에서 터치펜, 화면 조작 복귀, 듀얼 모니터 및 배율을 실제 확인한 뒤 수업에 사용하세요.

@@ -17,7 +17,7 @@ app.whenReady().then(async()=>{
     await board.overlay.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     assert.deepEqual(board.overlay.getBounds(),target.bounds);
     assert.deepEqual(board.control.getBounds(),originalControl,'monitor selection leaves control in place');
-    const canvas=await board.overlay.webContents.executeJavaScript(`({width:innerWidth,height:innerHeight,ratio:devicePixelRatio,pixels:document.querySelector('canvas').width})`);
+    const canvas=await board.overlay.webContents.executeJavaScript(`({width:innerWidth,height:innerHeight,ratio:devicePixelRatio,pixels:document.querySelector('#ink').width})`);
     assert.equal(canvas.width,target.bounds.width);assert.equal(canvas.height,target.bounds.height);
     assert.equal(canvas.ratio,target.scaleFactor);assert.equal(canvas.pixels,Math.round(canvas.width*canvas.ratio));
     console.log('PASS actual monitor',target.id,'overlay bounds / control fixed / canvas DPI');
@@ -46,24 +46,24 @@ app.whenReady().then(async()=>{
   assert.equal(board.getState().mode,'draw');
   await board.overlay.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await board.overlay.webContents.executeJavaScript(`{
-    const canvas=document.querySelector('canvas');
+    const canvas=document.querySelector('#ink');
     // Synthetic pointer events cannot capture a native pointer. Disable capture
     // only in this test realm, while exercising the real renderer event handlers.
     canvas.setPointerCapture=()=>{}; canvas.hasPointerCapture=()=>false;
     for (const [type,x] of [['pointerdown',100],['pointermove',200],['pointerup',250]]) canvas.dispatchEvent(new PointerEvent(type,{pointerId:1,button:0,clientX:x,clientY:120}));
   }`);
-  const alpha=await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('canvas');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`);
+  const alpha=await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('#ink');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`);
   assert(alpha>0,'pen drew pixels');
   // Renderer surface switch preserves original pixels; no second physical monitor is implied.
   board.overlay.webContents.send('board:state',{...board.getState(),displayId:-999,displayRevision:999});
   await board.overlay.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-  assert.equal(await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('canvas');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`),0);
+  assert.equal(await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('#ink');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`),0);
   board.overlay.webContents.send('board:state',board.getState());
   await board.overlay.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-  assert((await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('canvas');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`))>0);
+  assert((await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('#ink');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`))>0);
   await board.control.webContents.executeJavaScript(`window.whiteboard.command('clear')`);
   await board.overlay.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  const cleared=await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('canvas');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`);
+  const cleared=await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('#ink');c.getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]}`);
   assert.equal(cleared,0);
   // Emulated Chromium DPI plus the main-process display-metrics notification
   // exercises real canvas pixels even when CSS dimensions stay unchanged.
@@ -73,10 +73,10 @@ app.whenReady().then(async()=>{
     await board.overlay.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:1280,height:720,deviceScaleFactor:ratio,mobile:false});
     board.overlay.webContents.send('board:state',{...board.getState(),displayRevision:2000+ratio*100});
     await board.overlay.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-    const geometry=await board.overlay.webContents.executeJavaScript(`({ratio:devicePixelRatio,width:document.querySelector('canvas').width,height:document.querySelector('canvas').height})`);
+    const geometry=await board.overlay.webContents.executeJavaScript(`({ratio:devicePixelRatio,width:document.querySelector('#ink').width,height:document.querySelector('#ink').height})`);
     assert.deepEqual(geometry,{ratio,width:1280*ratio,height:720*ratio});
-    await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('canvas');for(const [type,x] of [['pointerdown',100],['pointermove',200],['pointerup',250]])c.dispatchEvent(new PointerEvent(type,{pointerId:1,button:0,clientX:x,clientY:120}));}`);
-    assert((await board.overlay.webContents.executeJavaScript(`document.querySelector('canvas').getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]`))>0);
+    await board.overlay.webContents.executeJavaScript(`{const c=document.querySelector('#ink');for(const [type,x] of [['pointerdown',100],['pointermove',200],['pointerup',250]])c.dispatchEvent(new PointerEvent(type,{pointerId:1,button:0,clientX:x,clientY:120}));}`);
+    assert((await board.overlay.webContents.executeJavaScript(`document.querySelector('#ink').getContext('2d').getImageData(Math.round(150*devicePixelRatio),Math.round(120*devicePixelRatio),1,1).data[3]`))>0);
     await board.control.webContents.executeJavaScript(`window.whiteboard.command('clear')`);
     console.log('PASS emulated renderer DPI',ratio,'canvas size / pen coordinates');
   }
@@ -111,6 +111,7 @@ app.whenReady().then(async()=>{
   board.control.setMaximumSize(1920,1080); board.control.setSize(420,920);
   await board.control.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   await board.control.webContents.executeJavaScript(`{
+    document.querySelector('.backgrounds').hidden=true;
     document.querySelector('#login').hidden=true;document.querySelector('#logout').hidden=false;
     document.querySelector('#teacher').textContent='선생님 로그인됨';document.querySelector('#class-label').hidden=false;
     document.querySelector('#connection').textContent='2026-09-10 · 학급 현황 연결됨';

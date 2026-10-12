@@ -50,3 +50,8 @@ body.collapsed header { justify-content: flex-end; }
 body.collapsed main { overflow: hidden; padding: 7px; }
 body.collapsed .modes button { font-size: 16px; min-height: 52px; padding: 5px; }
 body.collapsed #mode-status, body.collapsed #expanded { display: none; }
+
+.backgrounds { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #d5dce6; }
+.backgrounds h1 { margin-bottom: 0; }
+#grid-labels-label { display: flex; gap: 8px; align-items: center; min-height: 48px; }
+#grid-labels { width: 24px; height: 24px; margin: 0; }

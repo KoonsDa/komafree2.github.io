@@ -5,8 +5,9 @@ const path = require('node:path');
 const {defaults, minimum, compact, fitBounds} = require('./control-bounds.cjs');
 const {createDisplaySelection} = require('./display-selection.cjs');
 
-const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false};
-const colors = ['#111111', '#d52b38', '#2164df'];
+const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false, background: 'desktop', spacing: 48, gridLabels: false};
+const colors = ['#111111', '#d52b38', '#2164df', '#ffffff'];
+const backgrounds = ['desktop', 'white', 'black', 'grid', 'dots', 'music', 'english', 'korean'];
 const csp = "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://our-class-quest.firebaseapp.com https://asia-northeast3-our-class-quest.cloudfunctions.net; frame-src https://our-class-quest.firebaseapp.com https://apis.google.com; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 async function createWhiteboard() {
@@ -59,8 +60,10 @@ async function createWhiteboard() {
     event.senderFrame === w.webContents.mainFrame && event.senderFrame.url.startsWith(origin + '/'));
   const fromControl = event => trusted(event) && event.sender === control.webContents;
   const broadcast = () => windows.forEach(w => !w.isDestroyed() && w.webContents.send('board:state', state));
+  const boardSettings = new Map();
   const displaySelection = createDisplaySelection(screen, overlay, selection => {
-    Object.assign(state, selection); broadcast();
+    boardSettings.set(state.displayId, {background: state.background, spacing: state.spacing, gridLabels: state.gridLabels});
+    Object.assign(state, selection, boardSettings.get(selection.displayId) || {background: 'desktop', spacing: 48, gridLabels: false}); broadcast();
   });
   let expandedBounds = {...initialBounds}, placingControl = false;
   const placeControl = () => {
@@ -95,6 +98,14 @@ async function createWhiteboard() {
     if (!fromControl(event)) throw Error('Control window required');
     if (command === 'mode' && ['draw', 'interact'].includes(value)) setMode(value);
     else if (command === 'display') displaySelection.select(value);
+    else if (command === 'background' && backgrounds.includes(value)) {
+      state.background = value;
+      if (value === 'black' && state.color === '#111111') state.color = '#ffffff';
+      if (value !== 'black' && state.color === '#ffffff') state.color = '#111111';
+      setMode('draw');
+    }
+    else if (command === 'spacing' && [24, 48, 72, 96].includes(value)) { state.spacing = value; broadcast(); }
+    else if (command === 'gridLabels' && typeof value === 'boolean') { state.gridLabels = value; broadcast(); }
     else if (command === 'tool' && ['pen', 'eraser'].includes(value)) { state.tool = value; broadcast(); }
     else if (command === 'color' && colors.includes(value)) { state.color = value; state.tool = 'pen'; broadcast(); }
     else if (command === 'width' && [3, 6, 10].includes(value)) { state.width = value; broadcast(); }

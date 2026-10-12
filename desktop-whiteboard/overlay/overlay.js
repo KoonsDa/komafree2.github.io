@@ -1,3 +1,4 @@
+import {drawBackground} from './background.js';
 import {Ink} from './ink.js';
 const canvas = document.querySelector('#ink');
 const ink = new Ink(canvas);
@@ -10,11 +11,13 @@ const finish = () => {
 };
 function receive(next) {
   finish();
-  ink.selectSurface(next.displayId);
+  ink.selectSurface(`${next.displayId}:${next.background || 'desktop'}`);
   const geometryChanged = state.displayRevision !== next.displayRevision;
   state = next;
   document.body.dataset.mode = state.mode;
   document.body.dataset.tool = state.tool;
+  document.body.dataset.background = state.background || 'desktop';
+  renderBackground();
   if (geometryChanged) requestAnimationFrame(resize);
 }
 window.whiteboard.onState(receive);
@@ -38,7 +41,8 @@ canvas.addEventListener('pointercancel', event => { if (pointer === event.pointe
 canvas.addEventListener('lostpointercapture', event => { if (pointer === event.pointerId) finish(); });
 window.addEventListener('blur', finish);
 window.addEventListener('keydown', event => { if (event.key === 'Escape') window.whiteboard.command('escape'); });
-function resize() { finish(); ink.resize(innerWidth, innerHeight, devicePixelRatio || 1); }
+function renderBackground() { drawBackground(document.querySelector('#background'), innerWidth, innerHeight, devicePixelRatio || 1, state); }
+function resize() { finish(); ink.resize(innerWidth, innerHeight, devicePixelRatio || 1); renderBackground(); }
 window.addEventListener('resize', resize);
 function watchPixelRatio() {
   const media = matchMedia(`(resolution: ${devicePixelRatio || 1}dppx)`);

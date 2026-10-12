@@ -7,8 +7,20 @@
     <div id="monitor-picker" hidden><select id="monitors" aria-label="필기 대상 모니터" title="필기는 모니터별로 보관됩니다."></select></div>
     <p id="mode-status" class="mode-status">뒤 화면을 조작할 수 있어요</p>
     <div id="expanded">
+      <section class="backgrounds" aria-label="과목별 칠판 배경">
+        <h1>수업 칠판</h1>
+        <label>배경<select id="backgrounds">
+          <option value="desktop">컴퓨터 화면 위 필기</option><option value="white">흰 칠판</option><option value="black">검은 칠판</option>
+          <option value="grid">수학 · 모눈종이</option><option value="dots">수학 · 점격자</option><option value="music">음악 · 오선 악보</option>
+          <option value="english">영어 · 4선 공책</option><option value="korean">국어 · 칸 공책</option>
+        </select></label>
+        <label id="spacing-label">칸·줄 간격<select id="spacing"><option value="24">촘촘</option><option value="48">보통</option><option value="72">넓게</option><option value="96">아주 넓게</option></select></label>
+        <label id="grid-labels-label"><input id="grid-labels" type="checkbox"> 모눈 눈금 표시 (한 칸 = 1)</label>
+        <p class="hint">화면 조작으로 컴퓨터 화면을 보고, 필기로 칠판에 돌아와요. 판서는 배경별로 보관돼요.</p>
+      </section>
       <section class="tools" aria-label="필기 도구">
         <div class="row"><button data-command="color" data-value="#111111">● 검정</button><button class="red" data-command="color" data-value="#d52b38">● 빨강</button><button class="blue" data-command="color" data-value="#2164df">● 파랑</button></div>
+        <div class="row"><button data-command="color" data-value="#ffffff">○ 흰색 펜</button></div>
         <div class="row" aria-label="펜 굵기"><button data-command="width" data-value="3">3</button><button data-command="width" data-value="6">6</button><button data-command="width" data-value="10">10</button></div>
         <div class="row"><button data-command="tool" data-value="pen">✏ 펜</button><button data-command="tool" data-value="eraser">🧽 지우개</button></div>
         <div class="row"><button data-command="undo">↶ 실행 취소</button><button data-command="clear">전체 지우기</button></div>

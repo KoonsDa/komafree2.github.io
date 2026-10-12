@@ -11,9 +11,14 @@ function receive(state) {
   if (monitors.innerHTML !== options) monitors.innerHTML = options;
   monitors.value = String(state.displayId);
   $('#monitor-picker').hidden = displays.length < 2;
+  $('#backgrounds').value = state.background || 'desktop';
+  $('#spacing').value = String(state.spacing || 48);
+  $('#spacing-label').hidden = ['desktop', 'white', 'black'].includes(state.background || 'desktop');
+  $('#grid-labels-label').hidden = !['grid', 'dots'].includes(state.background);
+  $('#grid-labels').checked = Boolean(state.gridLabels);
   $('#collapse').textContent = state.collapsed ? '펼치기' : '접기';
   $('#collapse').setAttribute('aria-label', state.collapsed ? '패널 펼치기' : '패널 접기');
-  $('#mode-status').textContent = state.mode === 'draw' ? '화면 위에 필기 중 · ESC로 화면 조작' : '뒤 화면을 조작할 수 있어요';
+  $('#mode-status').textContent = state.mode === 'draw' ? '필기 중 · ESC로 컴퓨터 화면 보기' : '뒤 화면을 조작할 수 있어요';
   document.querySelectorAll('[data-command]').forEach(button => {
     const key = button.dataset.command;
     if (['mode', 'tool', 'color', 'width'].includes(key)) button.setAttribute('aria-pressed', String(state[key]) === button.dataset.value ? 'true' : 'false');
@@ -30,6 +35,9 @@ document.querySelectorAll('[data-command]').forEach(button => button.addEventLis
 }));
 $('#collapse').onclick = () => command('collapse');
 $('#quit').onclick = () => command('quit');
+$('#backgrounds').onchange = event => command('background', event.target.value);
+$('#spacing').onchange = event => command('spacing', Number(event.target.value));
+$('#grid-labels').onchange = event => command('gridLabels', event.target.checked);
 $('#monitors').onchange = event => command('display', Number(event.target.value));
 window.addEventListener('keydown', event => { if (event.key === 'Escape') command('escape'); });
 
