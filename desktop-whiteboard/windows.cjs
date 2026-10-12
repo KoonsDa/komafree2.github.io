@@ -5,8 +5,8 @@ const path = require('node:path');
 const {defaults, minimum, compact, fitBounds} = require('./control-bounds.cjs');
 const {createDisplaySelection} = require('./display-selection.cjs');
 
-const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false};
-const colors = ['#111111', '#d52b38', '#2164df'];
+const initialState = {mode: 'interact', tool: 'pen', color: '#111111', width: 6, collapsed: false, background: 'none', gridSize: 40};
+const colors = ['#111111', '#d52b38', '#2164df', '#ffffff'];
 const csp = "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://our-class-quest.firebaseapp.com https://asia-northeast3-our-class-quest.cloudfunctions.net; frame-src https://our-class-quest.firebaseapp.com https://apis.google.com; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 async function createWhiteboard() {
@@ -95,6 +95,8 @@ async function createWhiteboard() {
     if (!fromControl(event)) throw Error('Control window required');
     if (command === 'mode' && ['draw', 'interact'].includes(value)) setMode(value);
     else if (command === 'display') displaySelection.select(value);
+    else if (command === 'background' && ['none','white','black','grid','dot','music','english','korean'].includes(value)) { state.background = value; if (value !== 'none') setMode('draw'); else setMode('interact'); }
+    else if (command === 'gridSize' && [24,40,64].includes(value)) { state.gridSize = value; broadcast(); }
     else if (command === 'tool' && ['pen', 'eraser'].includes(value)) { state.tool = value; broadcast(); }
     else if (command === 'color' && colors.includes(value)) { state.color = value; state.tool = 'pen'; broadcast(); }
     else if (command === 'width' && [3, 6, 10].includes(value)) { state.width = value; broadcast(); }
