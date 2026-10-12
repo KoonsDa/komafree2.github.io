@@ -50,3 +50,7 @@ body.collapsed header { justify-content: flex-end; }
 body.collapsed main { overflow: hidden; padding: 7px; }
 body.collapsed .modes button { font-size: 16px; min-height: 52px; padding: 5px; }
 body.collapsed #mode-status, body.collapsed #expanded { display: none; }
+
+.backgrounds { margin-top: 16px; border-top: 1px solid #d5dce6; padding-top: 12px; }
+.background-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+.background-grid button { font-size: 15px; padding: 8px 4px; }
