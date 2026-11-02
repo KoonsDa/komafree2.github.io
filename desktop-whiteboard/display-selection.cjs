@@ -11,7 +11,7 @@ function createDisplaySelection(screen, overlay, publish) {
     const selected = displays.find(d => d.id === selectedId) ||
       displays.find(d => d.id === screen.getPrimaryDisplay().id) || displays[0];
     selectedId = selected.id;
-    overlay.setBounds(selected.bounds);
+    overlay.setBounds(selected.workArea);
     publish({displayId: selectedId, displayRevision: ++revision, displays: displays.map(d => ({
       id: d.id, label: typeof d.label === 'string' ? d.label : '',
       bounds: {...d.bounds}, workArea: {...d.workArea}, scaleFactor: d.scaleFactor
