@@ -1,0 +1,39 @@
+name: Build whiteboard portable EXE
+
+on:
+  push:
+    branches:
+      - feature/subject-whiteboard-backgrounds
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop-whiteboard
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop-whiteboard/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build portable EXE
+        run: npm run dist:portable
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: OurClassQuest-Whiteboard-Windows
+          path: desktop-whiteboard/dist/portable/OurClassQuest-Whiteboard.exe
+          if-no-files-found: error
+          retention-days: 14
