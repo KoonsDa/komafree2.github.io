@@ -42,7 +42,7 @@ async function createWhiteboard() {
   const prefs = {preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
     nodeIntegration: false, sandbox: true, webSecurity: true, partition};
   const display = screen.getPrimaryDisplay();
-  const overlay = new BrowserWindow({...display.bounds, title: '우리반 퀘스트 · 필기 화면',
+  const overlay = new BrowserWindow({...display.workArea, title: '우리반 퀘스트 · 필기 화면',
     transparent: true, backgroundColor: '#00000000', frame: false, alwaysOnTop: true,
     skipTaskbar: true, resizable: false, movable: false, hasShadow: false, show: false,
     focusable: false, fullscreen: false, thickFrame: false, webPreferences: prefs});
